@@ -2898,6 +2898,8 @@ describe('MessageList auto-scroll', () => {
     let thinkingVisible = true;
     let hostWidth = 500;
     let paragraphOffset = 6;
+    let collectingAnchorReads = false;
+    const anchorReads = new Map<HTMLElement, number>();
     vi.spyOn(window, 'innerWidth', 'get').mockImplementation(() => hostWidth);
 
     const rowHeight = (index: number) => {
@@ -2929,6 +2931,9 @@ describe('MessageList auto-scroll', () => {
       }
       const row = this.dataset.msgId ? this : this.closest<HTMLElement>('[data-msg-id]');
       const messageId = row?.dataset.msgId;
+      if (collectingAnchorReads && this.tagName === 'P') {
+        anchorReads.set(this, (anchorReads.get(this) ?? 0) + 1);
+      }
       if (!row || !messageId) return new DOMRect(0, 0, hostWidth, 40);
       const index =
         messageId === 'assistant-anchor'
@@ -3026,10 +3031,18 @@ describe('MessageList auto-scroll', () => {
     clientHeight = 400;
     expect(anchor?.getBoundingClientRect().top).toBe(84);
     const stopUpdatingFixtureGeometry = onBeforeShowThinkingPreferenceChange(() => {
+      collectingAnchorReads = false;
       thinkingVisible = false;
     });
+    collectingAnchorReads = true;
     setShowThinkingPreference(false);
     stopUpdatingFixtureGeometry();
+    // Later visible blocks used to be reread by the anchor candidate sort comparator.
+    for (const messageId of ['assistant-22', 'assistant-23']) {
+      const paragraph = container?.querySelector<HTMLElement>(`[data-msg-id="${messageId}"] p`);
+      expect(paragraph).toBeInstanceOf(HTMLElement);
+      expect(anchorReads.get(paragraph!)).toBe(1);
+    }
     for (let frame = 0; frame < 4; frame += 1) {
       await Promise.resolve();
       animationFrames.flush();
