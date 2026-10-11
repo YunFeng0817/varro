@@ -208,6 +208,21 @@ test('renders ghost text without changing the draft, accepts with Tab, and undoe
   await expect(composer).toHaveText('Add a feature with tests');
 });
 
+test('does not render or accept an extra space after a trailing draft space', async ({ page }) => {
+  await enableCompletion(page);
+  const composer = page.getByRole('textbox', { name: 'Message composer' }).first();
+  await composer.fill('Add a feature ');
+  await composer.press('End');
+  await expect(composer).toHaveAttribute('data-prompt-suggestion', 'with tests');
+  expect(await composer.evaluate((element) => getComputedStyle(element, '::after').content)).toBe(
+    '"with tests"'
+  );
+  await composer.press('Tab');
+  await expect(composer).toHaveText('Add a feature with tests');
+  await composer.press('ControlOrMeta+z');
+  expect(await composer.textContent()).toBe('Add a feature ');
+});
+
 test('clears completion warnings when the input is emptied', async ({ page }) => {
   await enableCompletion(page, true);
   const composer = page.getByRole('textbox', { name: 'Message composer' }).first();

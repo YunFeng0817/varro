@@ -155,4 +155,16 @@ describe('prompt completion boundaries', () => {
       expect(normalizePromptSuffix(value, 'draft')).toBe('');
     }
   });
+
+  it.each([' ', '  ', '\t', '\n'])('does not duplicate draft whitespace: %j', (separator) => {
+    const draft = `Add a feature${separator}`;
+    expect(normalizePromptSuffix(' with tests', draft)).toBe('with tests');
+    expect(normalizePromptSuffix(' \t with tests  ', draft)).toBe('with tests');
+    expect(normalizePromptSuffix(`${draft} with tests`, draft)).toBe('with tests');
+  });
+
+  it('preserves partial-word continuations and intentional line breaks', () => {
+    expect(normalizePromptSuffix('ner?', 'Show it in the cor')).toBe('ner?');
+    expect(normalizePromptSuffix('\nThen add tests.', 'Add a feature ')).toBe('\nThen add tests.');
+  });
 });

@@ -1126,6 +1126,31 @@ describe('ChatInput', () => {
     }
   );
 
+  it('displays and accepts a suggestion without duplicating the trailing draft space', async () => {
+    vi.useFakeTimers();
+    setState('promptCompletionModel', 'openai/fast');
+    const draft = 'Add a feature ';
+    setInputText(draft);
+    cleanup = render(() => ChatInput(), container!);
+    const editor = container!.querySelector<HTMLDivElement>('.rich-composer')!;
+    editor.focus();
+    setCollapsedSelection(editor.firstChild!, draft.length);
+    editor.dispatchEvent(new KeyboardEvent('keyup', { key: ' ', bubbles: true }));
+    await vi.advanceTimersByTimeAsync(600);
+    expect(editor.dataset.promptSuggestion).toBe('with tests');
+    expect(inputText()).toBe(draft);
+    editor.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true })
+    );
+    await flushAsyncWork();
+    expect(inputText()).toBe('Add a feature with tests');
+    expect(sendMessageMock).not.toHaveBeenCalled();
+    editor.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'z', metaKey: true, bubbles: true, cancelable: true })
+    );
+    expect(inputText()).toBe(draft);
+  });
+
   it('hides prompt suggestions during composition and a text selection', async () => {
     vi.useFakeTimers();
     setState('promptCompletionModel', 'openai/fast');
