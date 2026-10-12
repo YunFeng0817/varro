@@ -155,9 +155,7 @@ describe('QuestionPrompt draft retention', () => {
     expect(container?.querySelector<HTMLButtonElement>('.question-btn-primary')?.disabled).toBe(
       false
     );
-    expect(container?.querySelector<HTMLButtonElement>('.question-btn-tertiary')?.disabled).toBe(
-      false
-    );
+    expect(skipButton().disabled).toBe(false);
 
     cleanup?.();
     cleanup = undefined;
@@ -177,9 +175,7 @@ describe('QuestionPrompt draft retention', () => {
     const input = container?.querySelector<HTMLTextAreaElement>('.question-custom-input');
     input!.value = 'Do not discard this';
     input!.dispatchEvent(new Event('input', { bubbles: true }));
-    container
-      ?.querySelector<HTMLButtonElement>('.question-btn-tertiary')
-      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    click(skipButton());
     await Promise.resolve();
     await Promise.resolve();
 
@@ -188,9 +184,7 @@ describe('QuestionPrompt draft retention', () => {
     expect(container?.querySelector<HTMLButtonElement>('.question-btn-primary')?.disabled).toBe(
       false
     );
-    expect(container?.querySelector<HTMLButtonElement>('.question-btn-tertiary')?.disabled).toBe(
-      false
-    );
+    expect(skipButton().disabled).toBe(false);
   });
 });
 
@@ -248,7 +242,17 @@ function primaryButton() {
 }
 
 function backButton() {
-  return container!.querySelector<HTMLButtonElement>('.question-btn-secondary');
+  return (
+    Array.from(
+      container!.querySelectorAll<HTMLButtonElement>('.question-prompt-actions button')
+    ).find((button) => button.textContent === 'Back') ?? null
+  );
+}
+
+function skipButton() {
+  return Array.from(
+    container!.querySelectorAll<HTMLButtonElement>('.question-prompt-actions button')
+  ).find((button) => button.textContent === 'Skip')!;
 }
 
 function stepIndicator() {
@@ -531,6 +535,19 @@ describe('QuestionPrompt multi-step flow', () => {
       [['TypeScript', 'Zig'], ['Node']],
       { rethrow: true }
     );
+  });
+
+  it('uses the same secondary style for Back and Skip while keeping Submit primary', () => {
+    renderQuestionPrompt(multiQuestionRequest());
+
+    expect(skipButton().className).toBe('question-btn question-btn-secondary');
+
+    click(optionByLabel('TypeScript'));
+    click(primaryButton());
+
+    expect(backButton()!.className).toBe(skipButton().className);
+    expect(primaryButton().className).toBe('question-btn question-btn-primary');
+    expect(primaryButton().textContent).toBe('Submit');
   });
 
   it('offers Back only after the first step and restores the earlier answer', () => {
