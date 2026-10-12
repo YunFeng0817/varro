@@ -60,7 +60,12 @@ export class BackgroundProcessJudge {
     );
     if (!result) return null;
     // Only a validated boolean can detach a process. Extra prose or malformed JSON leaves it blocking.
-    const verdict = asRecord(JSON.parse(result.text));
-    return isBoolean(verdict?.blocking) ? !verdict.blocking : null;
+    try {
+      const verdict = asRecord(JSON.parse(result.text));
+      return isBoolean(verdict?.blocking) ? !verdict.blocking : null;
+    } catch {
+      // Invalid model output is an undecided verdict, so the process stays blocking.
+      return null;
+    }
   }
 }

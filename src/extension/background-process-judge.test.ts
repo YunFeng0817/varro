@@ -61,25 +61,32 @@ describe('background process model judgment', () => {
     expect(request).toHaveBeenCalledTimes(1);
   });
 
-  it.each(['{}', '{"blocking":"false"}'])(
-    'leaves malformed boolean verdict %s undecided',
-    async (text) => {
-      const request = vi.fn(async (_method: string, path: string) =>
-        path.startsWith('/api/session/')
-          ? { data: { model: { providerID: 'openai', id: 'current-model' } } }
-          : path === '/openapi.json'
-            ? specification
-            : { data: { text } }
-      );
-      expect(
-        await new BackgroundProcessJudge(request).classify(
-          shell,
-          '/repo',
-          new AbortController().signal
-        )
-      ).toBeNull();
-    }
-  );
+  it.each([
+    '{}',
+    '{"blocking":"false"}',
+    '',
+    '{"blocking":false',
+    'Here is the verdict: {"blocking":false}',
+    '```json\n{"blocking":false}\n```',
+    'null',
+    'false',
+    '[{"blocking":false}]',
+  ])('leaves invalid verdict %s undecided', async (text) => {
+    const request = vi.fn(async (_method: string, path: string) =>
+      path.startsWith('/api/session/')
+        ? { data: { model: { providerID: 'openai', id: 'current-model' } } }
+        : path === '/openapi.json'
+          ? specification
+          : { data: { text } }
+    );
+    expect(
+      await new BackgroundProcessJudge(request).classify(
+        shell,
+        '/repo',
+        new AbortController().signal
+      )
+    ).toBeNull();
+  });
 
   it('does not start generation after cancellation', async () => {
     const controller = new AbortController();
