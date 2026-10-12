@@ -103,7 +103,13 @@ for (const width of [486, 1100]) {
         range.selectNodeContents(element);
         const text = range.getBoundingClientRect();
         const bounds = element.getBoundingClientRect();
-        return Math.abs(text.y + text.height / 2 - (bounds.y + bounds.height / 2));
+        const context = document.createElement('canvas').getContext('2d')!;
+        context.font = getComputedStyle(element).font;
+        const metrics = context.measureText(element.textContent ?? '');
+        const baseline = text.y + metrics.fontBoundingBoxAscent;
+        const inkCenter =
+          baseline + (metrics.actualBoundingBoxDescent - metrics.actualBoundingBoxAscent) / 2;
+        return Math.abs(inkCenter - (bounds.y + bounds.height / 2));
       });
       expect(centerOffset).toBeLessThanOrEqual(1);
     }
