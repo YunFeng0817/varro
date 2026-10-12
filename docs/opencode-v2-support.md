@@ -25,7 +25,7 @@ update does not block later deletion. Cancelled updates check their signal befor
 reading, and before replacing the annotation file, so cancellation while queued or preparing a write
 does not commit that update.
 
-`npm run test:compatibility:adapters` installs published binaries into isolated directories and tests the production adapters. The current tested versions are v1 `1.18.35` and v2 `2.0.26`, alongside the v1 `1.16.0` and v2 `2.0.5` support floors. Release-specific results are recorded below. The checks cover managed startup, credential recovery in a second window, restart, multi-window recovery after process exit, bootstrap, workspace path encoding, v2 configuration precedence, session updates, deterministic streamed model responses, actual fixture-only tool execution, message pagination, tail editing, helper generation, fork/revert, deletion, and native v2 permissions/forms. The generated report is `artifacts/opencode-adapters/verified.json`.
+`npm run test:compatibility:adapters` installs published binaries into isolated directories and tests the production adapters. The current tested versions are v1 `1.19.0` and v2 `2.0.26`, alongside the v1 `1.16.0` and v2 `2.0.5` support floors. Release-specific results are recorded below. The checks cover managed startup, credential recovery in a second window, restart, multi-window recovery after process exit, bootstrap, workspace path encoding, v2 configuration precedence, session updates, deterministic streamed model responses, actual fixture-only tool execution, message pagination, tail editing, helper generation, fork/revert, deletion, and native v2 permissions/forms. The generated report is `artifacts/opencode-adapters/verified.json`.
 
 Fresh VS Code sandbox windows passed `v2-first-run` and the existing `healthy-first-run` scenario. These editor checks verify activation, ownership, health, and event-stream connection. `test:compatibility:ui` additionally exercises the actual composer, successful replies, pre-turn failures, HTTP 401 handling, recovery through a working provider, and reopening history. Full visual streaming performance remains a separate verification task.
 
@@ -83,6 +83,40 @@ resolve to `literal/directory`. V2 location queries retain their normal URL enco
 The released-server adapter tests cover exact workspace resolution for Japanese text, emoji,
 and literal percent escapes. Unit tests also cover header construction with embedded newlines
 and preservation of Windows separators and casing.
+
+### 1.19.0 compatibility review
+
+Reviewed v1.18.35 to v1.19.0, `63be8f95d8` through `dfb56f76c7`.
+Public HTTP routes, generated SDK/OpenAPI shapes, session/message records,
+permissions/questions, and managed `serve` output consumed by Varro remain compatible.
+No adapter changes are required. PTY connection preflight now validates origin and
+consumes tickets before looking up the process; Varro does not use that route.
+
+V1's TUI replaces automatic installation with update notices and an explicit `/update`
+dialog. The `autoupdate` shape is unchanged, but `true` and `"notify"` now both mean
+notice-only. TUI update checks no longer emit global installation SSE events. Varro
+checks the registry itself and retains its own `varro.server.autoUpdate` behavior.
+The new `opencode upgrade --major` explicitly replaces v1 with v2; Varro never passes
+that flag and continues upgrading within the installed family.
+
+Provider fixes accept interleaved Copilot opaque reasoning values, concatenate their
+reasoning text for replay, and forward OpenAI's `ultrafast` service tier. These retain
+Varro's consumed message/part contracts. Console inference routing, model/pricing
+catalogs, localization, TUI styling, and the upstream v1 release-branch split require
+no local adaptation.
+
+The tested v1 SDK is `1.19.0`; the v2 client is already current at `2.0.26`.
+Support floors remain v1 `1.16.0` and v2 `2.0.5`.
+
+The Docker support-range run passed all 524 required checks across 14 releases,
+including 43/43 on 1.19.0 and 37/37 on the 1.16.0 floor. Advisory checks passed
+76/78; the floor and below-floor 1.15.13 each retain the MCP pagination caveat.
+No required-check boundary was found; the declared support floor is unchanged.
+The run regenerated `scripts/opencode-compatibility/verified.json`.
+
+All 542 focused process, transport, adapter, and shared compatibility unit tests
+passed. `npm run lint`, `npm run fmt`, `npm run lint:check`, `npm run typecheck`,
+`npm run typecheck:suggestions`, and `npm run build` passed.
 
 ### 2.0.26 compatibility review
 

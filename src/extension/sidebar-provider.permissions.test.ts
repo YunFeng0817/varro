@@ -1,5 +1,5 @@
 /* oxlint-disable anti-slop/no-chained-type-assertions, anti-slop/no-unknown-parameters, anti-slop/no-unsafe-dictionary-type, anti-slop/require-safety-comment-for-type-assertion -- These tests deliberately model malformed permission events and inspect controlled provider internals. */
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { readMaximumTestedOpenCodeVersion } from './extension-manifest';
 import {
   attachTestView,
@@ -748,39 +748,47 @@ describe('SidebarProvider permission replay', () => {
     );
   });
 
-  it('refreshes the displayed OpenCode version after a background update restart', async () => {
-    const updatedVersion = readMaximumTestedOpenCodeVersion();
-    const [major, minor, patch] = updatedVersion.split('.').map(Number);
-    const previousVersion = `${major}.${minor}.${Math.max(0, (patch ?? 1) - 1)}`;
-    const readServerInfo = vi
-      .fn()
-      .mockResolvedValueOnce({
-        managedProcess: true,
-        cliVersion: previousVersion,
-        health: { healthy: true, version: previousVersion },
-      })
-      .mockResolvedValueOnce({
-        managedProcess: true,
-        cliVersion: updatedVersion,
-        health: { healthy: true, version: updatedVersion },
-      });
-    const server = createServer({ readServerInfo });
-    await createSidebarProviderInstance({ server });
-    const statusHandler = server.on.mock.calls.findLast(([event]) => event === 'status')?.[1];
-    const createStatusBarItem = getVscodeMock().window.createStatusBarItem;
-    const itemIndex = createStatusBarItem.mock.calls.findIndex(
-      ([id]) => id === 'varro.opencode-version'
-    );
-    const item = createStatusBarItem.mock.results[itemIndex]?.value;
+  it.each([
+    { previousVersion: '1.18.31', updatedVersion: '1.19.0' },
+    { previousVersion: '1.19.0', updatedVersion: '1.19.1' },
+  ])(
+    'refreshes the displayed OpenCode version after a background update restart to $updatedVersion',
+    async ({ previousVersion, updatedVersion }) => {
+      const extensionManifest = await import('./extension-manifest');
+      const testedVersion = vi
+        .spyOn(extensionManifest, 'readMaximumTestedOpenCodeVersion')
+        .mockReturnValue(updatedVersion);
+      onTestFinished(() => testedVersion.mockRestore());
+      const readServerInfo = vi
+        .fn()
+        .mockResolvedValueOnce({
+          managedProcess: true,
+          cliVersion: previousVersion,
+          health: { healthy: true, version: previousVersion },
+        })
+        .mockResolvedValueOnce({
+          managedProcess: true,
+          cliVersion: updatedVersion,
+          health: { healthy: true, version: updatedVersion },
+        });
+      const server = createServer({ readServerInfo });
+      await createSidebarProviderInstance({ server });
+      const statusHandler = server.on.mock.calls.findLast(([event]) => event === 'status')?.[1];
+      const createStatusBarItem = getVscodeMock().window.createStatusBarItem;
+      const itemIndex = createStatusBarItem.mock.calls.findIndex(
+        ([id]) => id === 'varro.opencode-version'
+      );
+      const item = createStatusBarItem.mock.results[itemIndex]?.value;
 
-    statusHandler?.({ state: 'running', url: 'http://127.0.0.1:4096' });
-    await vi.waitFor(() => expect(item.text).toBe(`$(robot) OpenCode ${previousVersion}*`));
+      statusHandler?.({ state: 'running', url: 'http://127.0.0.1:4096' });
+      await vi.waitFor(() => expect(item.text).toBe(`$(robot) OpenCode ${previousVersion}*`));
 
-    statusHandler?.({ state: 'starting' });
-    statusHandler?.({ state: 'running', url: 'http://127.0.0.1:4096' });
-    await vi.waitFor(() => expect(item.text).toBe(`$(robot) OpenCode ${updatedVersion}`));
-    expect(readServerInfo).toHaveBeenCalledTimes(2);
-  });
+      statusHandler?.({ state: 'starting' });
+      statusHandler?.({ state: 'running', url: 'http://127.0.0.1:4096' });
+      await vi.waitFor(() => expect(item.text).toBe(`$(robot) OpenCode ${updatedVersion}`));
+      expect(readServerInfo).toHaveBeenCalledTimes(2);
+    }
+  );
 
   it('shows no guessed version during startup and ignores version reads from before a restart', async () => {
     const v2Version = readMaximumTestedOpenCodeVersion(undefined, 2);
@@ -824,9 +832,13 @@ describe('SidebarProvider permission replay', () => {
 
   it('describes an uninstalled patch update without repeating the verified version', async () => {
     await getVscodeMock().workspace.getConfiguration().update('server.autoUpdate', false);
-    const maximumTestedVersion = readMaximumTestedOpenCodeVersion();
-    const [major, minor, patch] = maximumTestedVersion.split('.').map(Number);
-    const installedVersion = `${major}.${minor}.${Math.max(0, (patch ?? 1) - 1)}`;
+    const maximumTestedVersion = '1.19.1';
+    const installedVersion = '1.19.0';
+    const extensionManifest = await import('./extension-manifest');
+    const testedVersion = vi
+      .spyOn(extensionManifest, 'readMaximumTestedOpenCodeVersion')
+      .mockReturnValue(maximumTestedVersion);
+    onTestFinished(() => testedVersion.mockRestore());
     const server = createServer({
       readServerInfo: vi.fn(async () => ({
         managedProcess: true,
