@@ -16,14 +16,16 @@ for (const scenario of ['large-transcript', 'blank', 'busy-stop-send']) {
       // Finish that ownership handoff before attaching files or typing the test draft.
       await expect
         .poll(() =>
-          page.evaluate(async () => {
-            const path = '/src/webview/lib/state.ts';
-            // SAFETY: This read-only import is served by the isolated Vite E2E harness.
-            const { connectionInitialized, state } = (await import(path)) as {
-              connectionInitialized: () => boolean;
-              state: { messagesLoading: boolean };
-            };
-            return { initialized: connectionInitialized(), loading: state.messagesLoading };
+          page.evaluate(() => {
+            // SAFETY: The isolated harness exposes a read-only view of its loaded application state.
+            const harness = (
+              window as Window & {
+                __varroE2E?: {
+                  getStartupState?: () => { initialized: boolean; loading: boolean };
+                };
+              }
+            ).__varroE2E;
+            return harness?.getStartupState?.() ?? { initialized: false, loading: true };
           })
         )
         .toEqual({ initialized: true, loading: false });

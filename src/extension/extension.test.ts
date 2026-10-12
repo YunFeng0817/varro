@@ -11,11 +11,13 @@ vi.mock('./varro-state-paths', async (importOriginal) => ({
   prepareVarroScratchDirectory: scratchMock.prepare,
 }));
 
-const { disposeProcessInspectionMock } = vi.hoisted(() => ({
+const { disposeProcessInspectionMock, prepareProcessInspectionMock } = vi.hoisted(() => ({
   disposeProcessInspectionMock: vi.fn(),
+  prepareProcessInspectionMock: vi.fn(),
 }));
 vi.mock('./process-inspection', () => ({
   disposeProcessInspection: disposeProcessInspectionMock,
+  prepareProcessInspection: prepareProcessInspectionMock,
 }));
 
 type ConfigChangeEvent = { affectsConfiguration: (key: string) => boolean };
@@ -202,6 +204,7 @@ describe('extension activation', () => {
   beforeEach(() => {
     vi.resetModules();
     vi.clearAllMocks();
+    prepareProcessInspectionMock.mockReset().mockResolvedValue(undefined);
     executeCommandMock.mockImplementation(() => Promise.resolve());
     latestContextProviderInstance.current = null;
     contextChangeCallback.current = null;
@@ -217,6 +220,23 @@ describe('extension activation', () => {
 
   afterEach(() => {
     vi.useRealTimers();
+  });
+
+  it('does not wait for native helper preparation before registering the server and views', async () => {
+    prepareProcessInspectionMock.mockReturnValue(new Promise<void>(() => {}));
+    const { activate } = await import('./extension');
+    await activate({
+      extensionUri: {},
+      extension: { id: 'koltyakov.varro' },
+      workspaceState: {},
+      subscriptions: [],
+    } as never);
+    expect(prepareProcessInspectionMock).toHaveBeenCalledOnce();
+    expect(openCodeServerMock).toHaveBeenCalledOnce();
+    expect(registerWebviewViewProviderMock).toHaveBeenCalledOnce();
+    expect(prepareProcessInspectionMock.mock.invocationCallOrder[0]).toBeLessThan(
+      openCodeServerMock.mock.invocationCallOrder[0]!
+    );
   });
 
   it('passes secret storage into OpenCodeServer without reading compaction settings', async () => {

@@ -6,6 +6,7 @@ export type WebviewAssetUris = {
   scriptUri: string;
   cssUri: string;
   version: string;
+  modulePreloadUris?: string[];
 };
 
 const LOADING_STYLES = `
@@ -117,6 +118,14 @@ export function renderWebviewHtml(
   const serializedInitialState = serializeForInlineScript(initialState);
   const scriptUri = appendCacheKey(assets.scriptUri, assets.version);
   const cssUri = appendCacheKey(assets.cssUri, assets.version);
+  // Keep the hashed import URLs unchanged so the module loader reuses these
+  // fetches. Adding the entry's cache key would download dependencies twice.
+  const modulePreloads = (assets.modulePreloadUris ?? [])
+    .map(
+      (uri) =>
+        `\n  <link rel="modulepreload" nonce="${nonce}" href="${escapeHtmlAttribute(uri)}" />`
+    )
+    .join('');
   const logoPreload = initialState.emptyStateLogoUri
     ? `\n  <link rel="preload" as="image" href="${escapeHtmlAttribute(initialState.emptyStateLogoUri)}" fetchpriority="high" />`
     : '';
@@ -140,7 +149,7 @@ export function renderWebviewHtml(
     content="default-src 'none'; img-src ${cspSource} data:; script-src 'nonce-${nonce}' ${cspSource}; worker-src blob:; connect-src ${cspSource}; style-src 'unsafe-inline' ${cspSource}; font-src data:;" />
   <title>Varro</title>
   <style>${LOADING_STYLES}${editorLoadingStyles}</style>${logoPreload}
-  <link rel="stylesheet" href="${escapeHtmlAttribute(cssUri)}" />
+  <link rel="stylesheet" href="${escapeHtmlAttribute(cssUri)}" />${modulePreloads}
 </head>
 <body>
   <div id="root">${renderStartupMarkup(initialState.emptyStateLogoUri)}</div>

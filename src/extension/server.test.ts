@@ -44,7 +44,7 @@ const { getConfigurationMock, loggerMock, mkdirMock, spawnMock, vscodeMock, writ
       env: { openExternal: vi.fn() },
       Uri: { parse: vi.fn((value: string) => value) },
     },
-    writeFileMock: vi.fn(() => Promise.resolve(undefined)),
+    writeFileMock: vi.fn<typeof FsPromisesModule.writeFile>(() => Promise.resolve()),
   }));
 
 vi.mock('./logger', () => ({ logger: loggerMock }));
@@ -2026,6 +2026,11 @@ describe('OpenCodeServer event stream', () => {
 
 describe('OpenCodeServer runtime config injection', () => {
   it('injects runtime defaults without overriding caller compaction configuration', async () => {
+    const actualFs = await vi.importActual<typeof FsPromisesModule>('fs/promises');
+    const os = await import('os');
+    await actualFs.mkdir(os.tmpdir(), { recursive: true });
+    // This case reads the generated config from disk; other server fixtures keep writes mocked.
+    writeFileMock.mockImplementationOnce(actualFs.writeFile);
     const inheritedContent =
       '{\n  // inherited content\n  "provider": { "example": { "name": "Example" } },\n  "compaction": { "auto": false, "buffer": 16000 },\n}\n';
     process.env.OPENCODE_CONFIG_CONTENT = inheritedContent;
@@ -2092,7 +2097,6 @@ describe('OpenCodeServer runtime config injection', () => {
     expect(configPath).toContain('varro-opencode-config-');
     expect(configPath).toMatch(/opencode\.json$/);
     expect(options?.env?.OPENCODE_CONFIG_CONTENT).toBe(inheritedContent);
-    const actualFs = await vi.importActual<typeof FsPromisesModule>('fs/promises');
     expect(await actualFs.readFile(configPath!, 'utf-8')).toBe(configText);
     await actualFs.rm(dirname(configPath!), { recursive: true, force: true });
   });

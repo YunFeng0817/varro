@@ -4056,6 +4056,10 @@ describe('OpenCodeProcess server ownership leases', () => {
 
   it('does not signal a POSIX listener whose executable does not match the lease', async () => {
     Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
+    // PID 777 may exist on a real Linux host. This fixture models a live unchanged
+    // birth with an unverified executable, not confirmed PID reuse/retirement.
+    vi.spyOn(processInspection, 'readProcessBirthIdentity').mockResolvedValue('linux:100');
+    vi.spyOn(processInspection, 'readProcessExecutable').mockResolvedValue('/foreign/opencode');
     const directory = await mkdtemp(join(tmpdir(), 'varro-server-lease-test-'));
     const leasePath = join(directory, 'lease.json');
     await writeFile(

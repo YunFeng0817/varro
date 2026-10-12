@@ -102,6 +102,21 @@ describe('renderWebviewHtml', () => {
     expect(html).toContain('body { background: var(--vscode-editor-background, #1e1e1e); }');
   });
 
+  it('preloads static modules at their exact escaped import URLs without evaluating them', () => {
+    const html = renderWebviewHtml('vscode-webview-resource:', initialState, {
+      scriptUri: 'webview://assets/webview.mjs',
+      cssUri: 'webview://assets/webview.css',
+      version: 'fixed-cache-key',
+      modulePreloadUris: ['webview://assets/chunks/shared-hash.js?value="&'],
+    });
+    const hint =
+      '<link rel="modulepreload" nonce="Zml4ZWQtbm9uY2U" href="webview://assets/chunks/shared-hash.js?value=&quot;&amp;" />';
+    expect(html).toContain(hint);
+    expect(html.indexOf(hint)).toBeLessThan(html.indexOf('<script type="module"'));
+    expect(html).not.toContain('shared-hash.js?value=&quot;&amp;&amp;v=');
+    expect(html.match(/<script type="module"/g)).toHaveLength(1);
+  });
+
   it('preloads the starter logo before the app module mounts the empty chat', () => {
     const html = renderWebviewHtml(
       'vscode-webview-resource:',

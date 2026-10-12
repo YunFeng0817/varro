@@ -191,6 +191,28 @@ describe('SidebarProvider export flows', () => {
     });
   });
 
+  it('preserves every chunk of export stdout before opening the result', async () => {
+    const { stdout, closeHandlers } = mockExportProcess();
+    const { provider } = await createSidebarProviderInstance({ server: createExportServer() });
+    const exportPromise = provider.handleMessage({
+      type: 'session/export',
+      payload: { sessionId: 'session-1' },
+    });
+
+    await vi.waitFor(() => expect(closeHandlers).toHaveLength(1));
+    const chunks = ['{"items":[', '{"id":1,"text":"', 'x'.repeat(70_000), '"}]}'];
+    for (const chunk of chunks) stdout.write(chunk);
+    expect(vscodeMock.workspace.openTextDocument).not.toHaveBeenCalled();
+    closeHandlers[0]?.(0, null);
+    await exportPromise;
+
+    expect(vscodeMock.workspace.openTextDocument).toHaveBeenCalledWith({
+      language: 'json',
+      content: chunks.join(''),
+    });
+    expect(vscodeMock.window.showErrorMessage).not.toHaveBeenCalled();
+  });
+
   it('times out a hung export process and reports an error', async () => {
     let closeHandler: ((code: number | null, signal: NodeJS.Signals | null) => void) | undefined;
     const proc = {

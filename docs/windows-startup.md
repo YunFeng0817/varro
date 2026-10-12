@@ -42,6 +42,12 @@ deterministic unit tests check both deadlines, rejection of all pending reads, a
 restart without cached or partial evidence. The native suite does not prove cold
 startup always fits five seconds.
 
+Activation starts optional helper preparation without awaiting it, overlapping PowerShell/C# startup
+with extension and webview setup. Preparation observes no PID and grants no admission evidence.
+Production reads still have their independent five-second total bound and obtain fresh process/account
+observations. Preparation failure is logged; normal inspection and fallback remain responsible for
+admission. Non-Windows hosts do not start this helper.
+
 Logical REST requests carry an internal admission ticket through their adapter wire
 requests. For strict initial/foreign/unknown admission, its expiry is the **earlier
 original** account/ownership verification expiry, not one second after both checks

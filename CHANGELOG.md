@@ -2,6 +2,15 @@
 
 This changelog summarizes the main user-facing improvements in each Varro minor release line. Patch releases are consolidated into their parent minor version. Dates reflect the development history.
 
+## 0.33.x - October 2026
+
+- Added opt-in inline prompt completion with configurable models. Requires OpenCode v2 and a supported API-key connection.
+- Added live background-process logs and non-blocking services with wait and stop controls.
+- Preserved conversations and drafts across folder transfers, with read-only history for unavailable destinations.
+- Added unread interruption markers, persistent workspace chat views, and full-resolution image copying.
+- Improved startup and server recovery; isolated managed v2 servers from OpenCode Desktop.
+- Fixed steering queues, model selection, failed edits, image sends, scrolling, and composer behavior.
+
 ## 0.32.x - October 2026
 
 - Left automatic compaction to OpenCode; kept manual compaction and added session indicators.

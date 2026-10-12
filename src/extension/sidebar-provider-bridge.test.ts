@@ -5,7 +5,7 @@ import type { InitialWebviewState } from '../shared/protocol';
 const mocks = vi.hoisted(() => ({
   logger: { warn: vi.fn() },
   renderWebviewHtml: vi.fn(() => '<html />'),
-  readFileSync: vi.fn(() => '0123456789abcdef'),
+  readFileSync: vi.fn((_path: string, _encoding?: string) => '0123456789abcdef'),
   joinPath: vi.fn((base: { fsPath: string }, ...parts: string[]) => ({
     fsPath: [base.fsPath, ...parts].join('/'),
   })),
@@ -72,6 +72,7 @@ function createView(options?: { visible?: boolean; cspSource?: string }) {
 describe('SidebarProviderBridge', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.readFileSync.mockImplementation(() => '0123456789abcdef');
     mocks.renderWebviewHtml.mockReturnValue('<html />');
   });
 
@@ -343,4 +344,50 @@ describe('SidebarProviderBridge', () => {
       'Cannot render webview assets before the view is available'
     );
   });
+
+  it('preloads only validated build chunk paths and deduplicates them', async () => {
+    mocks.readFileSync.mockImplementation((file) =>
+      String(file).endsWith('webview.imports.json')
+        ? JSON.stringify([
+            'chunks/shared-abc.js',
+            'chunks/shared-abc.js',
+            '../outside.js',
+            '/outside.js',
+            'chunks/../outside.js',
+            'chunks/lazy.js?query',
+            42,
+          ])
+        : '0123456789abcdef'
+    );
+    const bridge = new SidebarProviderBridge({ fsPath: '/extension' } as never);
+    bridge.setView(createView() as never);
+    await bridge.renderHtml(createInitialState());
+    expect(mocks.renderWebviewHtml).toHaveBeenCalledWith(
+      'vscode-webview-resource:',
+      expect.anything(),
+      {
+        scriptUri: 'webview:/extension/dist/webview/webview.mjs',
+        cssUri: 'webview:/extension/dist/webview/webview.css',
+        version: '0123456789abcdef',
+        modulePreloadUris: ['webview:/extension/dist/webview/chunks/shared-abc.js'],
+      }
+    );
+  });
+
+  it.each(['not json', '{}', 'null'])(
+    'ignores invalid optional module hints: %s',
+    async (content) => {
+      mocks.readFileSync.mockImplementation((file) =>
+        String(file).endsWith('webview.imports.json') ? content : '0123456789abcdef'
+      );
+      const bridge = new SidebarProviderBridge({ fsPath: '/extension' } as never);
+      bridge.setView(createView() as never);
+      await bridge.renderHtml(createInitialState());
+      expect(mocks.renderWebviewHtml).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.anything(),
+        expect.not.objectContaining({ modulePreloadUris: expect.anything() })
+      );
+    }
+  );
 });

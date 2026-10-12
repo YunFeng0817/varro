@@ -22,10 +22,16 @@ test('submits answers for linked tool questions', async ({ page }) => {
   await submitButton.click();
 
   const replyRequest = await getE2EState(page, () => {
-    const value = (window as Window & {
-      __varroE2E?: { requests: Array<{ method: string; path: string; body?: unknown }> };
-    }).__varroE2E;
-    return value?.requests.find((request) => request.path === '/question/linked-tool-question-1/reply') || null;
+    const value = (
+      window as Window & {
+        __varroE2E?: { requests: Array<{ method: string; path: string; body?: unknown }> };
+      }
+    ).__varroE2E;
+    return (
+      value?.requests.find(
+        (request) => request.path === '/question/linked-tool-question-1/reply'
+      ) || null
+    );
   });
 
   expect(replyRequest).toMatchObject({
@@ -40,16 +46,24 @@ test('skips linked tool questions inline', async ({ page }) => {
   await page.getByRole('button', { name: 'Skip' }).click();
 
   const rejectRequest = await getE2EState(page, () => {
-    const value = (window as Window & {
-      __varroE2E?: { requests: Array<{ method: string; path: string }> };
-    }).__varroE2E;
-    return value?.requests.find((request) => request.path === '/question/linked-tool-question-1/reject') || null;
+    const value = (
+      window as Window & {
+        __varroE2E?: { requests: Array<{ method: string; path: string }> };
+      }
+    ).__varroE2E;
+    return (
+      value?.requests.find(
+        (request) => request.path === '/question/linked-tool-question-1/reject'
+      ) || null
+    );
   });
 
   expect(rejectRequest).toMatchObject({ method: 'POST' });
 });
 
-test('keeps completed question answers stacked at wide and narrow widths', async ({ page }) => {
+test('keeps completed question answers stacked and clamped to three lines at wide and narrow widths', async ({
+  page,
+}) => {
   for (const viewport of [
     { width: 1000, height: 720 },
     { width: 480, height: 720 },
@@ -72,10 +86,16 @@ test('keeps completed question answers stacked at wide and narrow widths', async
 
           const questionRect = question.getBoundingClientRect();
           const answerRect = answer.getBoundingClientRect();
+          const answerStyle = getComputedStyle(answer);
           return {
             answerWidth: answerRect.width,
+            answerHeight: answerRect.height,
+            lineHeight: Number.parseFloat(answerStyle.lineHeight),
+            lineClamp: answerStyle.webkitLineClamp,
+            overflow: answerStyle.overflow,
+            clipped: answer.scrollHeight > answer.clientHeight,
             leftDifference: Math.abs(questionRect.left - answerRect.left),
-            textAlign: getComputedStyle(answer).textAlign,
+            textAlign: answerStyle.textAlign,
           };
         }),
       };
@@ -84,6 +104,12 @@ test('keeps completed question answers stacked at wide and narrow widths', async
     expect(layout.hasOverflow).toBe(false);
     expect(layout.rows.every((row) => row.leftDifference < 1)).toBe(true);
     expect(layout.rows.every((row) => row.textAlign === 'left')).toBe(true);
+    expect(layout.rows.every((row) => row.lineClamp === '3' && row.overflow === 'hidden')).toBe(
+      true
+    );
+    expect(layout.rows.every((row) => row.answerHeight <= row.lineHeight * 3 + 1)).toBe(true);
+    expect(layout.rows[0]?.clipped).toBe(false);
+    expect(layout.rows[2]?.clipped).toBe(true);
     if (viewport.width === 1000) {
       expect(layout.rows.every((row) => row.answerWidth > 260)).toBe(true);
     }

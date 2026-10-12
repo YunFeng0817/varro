@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render } from 'solid-js/web';
+import { createRoot } from 'solid-js';
 import { reconcile } from 'solid-js/store';
 import packageJson from '../../../package.json';
 import type * as UseOpenCodeModule from '../hooks/useOpenCode';
@@ -121,6 +122,18 @@ const {
 }));
 
 /* oxlint-disable anti-slop/no-module-mocking -- These tests exercise ChatInput's module-level hook and client integration. */
+const immediateComposerEffects = vi.hoisted(() => ({ enabled: false }));
+vi.mock('solid-js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('solid-js')>();
+  return {
+    ...actual,
+    // SAFETY: Both Solid effect APIs accept the same forwarded arguments; this preserves their overloads.
+    createEffect: ((...args: Parameters<typeof actual.createEffect>) => {
+      if (immediateComposerEffects.enabled) actual.createRenderEffect(...args);
+      else actual.createEffect(...args);
+    }) as typeof actual.createEffect,
+  };
+});
 vi.mock('../hooks/useOpenCode', async () => {
   const actual = await vi.importActual<typeof UseOpenCodeModule>('../hooks/useOpenCode');
   return {
@@ -734,6 +747,28 @@ function availableProviderLimit(
 }
 
 describe('ChatInput', () => {
+  it('initializes queue timers before synchronous construction effects run', () => {
+    setupModelState();
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    immediateComposerEffects.enabled = true;
+    try {
+      expect(() =>
+        createRoot((dispose) => {
+          cleanup = dispose;
+          const element = ChatInput();
+          if (!(element instanceof HTMLElement)) throw new Error('Expected a composer element');
+          container!.appendChild(element);
+        })
+      ).not.toThrow();
+      expect(container.querySelector('[role="textbox"]')).not.toBeNull();
+      expect(sendMessageMock).not.toHaveBeenCalled();
+      expect(client.session.status).not.toHaveBeenCalled();
+    } finally {
+      immediateComposerEffects.enabled = false;
+    }
+  });
+
   it.each(['live messages', 'cached messages'])(
     'includes only the latest same-chat agent text from %s',
     async (source) => {

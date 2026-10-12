@@ -5,7 +5,7 @@ import { ContextProvider } from './context-provider';
 import { registerCommands } from './commands';
 import { logger } from './logger';
 import { readServerPortSetting, sweepStaleInjectedConfigDirectories } from './open-code-process';
-import { disposeProcessInspection } from './process-inspection';
+import { disposeProcessInspection, prepareProcessInspection } from './process-inspection';
 import { diagnosticTimeline } from './diagnostics';
 import { measureStartupPhase } from '../shared/startup';
 import { prepareVarroScratchDirectory } from './varro-state-paths';
@@ -150,6 +150,7 @@ export async function activate(context: vscode.ExtensionContext) {
 
 async function activateExtension(context: vscode.ExtensionContext) {
   logger.info('Activating Varro extension');
+  void prepareProcessInspection();
   if (!vscode.workspace.workspaceFolders?.length) await prepareVarroScratchDirectory();
 
   const config = vscode.workspace.getConfiguration('varro');

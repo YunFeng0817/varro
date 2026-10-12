@@ -3,14 +3,16 @@ import { EventEmitter } from 'events';
 import { createServer } from 'net';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { spawnMock, nativeReadMock } = vi.hoisted(() => ({
+const { spawnMock, nativeReadMock, nativePrepareMock } = vi.hoisted(() => ({
   spawnMock: vi.fn(),
   nativeReadMock: vi.fn(),
+  nativePrepareMock: vi.fn(),
 }));
 vi.mock('child_process', () => ({ spawn: spawnMock, default: { spawn: spawnMock } }));
 vi.mock('./windows-process-inspector', () => ({
   WindowsProcessInspector: class {
     read = nativeReadMock;
+    prepare = nativePrepareMock;
   },
 }));
 vi.mock('./logger', () => ({ logger: { warn: vi.fn() } }));
@@ -21,6 +23,7 @@ import {
   findListeningPids,
   inspectLocalServerAccount,
   inspectWindowsManagedListener,
+  prepareProcessInspection,
   readWindowsProcessIdentity,
 } from './process-inspection';
 
@@ -31,6 +34,7 @@ const listenerPid = 1_072_000_000 + process.pid;
 
 beforeEach(() => {
   nativeReadMock.mockRejectedValue(new Error('Native inspection unavailable'));
+  nativePrepareMock.mockReset().mockResolvedValue(undefined);
 });
 
 function mockCommands(
@@ -73,6 +77,31 @@ afterEach(() => {
   if (originalGeteuid) Object.defineProperty(process, 'geteuid', originalGeteuid);
   else Reflect.deleteProperty(process, 'geteuid');
   vi.clearAllMocks();
+});
+
+describe('process inspection preparation', () => {
+  it('starts the Windows helper without reading or trusting a process identity', async () => {
+    Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+    await prepareProcessInspection();
+    expect(nativePrepareMock).toHaveBeenCalledOnce();
+    expect(nativeReadMock).not.toHaveBeenCalled();
+    expect(spawnMock).not.toHaveBeenCalled();
+  });
+  it.each(['darwin', 'linux'] as const)('does not start a helper on %s', async (platform) => {
+    Object.defineProperty(process, 'platform', { value: platform, configurable: true });
+    await prepareProcessInspection();
+    expect(nativePrepareMock).not.toHaveBeenCalled();
+    expect(nativeReadMock).not.toHaveBeenCalled();
+  });
+  it('reports an unavailable helper without turning preparation into admission failure', async () => {
+    Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+    nativePrepareMock.mockRejectedValue(new Error('Preparation timed out'));
+    await expect(prepareProcessInspection()).resolves.toBeUndefined();
+    expect(logger.warn).toHaveBeenCalledWith(
+      'Could not prepare Windows process inspection: Preparation timed out'
+    );
+    expect(nativeReadMock).not.toHaveBeenCalled();
+  });
 });
 
 describe('local listener account inspection', () => {

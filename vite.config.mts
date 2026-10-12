@@ -10,6 +10,27 @@ const projectRoot = dirname(fileURLToPath(import.meta.url));
 const webviewAssetVersionPlugin: Plugin = {
   name: 'varro-webview-asset-version',
   generateBundle(_options, bundle) {
+    const imports = new Set<string>();
+    const visitImports = (fileName: string) => {
+      const output = bundle[fileName];
+      if (output?.type !== 'chunk') return;
+      for (const imported of output.imports) {
+        if (
+          imported === 'webview.mjs' ||
+          imports.has(imported) ||
+          bundle[imported]?.type !== 'chunk'
+        )
+          continue;
+        imports.add(imported);
+        visitImports(imported);
+      }
+    };
+    visitImports('webview.mjs');
+    this.emitFile({
+      type: 'asset',
+      fileName: 'webview.imports.json',
+      source: JSON.stringify([...imports].toSorted()),
+    });
     const hash = createHash('sha256');
     for (const fileName of Object.keys(bundle).toSorted()) {
       const output = bundle[fileName]!;

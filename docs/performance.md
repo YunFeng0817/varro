@@ -88,6 +88,10 @@ any saving described here.
 - Lazy catalogs use a distinct import query, as the agent-icon catalog does, so static imports of the
   same files stay with their importers.
 - Extension bundle compile and evaluation cost is small. Measure it before splitting activation code.
+- `webview.imports.json` lists only the entry's static imports, including transitive chunks. The host
+  preloads those hashed URLs without changing their cache keys or evaluating them early. Keep lazy
+  features out of the list. Measure transcript readiness as well as download completion; a smaller
+  entry or earlier composer does not prove that restored history appears sooner.
 
 ## Memory
 
