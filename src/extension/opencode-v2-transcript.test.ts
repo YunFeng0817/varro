@@ -143,6 +143,67 @@ describe('V2 transcript deletion', () => {
 describe('V2 generated transcript records', () => {
   const base = { id: 'msg_generated', time: { created: 10 } };
 
+  it.each([false, true])(
+    'preserves persisted execution errors on reload with a preceding assistant: %s',
+    async (hasAssistant) => {
+      const failure: SessionMessageInfo = {
+        ...base,
+        type: 'idle',
+        outcome: 'failed',
+        error: { type: 'provider.auth', message: 'Provider credential expired', status: 401 },
+      };
+      const records: SessionMessageInfo[] = [
+        { id: 'msg_user', type: 'user', text: 'Run tests', time: { created: 1 } },
+        ...(hasAssistant
+          ? [
+              {
+                id: 'msg_answer',
+                type: 'assistant' as const,
+                agent: 'build',
+                model: { providerID: 'openai', id: 'model' },
+                content: [{ type: 'text' as const, text: 'Checking the project.' }],
+                time: { created: 2, completed: 3 },
+              },
+            ]
+          : []),
+        failure,
+      ];
+      const adapter = new OpenCodeV2Adapter(async (_method, path) => ({
+        data: path.endsWith('/inbox')
+          ? []
+          : path.includes('/message/')
+            ? failure
+            : records.toReversed(),
+        cursor: {},
+      }));
+      const expected = {
+        info: {
+          id: base.id,
+          parentID: 'msg_user',
+          error: {
+            name: 'ProviderAuthError',
+            data: { message: 'Provider credential expired', statusCode: 401 },
+          },
+        },
+        parts: [],
+      };
+      const history = await adapter.request('GET', '/session/ses_one/message', undefined);
+      expect(history).toHaveLength(records.length);
+      expect(history).toMatchObject([
+        ...records.slice(0, -1).map((record) => ({ info: { id: record.id } })),
+        expected,
+      ]);
+      expect(
+        await adapter.request('GET', '/session/ses_one/message/msg_generated', undefined)
+      ).toMatchObject(expected);
+      expect(
+        projectV2Message(failure, 'ses_one', '', 'msg_user', {
+          error: { type: 'unknown', message: 'Stale live error' },
+        })
+      ).toMatchObject(expected);
+    }
+  );
+
   it('preserves the durable interruption after a completed response and background notice', async () => {
     const records: SessionMessageInfo[] = [
       { id: 'msg_user', type: 'user', text: 'Run tests', time: { created: 1 } },

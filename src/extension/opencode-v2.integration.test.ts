@@ -499,7 +499,7 @@ describe.skipIf(!binary)('released OpenCode adapter contract', () => {
     }
   }, 30000);
 
-  it('falls back for a configured custom model without admitting duplicate generation', async () => {
+  it('generates with a configured custom model or falls back without duplicate generation', async () => {
     if (transport.version !== 2) return;
     expect(
       JSON.stringify(await transport.request('GET', '/api/config', undefined, { unscoped: true }))
@@ -515,11 +515,16 @@ describe.skipIf(!binary)('released OpenCode adapter contract', () => {
         signal: AbortSignal.timeout(20000),
       }
     );
-    // The released base runner does not resolve this configured provider, even
-    // though location-scoped catalogs and helper sessions can use it.
-    expect(result).toBeNull();
-    expect(modelRequests).toHaveLength(requestCount);
+    // 2.0.27 waits for location plugins before resolving configured providers.
+    // Earlier releases need the helper-session fallback without a provider call.
+    const supportsConfiguredGeneration =
+      compareVersions((await transport.readHealthInfo()).version ?? '', '2.0.27') >= 0;
+    expect(result).toEqual(
+      supportsConfiguredGeneration ? { text: 'Adapter stream verified.' } : null
+    );
+    expect(modelRequests).toHaveLength(requestCount + (supportsConfiguredGeneration ? 1 : 0));
     expect(await transport.request('GET', '/session')).toEqual(before);
+    if (result) return;
     const session = asRecord(
       await transport.request('POST', '/session', { title: 'Fixture helper fallback' })
     );

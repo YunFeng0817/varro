@@ -326,7 +326,7 @@ export function projectV2Message(
     (message.outcome === 'failed' || message.outcome === 'interrupted')
   ) {
     const interrupted = message.outcome === 'interrupted';
-    const error = normalizeV2Error(context.error);
+    const error = normalizeV2Error(message.error) ?? normalizeV2Error(context.error);
     return {
       info: {
         ...base,

@@ -25,7 +25,7 @@ update does not block later deletion. Cancelled updates check their signal befor
 reading, and before replacing the annotation file, so cancellation while queued or preparing a write
 does not commit that update.
 
-`npm run test:compatibility:adapters` installs published binaries into isolated directories and tests the production adapters. The current tested versions are v1 `1.19.0` and v2 `2.0.26`, alongside the v1 `1.16.0` and v2 `2.0.5` support floors. Release-specific results are recorded below. The checks cover managed startup, credential recovery in a second window, restart, multi-window recovery after process exit, bootstrap, workspace path encoding, v2 configuration precedence, session updates, deterministic streamed model responses, actual fixture-only tool execution, message pagination, tail editing, helper generation, fork/revert, deletion, and native v2 permissions/forms. The generated report is `artifacts/opencode-adapters/verified.json`.
+`npm run test:compatibility:adapters` installs published binaries into isolated directories and tests the production adapters. The current tested versions are v1 `1.19.0` and v2 `2.0.27`, alongside the v1 `1.16.0` and v2 `2.0.5` support floors. Release-specific results are recorded below. The checks cover managed startup, credential recovery in a second window, restart, multi-window recovery after process exit, bootstrap, workspace path encoding, v2 configuration precedence, session updates, deterministic streamed model responses, actual fixture-only tool execution, message pagination, tail editing, helper generation, fork/revert, deletion, and native v2 permissions/forms. The generated report is `artifacts/opencode-adapters/verified.json`.
 
 Fresh VS Code sandbox windows passed `v2-first-run` and the existing `healthy-first-run` scenario. These editor checks verify activation, ownership, health, and event-stream connection. `test:compatibility:ui` additionally exercises the actual composer, successful replies, pre-turn failures, HTTP 401 handling, recovery through a working provider, and reopening history. Full visual streaming performance remains a separate verification task.
 
@@ -83,6 +83,48 @@ resolve to `literal/directory`. V2 location queries retain their normal URL enco
 The released-server adapter tests cover exact workspace resolution for Japanese text, emoji,
 and literal percent escapes. Unit tests also cover header construction with embedded newlines
 and preservation of Windows separators and casing.
+
+### 2.0.27 compatibility review
+
+Reviewed v2.0.26 to v2.0.27, `8059cdcbdf` through `03cb9b9946`.
+The release moves its client/protocol/schema packages to Effect 4.0.1. Schema identifiers
+and generated references change, but consumed HTTP paths, SSE names and envelopes,
+permissions/forms, prompt/inbox operations, and managed `serve` flags remain compatible.
+Checked-in OpenAPI regeneration also includes the external-auth route already present
+in 2.0.26; it is not a new runtime dependency.
+
+Failed idle messages now persist the native execution error. Varro uses that error
+before its live fallback, retaining the diagnostic and authorization status after reload.
+Regression tests cover failures before the first assistant and between successful steps,
+history and direct-message reads, and precedence over stale live context.
+
+Project archival adds optional `time.archived` and an `archived=true` project-list query.
+Varro does not consume the project inventory. Built-in Code Mode worktree tools retain
+the generic tool and permission contracts. Provider changes fix Copilot routing and
+interleaved reasoning, Vertex credentials and model routes, environment-key discovery,
+and ChatGPT context limits. Subagent notifications now survive location eviction;
+remote filesystem overrides and well-known configuration propagation are corrected.
+Updater detection and timeouts change without changing Varro's family-specific upgrade
+arguments. Remote pairing consent, embedded SDK plugin seeding, desktop/TUI rendering,
+web installation, Console, documentation, and release-branch changes require no adaptation.
+
+Model discovery and one-shot generation now wait for location plugins to activate.
+The published-server test initially expected custom-model one-shot generation to return
+the older unsupported-model fallback. It now verifies successful generation with exactly
+one provider call and no helper session on 2.0.27, retaining the fallback assertions for
+older releases. Varro's existing one-shot implementation needs no change.
+
+The tested v2 client is `2.0.27`; v1 remains `1.19.0`. Support floors remain v2 `2.0.5`
+and v1 `1.16.0`. The unchanged v1 SDK does not require a new Docker support-range run.
+
+All 863 focused adapter, transcript, inbox, one-shot, process, transport, state, and
+server unit tests passed. The isolated published-2.0.27 custom-model generation
+regression passed, and all five shared compatibility tests passed after the initial
+matrix finished. Formatting, both TypeScript checks, build, and the isolated VS Code
+`v2-first-run` scenario passed. Lint passed before concurrent webview edits; subsequent
+`npm run lint` and `npm run lint:check` report an unrelated `no-unknown-parameters`
+diagnostic at `src/webview/App.tsx:38`. Scoped lint on the three changed extension files
+passes. That webview work was left unchanged.
 
 ### 1.19.0 compatibility review
 
