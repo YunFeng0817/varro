@@ -148,6 +148,103 @@ test('keeps URL boundaries editable in the composer', async ({ page }) => {
   await expect(composer).toBeFocused();
 });
 
+test('keeps the caret after text typed before a pasted URL that wraps', async ({
+  page,
+}, testInfo) => {
+  await page.setViewportSize({ width: 360, height: 600 });
+  await page.goto('/e2e/harness/index.html?scenario=blank');
+  const composer = page.locator('.rich-composer').first();
+  const href = 'https://github.com/koltyakov/varro/discussions/42';
+  await composer.click();
+  await composer.evaluate((editor, text) => {
+    const clipboardData = new DataTransfer();
+    clipboardData.setData('text/plain', text);
+    editor.dispatchEvent(
+      new ClipboardEvent('paste', { bubbles: true, cancelable: true, clipboardData })
+    );
+  }, href);
+  const url = composer.locator('.composer-external-link');
+  await expect(url).toHaveText(href);
+  await composer.evaluate((editor) => {
+    window.getSelection()?.collapse(editor, 0);
+  });
+  await page.keyboard.type('When I pasted ');
+  await expect(composer).toHaveText(`When I pasted ${href}`);
+  await expect(url).toHaveText(href);
+  await composer.evaluate((editor) => editor.style.setProperty('caret-animation', 'manual'));
+  const hidden = await composer.screenshot({ caret: 'hide' });
+  const visible = await composer.screenshot({
+    caret: 'initial',
+    path: testInfo.outputPath('caret-before-url.png'),
+  });
+  const position = await composer.evaluate((editor) => {
+    const selection = window.getSelection()!;
+    const caret = selection.getRangeAt(0).getBoundingClientRect();
+    const prefix = document.createRange();
+    prefix.selectNodeContents(editor);
+    prefix.setEnd(selection.focusNode!, selection.focusOffset);
+    const lastCharacter = document.createRange();
+    lastCharacter.setStart(selection.focusNode!, selection.focusOffset - 1);
+    lastCharacter.setEnd(selection.focusNode!, selection.focusOffset);
+    const typed = lastCharacter.getBoundingClientRect();
+    const editorRect = editor.getBoundingClientRect();
+    return {
+      prefix: prefix.toString(),
+      caret: { top: caret.top, left: caret.left, height: caret.height },
+      typed: { top: typed.top, right: typed.right },
+      urlTop: editor.querySelector('.link-leading-label')!.getBoundingClientRect().top,
+      editor: { top: editorRect.top, left: editorRect.left },
+    };
+  });
+  expect(position.prefix).toBe('When I pasted ');
+  expect(position.caret.height).toBeGreaterThan(0);
+  expect(position.caret.top).toBeCloseTo(position.typed.top, 0);
+  expect(position.caret.left).toBeCloseTo(position.typed.right, 0);
+  expect(position.urlTop).toBeGreaterThan(position.typed.top);
+  // Range geometry is correct even with the bug. Check the painted caret too.
+  const pixels = await page.evaluate(
+    async (images) => {
+      const decoded = await Promise.all(
+        images.map(async (encoded) => {
+          const image = new Image();
+          image.src = `data:image/png;base64,${encoded}`;
+          await image.decode();
+          const canvas = document.createElement('canvas');
+          canvas.width = image.width;
+          canvas.height = image.height;
+          const context = canvas.getContext('2d');
+          if (!context) throw new Error('Canvas context unavailable');
+          context.drawImage(image, 0, 0);
+          return context.getImageData(0, 0, image.width, image.height);
+        })
+      );
+      const baseline = decoded[0]!;
+      const image = decoded[1]!;
+      if (image.width !== baseline.width || image.height !== baseline.height)
+        throw new Error('Composer dimensions changed');
+      const changed: Array<{ x: number; y: number }> = [];
+      for (let index = 0; index < image.data.length; index += 4) {
+        if (
+          [0, 1, 2, 3].some(
+            (channel) => image.data[index + channel] !== baseline.data[index + channel]
+          )
+        )
+          changed.push({ x: (index / 4) % image.width, y: Math.floor(index / 4 / image.width) });
+      }
+      return changed;
+    },
+    [hidden.toString('base64'), visible.toString('base64')]
+  );
+  expect(pixels.length).toBeGreaterThan(0);
+  for (const pixel of pixels) {
+    expect(Math.abs(pixel.x + position.editor.left - position.caret.left)).toBeLessThan(2);
+    expect(pixel.y + position.editor.top).toBeGreaterThanOrEqual(position.caret.top - 1);
+    expect(pixel.y + position.editor.top).toBeLessThan(
+      position.caret.top + position.caret.height + 1
+    );
+  }
+});
+
 for (const platform of [
   {
     name: 'macOS',

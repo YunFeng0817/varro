@@ -704,6 +704,71 @@ describe('RichComposerArea', () => {
     expect(document.activeElement).toBe(editor);
   });
 
+  it.each(['plain text', 'link label', 'controlled value'])(
+    'keeps a text continuation after the caret before an external link when editing %s',
+    (entry) => {
+      const href = 'https://github.com/koltyakov/varro/discussions/42';
+      const prefix = 'When I pasted ';
+      const [value, setValue] = createSignal(href);
+      const [cursor, setCursor] = createSignal(0);
+      const onInput = vi.fn((text: string, offset: number) => {
+        batch(() => {
+          setValue(text);
+          setCursor(offset);
+        });
+      });
+      renderComposer({
+        get value() {
+          return value();
+        },
+        get cursorOffset() {
+          return cursor();
+        },
+        chips: [
+          { id: href, type: 'external-link', label: href, icon: 'external-link', textMarker: href },
+        ],
+        onInput,
+      });
+      const editor = container!.querySelector<HTMLElement>('.rich-composer')!;
+      const reference = editor.querySelector('.composer-external-link')!;
+      if (entry === 'controlled value') {
+        onInput(`${prefix}${href}`, prefix.length);
+      } else {
+        const inserted =
+          entry === 'link label'
+            ? reference.querySelector('.link-leading-label')!.firstChild!
+            : document.createTextNode('');
+        if (entry === 'plain text') reference.before(inserted);
+        inserted.textContent = `${prefix}${inserted.textContent}`;
+        setCollapsedSelection(inserted, prefix.length);
+        editor.dispatchEvent(
+          new InputEvent('input', { bubbles: true, inputType: 'insertText', data: ' ' })
+        );
+      }
+      const text = editor.firstChild!;
+
+      expect(onInput).toHaveBeenLastCalledWith(`${prefix}${href}`, prefix.length);
+      expect(text.textContent).toBe(`${prefix}\u200B`);
+      expect(window.getSelection()?.focusNode).toBe(text);
+      expect(window.getSelection()?.focusOffset).toBe(prefix.length);
+      expect(extractText(editor)).toBe(`${prefix}${href}`);
+      expect(findNodeAtOffset(editor, prefix.length)).toEqual({
+        node: text,
+        offset: prefix.length,
+      });
+
+      if (!(text instanceof Text)) throw new Error('Expected plain text before URL');
+      text.insertData(prefix.length, 'more ');
+      setCollapsedSelection(text, prefix.length + 5);
+      editor.dispatchEvent(
+        new InputEvent('input', { bubbles: true, inputType: 'insertText', data: ' ' })
+      );
+      expect(onInput).toHaveBeenLastCalledWith(`${prefix}more ${href}`, prefix.length + 5);
+      expect(text.data).toBe(`${prefix}more \u200B`);
+      expect(editor.querySelector('.composer-external-link')?.textContent).toBe(href);
+    }
+  );
+
   it('inserts a typed space after a URL as plain composer text', () => {
     const onInput = vi.fn();
     renderComposer({
