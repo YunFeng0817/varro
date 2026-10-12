@@ -4647,6 +4647,40 @@ describe('OpenCodeServer restart blockers', () => {
 describe('OpenCodeServer registered server follow recovery', () => {
   const exitedPid = 1_074_000_000 + process.pid;
 
+  it('waits for replacement publication before reading registration or probing health', async () => {
+    const server = new OpenCodeServer(4096, true);
+    const { api, children } = configureManagedStartup(server);
+    const { processManager } = server as unknown as { processManager: OpenCodeProcess };
+    vi.spyOn(processManager, 'connectionIdentity', 'get').mockReturnValue({
+      port: 4096,
+      pid: exitedPid,
+      birthIdentity: 'retired-listener',
+      executable: '/fixture/opencode',
+    });
+    const claim = deferred<() => Promise<void>>();
+    const release = vi.fn(async () => {});
+    vi.mocked(processManager.acquireManagedServerLaunchClaim).mockReturnValue(claim.promise);
+    vi.mocked(processManager.refreshStartupRegistration).mockResolvedValue(true);
+    vi.mocked(api.readHealthInfo).mockResolvedValue({ healthy: true, version: '2.0.26' });
+    vi.spyOn(processManager, 'verifyManagedServerAdmission').mockResolvedValue(true);
+    vi.spyOn(processManager, 'prepareForHealthyExistingServer').mockResolvedValue(undefined);
+
+    const started = server.start();
+    await flushMicrotasks();
+    expect(processManager.acquireManagedServerLaunchClaim).toHaveBeenCalledOnce();
+    expect(processManager.refreshStartupRegistration).not.toHaveBeenCalled();
+    expect(api.readHealthInfo).not.toHaveBeenCalled();
+    expect(api.startEventStream).not.toHaveBeenCalled();
+    claim.resolve(release);
+    await expect(started).resolves.toBe(server.url);
+    expect(processManager.refreshStartupRegistration).toHaveBeenCalledOnce();
+    expect(api.readHealthInfo).toHaveBeenCalledOnce();
+    expect(release).toHaveBeenCalled();
+    expect(children).toHaveLength(0);
+    expect(vscodeMock.window.showWarningMessage).not.toHaveBeenCalled();
+    await server.disconnect();
+  });
+
   function fixture(registered: boolean, pid = exitedPid) {
     const server = new OpenCodeServer('auto', true);
     const startOperation = vi.fn(async () => {

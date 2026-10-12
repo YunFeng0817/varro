@@ -1140,116 +1140,139 @@ describe.skipIf(!binary)('released OpenCode adapter contract', () => {
     }
   }, 45000);
 
-  it('preserves pending steering and interruption history after cancelling a stalled turn', async () => {
-    if (transport.version !== 2) return;
-    const session = asRecord(
-      await transport.request('POST', '/session', { title: 'Pending steering abort fixture' })
-    );
-    if (!isString(session?.id)) throw new Error('Missing steering abort fixture session');
-    const id = session.id;
-    const start = modelRequests.length;
-    let release: (() => void) | undefined;
-    streamGate = new Promise<void>((complete) => {
-      release = complete;
-    });
-    try {
-      await transport.request('POST', `/session/${id}/prompt_async`, {
-        model: { providerID: 'fixture', modelID: 'fixture' },
-        parts: [{ type: 'text', text: 'Wait for cancellation.' }],
-      });
-      await vi.waitFor(() => expect(modelRequests.length).toBeGreaterThan(start), {
-        timeout: 10000,
-      });
-      await transport.request('POST', `/session/${id}/prompt_async`, {
-        messageID: 'msg_pending_steer',
-        delivery: 'steer',
-        parts: [{ type: 'text', text: 'Keep this steering prompt pending.' }],
-      });
-      expect(await transport.request('GET', `/session/${id}/message`)).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({
-            info: expect.objectContaining({ id: 'msg_pending_steer', pendingDelivery: 'steer' }),
-          }),
-        ])
+  it.each([0, 75, 250])(
+    'preserves pending steering and interruption history after cancelling a stalled turn with %sms sampling delay',
+    async (samplingDelay) => {
+      if (transport.version !== 2) return;
+      const session = asRecord(
+        await transport.request('POST', '/session', { title: 'Pending steering abort fixture' })
       );
-      await transport.request('POST', `/session/${id}/abort`);
-      await vi.waitFor(
-        async () => {
-          expect(await transport.request('GET', `/session/${id}/message`)).toEqual(
-            expect.arrayContaining([
-              expect.objectContaining({
-                info: expect.objectContaining({
-                  role: 'assistant',
-                  // Snapshot capture overlaps the provider request from v2.0.26, so
-                  // cancellation can project an interrupted idle record before a step starts.
-                  error: expect.objectContaining({
-                    name: expect.stringMatching(/^(aborted|MessageAbortedError)$/),
+      if (!isString(session?.id)) throw new Error('Missing steering abort fixture session');
+      const id = session.id;
+      const start = modelRequests.length;
+      let release: (() => void) | undefined;
+      streamGate = new Promise<void>((complete) => {
+        release = complete;
+      });
+      try {
+        await transport.request('POST', `/session/${id}/prompt_async`, {
+          model: { providerID: 'fixture', modelID: 'fixture' },
+          parts: [{ type: 'text', text: 'Wait for cancellation.' }],
+        });
+        await vi.waitFor(() => expect(modelRequests.length).toBeGreaterThan(start), {
+          timeout: 10000,
+        });
+        await transport.request('POST', `/session/${id}/prompt_async`, {
+          messageID: 'msg_pending_steer',
+          delivery: 'steer',
+          parts: [{ type: 'text', text: 'Keep this steering prompt pending.' }],
+        });
+        expect(await transport.request('GET', `/session/${id}/message`)).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              info: expect.objectContaining({ id: 'msg_pending_steer', pendingDelivery: 'steer' }),
+            }),
+          ])
+        );
+        await transport.request('POST', `/session/${id}/abort`);
+        await vi.waitFor(
+          async () => {
+            expect(await transport.request('GET', `/session/${id}/message`)).toEqual(
+              expect.arrayContaining([
+                expect.objectContaining({
+                  info: expect.objectContaining({
+                    role: 'assistant',
+                    // Snapshot capture overlaps the provider request from v2.0.26, so
+                    // cancellation can project an interrupted idle record before a step starts.
+                    error: expect.objectContaining({
+                      name: expect.stringMatching(/^(aborted|MessageAbortedError)$/),
+                    }),
                   }),
                 }),
-              }),
-              expect.objectContaining({
-                info: expect.objectContaining({
-                  id: 'msg_pending_steer',
-                  pendingDelivery: 'steer',
+                expect.objectContaining({
+                  info: expect.objectContaining({
+                    id: 'msg_pending_steer',
+                    pendingDelivery: 'steer',
+                  }),
                 }),
-              }),
-            ])
-          );
-        },
-        { timeout: 10000 }
-      );
-      await vi.waitFor(() =>
-        expect(
-          events.some((event) => {
-            const parsed = parseServerEvent(event);
-            return (
-              parsed?.type === 'session.error' &&
-              parsed.properties?.sessionID === id &&
-              asRecord(parsed.properties.error)?.name === 'MessageAbortedError'
+              ])
             );
-          })
-        ).toBe(true)
-      );
-      release?.();
-      streamGate = undefined;
-      await transport.request('POST', `/api/session/${id}/prompt`, {
-        id: 'msg_still_queued',
-        text: 'This queued prompt must stay parked.',
-        delivery: 'queue',
-        resume: false,
-      });
-      expect(await transport.request('POST', `/session/${id}/resume-steering`)).toBe(true);
-      await vi.waitFor(
-        async () => {
-          const messages = (await transport.request('GET', `/session/${id}/message`)) as Array<{
-            info: UnknownRecord;
-            parts: UnknownRecord[];
-          }>;
-          const steering = messages.find((message) => message.info.id === 'msg_pending_steer');
-          expect(steering?.info.pendingDelivery).toBeUndefined();
+          },
+          { timeout: 10000 }
+        );
+        await vi.waitFor(() =>
           expect(
-            messages.filter(
-              (message) => message.info.role === 'user' && !message.info.pendingDelivery
-            )
-          ).toHaveLength(2);
-          expect(
-            messages.find((message) => message.info.id === 'msg_still_queued')?.info.pendingDelivery
-          ).toBe('queue');
-          expect(
-            messages.some((message) =>
-              message.parts.some((part) => part.text === 'Adapter stream verified.')
-            )
-          ).toBe(true);
-        },
-        { timeout: 10000 }
-      );
-    } finally {
-      release?.();
-      streamGate = undefined;
-      await transport.request('POST', `/session/${id}/abort`);
-      await transport.request('DELETE', `/session/${id}`);
-    }
-  }, 25000);
+            events.some((event) => {
+              const parsed = parseServerEvent(event);
+              return (
+                parsed?.type === 'session.error' &&
+                parsed.properties?.sessionID === id &&
+                asRecord(parsed.properties.error)?.name === 'MessageAbortedError'
+              );
+            })
+          ).toBe(true)
+        );
+        release?.();
+        streamGate = undefined;
+        await transport.request('POST', `/api/session/${id}/prompt`, {
+          id: 'msg_still_queued',
+          text: 'This queued prompt must stay parked.',
+          delivery: 'queue',
+          resume: false,
+        });
+        expect(await transport.request('POST', `/session/${id}/resume-steering`)).toBe(true);
+        await vi.waitFor(
+          async () => {
+            const status = asRecord(await transport.request('GET', '/session/status'))?.[id];
+            expect(status === undefined || asRecord(status)?.type === 'idle').toBe(true);
+            const messages = await transport.request('GET', `/session/${id}/message`);
+            expect(messages).toEqual(
+              expect.arrayContaining([
+                expect.objectContaining({
+                  parts: expect.arrayContaining([
+                    expect.objectContaining({ text: 'Adapter stream verified.' }),
+                  ]),
+                }),
+              ])
+            );
+          },
+          { timeout: 10000 }
+        );
+        await new Promise<void>((done) => setTimeout(done, samplingDelay));
+        await vi.waitFor(
+          async () => {
+            const messages = (await transport.request('GET', `/session/${id}/message`)) as Array<{
+              info: UnknownRecord;
+              parts: UnknownRecord[];
+            }>;
+            const steering = messages.find((message) => message.info.id === 'msg_pending_steer');
+            expect(steering?.info.pendingDelivery).toBeUndefined();
+            expect(
+              messages.filter(
+                (message) => message.info.role === 'user' && !message.info.pendingDelivery
+              )
+            ).toHaveLength(2);
+            expect(
+              messages.find((message) => message.info.id === 'msg_still_queued')?.info
+                .pendingDelivery
+            ).toBe('queue');
+            expect(
+              messages.some((message) =>
+                message.parts.some((part) => part.text === 'Adapter stream verified.')
+              )
+            ).toBe(true);
+          },
+          { timeout: 10000 }
+        );
+      } finally {
+        release?.();
+        streamGate = undefined;
+        await transport.request('POST', `/session/${id}/abort`);
+        await transport.request('DELETE', `/session/${id}`);
+      }
+    },
+    25000
+  );
 
   it('aborts an active provider request and accepts the next prompt', async () => {
     const session = asRecord(

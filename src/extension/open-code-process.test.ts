@@ -2144,6 +2144,7 @@ describe('OpenCodeProcess server ownership leases', () => {
       'reused-pid',
       'multiple-retired-records',
       'unknown-account',
+      'v2-floor-status',
     ])(
       'recovers a replacement through %s without restarting or carrying obsolete config',
       async (mode) => {
@@ -2152,6 +2153,13 @@ describe('OpenCodeProcess server ownership leases', () => {
         let selectedPath = path;
         try {
           if (mode === 'unknown-account') state.account.mockResolvedValue({ kind: 'unknown' });
+          if (mode === 'v2-floor-status')
+            fetchMock.mockImplementation(async (url, options) => {
+              if (!options?.headers) return new Response(null, { status: 401 });
+              return String(url).endsWith('/api/info')
+                ? new Response(null, { status: 404 })
+                : new Response(JSON.stringify({ pid: MOCK_LINUX_PID, version: '2.0.5' }));
+            });
           if (mode === 'reused-pid') {
             kill.mockImplementation(() => true);
             vi.spyOn(processInspection, 'readProcessBirthIdentity').mockImplementation(
@@ -2190,7 +2198,7 @@ describe('OpenCodeProcess server ownership leases', () => {
           await expect(manager.verifyManagedServerConnection(true)).resolves.toBeUndefined();
           await expect(manager.verifyManagedServerAdmission()).resolves.toBe(true);
           expect(fetchMock).toHaveBeenCalledWith(
-            'http://127.0.0.1:49374/api/info',
+            `http://127.0.0.1:49374/api/${mode === 'v2-floor-status' ? 'status' : 'info'}`,
             expect.objectContaining({
               headers: {
                 Authorization: `Basic ${Buffer.from(`opencode:${lease.password}`).toString('base64')}`,

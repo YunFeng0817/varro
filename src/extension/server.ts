@@ -783,6 +783,12 @@ export class OpenCodeServer extends EventEmitter {
           }
         }
         this.throwIfStartCancelled(disposeGeneration, signal);
+        // A recovering follower must wait for the owner's replacement lease and
+        // credentials, not probe the listener halfway through their publication.
+        if (this.followsManagedRegistration && this.processManager.isAutoStartEnabled) {
+          this.setStatus({ state: 'starting' });
+          return await this.launchManagedServer(disposeGeneration, preserveRetryCount, signal);
+        }
         let registered = await this.measureStartup('registration', () =>
           this.processManager.refreshStartupRegistration(signal)
         );

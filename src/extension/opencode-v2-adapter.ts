@@ -1104,14 +1104,9 @@ export class OpenCodeV2Adapter {
         if (!Array.isArray(inbox)) throw new Error('Invalid OpenCode v2 session inbox');
         const pending = inbox.find((item) => item.type === 'user' && item.delivery === 'steer');
         if (!pending) return false;
-        // Prompt admission is idempotent by ID and wakes an existing item.
-        // Reasserting its delivery with inbox PATCH is a conflict in 2.0.20.
-        await raw('POST', `${endpoint}/prompt`, {
-          id: pending.id,
-          text: '',
-          delivery: 'steer',
-          resume: true,
-        });
+        // A prompt wake drains queued input too. Interrupt's steer-scoped wake
+        // resumes existing steering without admitting input or unpausing queues.
+        await raw('POST', `${endpoint}/interrupt?resume=true`, {});
         return true;
       }
       if (action === 'summarize') {

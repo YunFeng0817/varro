@@ -1532,26 +1532,33 @@ export class OpenCodeProcess {
     const selected = retired[0];
     if (!selected) return false;
     const authorization = basicAuthorization(selected.lease.password!, selected.lease.username);
-    const infoUrl = `${url}/api/info`;
     const requestSignal = signal
       ? AbortSignal.any([signal, AbortSignal.timeout(3000)])
       : AbortSignal.timeout(3000);
-    const anonymous = await fetch(infoUrl, {
-      redirect: 'error',
-      signal: requestSignal,
-    });
-    await anonymous.body?.cancel();
-    if (anonymous.status !== 401) return false;
-    const response = await fetch(infoUrl, {
-      headers: { Authorization: authorization },
-      redirect: 'error',
-      signal: requestSignal,
-    });
-    if (!response.ok) {
-      await response.body?.cancel();
-      return false;
+    let info: Record<string, unknown> | null = null;
+    // The supported v2 floor exposes listener identity at /api/status.
+    for (const route of ['/api/info', '/api/status']) {
+      const infoUrl = `${url}${route}`;
+      const anonymous = await fetch(infoUrl, { redirect: 'error', signal: requestSignal });
+      await anonymous.body?.cancel();
+      if (anonymous.status === 404) continue;
+      if (anonymous.status !== 401) return false;
+      const response = await fetch(infoUrl, {
+        headers: { Authorization: authorization },
+        redirect: 'error',
+        signal: requestSignal,
+      });
+      if (response.status === 404) {
+        await response.body?.cancel();
+        continue;
+      }
+      if (!response.ok) {
+        await response.body?.cancel();
+        return false;
+      }
+      info = asRecord(await response.json());
+      break;
     }
-    const info = asRecord(await response.json());
     if (
       info?.pid !== pid ||
       typeof info.version !== 'string' ||

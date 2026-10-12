@@ -118,6 +118,98 @@ All 542 focused process, transport, adapter, and shared compatibility unit tests
 passed. `npm run lint`, `npm run fmt`, `npm run lint:check`, `npm run typecheck`,
 `npm run typecheck:suggestions`, and `npm run build` passed.
 
+The released-server adapter matrix did not pass overall. The new v1 release passed
+all 28 applicable checks. Known recovery failures remain on the support floors and
+the unchanged v2 release. The initial v2.0.26 run exceeded the matrix runner's
+180-second deadline; a separate startup rerun completed in 200 seconds.
+
+| Scope | Tested behavior | Issues found | All cases complete |
+| --- | --- | --- | --- |
+| v1.19.0 | 28 passed, 11 platform/family skips | None found | Yes, all applicable automated checks |
+| v1.16.0 | 27 passed, 1 failed, 11 skips | Follower authentication after owner replacement | No, later recovery phases were not reached |
+| v2.0.5 | 33 passed, 3 failed, 3 skips | Replacement ownership, reboot recovery, multi-window ownership | No, later recovery phases were not reached |
+| v2.0.26 | Initial contract: 26 passed, 1 failed, 2 skips; separate startup rerun: 9 passed, 1 failed | Multi-window ownership; initial steering assertion failed but passed alone | No, later multi-window recovery phases were not reached |
+
+Recommended follow-up diagnostics:
+
+- High priority: v1.16.0 restarts the owner, but the follower reports authentication
+  failure instead of reattaching. Inspect credential refresh and lease-generation
+  ordering, then rerun killed-server and owner-restart recovery. Evidence is
+  `artifacts/ai-test-data/multi-window-nBt0WB/failure.json`.
+- Medium priority: v2.0.5 replacement recovery reports `unmanaged` instead of
+  `current-host`; both v2 releases report `unmanaged` instead of `other-host` after
+  multi-window recovery despite healthy event streams. Inspect authenticated
+  endpoint fallback and credential-backed registration identity. Evidence is in
+  `artifacts/ai-test-data/startup-I2AHLp/failure.json`,
+  `artifacts/ai-test-data/multi-window-4JoC9P/failure.json`, and
+  `artifacts/ai-test-data/multi-window-xYNyev/failure.json`.
+- High priority: v2.0.5 simulated reboot fails its healthy-start assertion. Capture
+  startup probes, lease identity, and credential restoration before changing logic.
+  Evidence is `artifacts/ai-test-data/startup-EswAcN/failure.json`.
+- The initial v2.0.26 stalled-turn steering assertion failed, but its isolated rerun
+  passed. The timed-out run did not retain the full assertion details. Capture native
+  inbox admission and resume ordering on another reproduction before assigning a
+  new cause. Evidence is `artifacts/opencode-1.19.0-v2-steering-rerun.log`.
+- The matrix runner's 180-second per-version deadline is shorter than the completed
+  v2 startup suite. Record timeout/error details in its report and use a suite-aware
+  bound, or run contract and startup checks separately. Do not count the timeout as
+  another product failure.
+
+Complete matrix logs are under `artifacts/opencode-adapters/run-COhYuE/`; the startup
+rerun is `artifacts/opencode-1.19.0-v2-startup-rerun.log`. No live provider sign-in or
+real-editor visual/performance checks were run for this bump.
+
+### Recovery and steering follow-up
+
+The recovery failures above were reproduced and fixed after the version bump.
+They were not all missed by tests: the opt-in published-server matrix caught them,
+but ordinary unit runs skip those files without `VARRO_OPENCODE_TEST_BINARY`.
+
+- Recovering registered windows now enter the existing launch claim before probing
+  the endpoint. Previously, followers could probe between listener startup and
+  replacement lease/credential publication. V1 rejected stale credentials; v2
+  could fall back to credential-only attachment and lose lifecycle ownership.
+  The earlier unit recovery fixtures replaced `startOperation` with an immediate
+  success, so they tested retry scheduling without exercising this race. A new
+  deferred-claim regression exercises real startup and forbids early probes.
+- Replacement ownership recovery now falls back to `/api/status` when `/api/info`
+  is unavailable on v2.0.5. Its earlier unit fixture always returned a modern info
+  response. The reboot fixture also now selects the floor's actual health route;
+  that assertion was a test-controller failure, not a reboot product failure.
+- Resume steering uses the native steer-scoped `interrupt?resume=true` wake instead
+  of re-admitting the pending prompt. Normal prompt wakes also drain queued input.
+  The old unit test proved request shape, not queue semantics; the released-server
+  check could pass during a short interval before the queue drained. It now waits
+  for completion and samples after 0, 75, and 250 ms on each supported family.
+- The adapter runner's outer deadline is now 900 seconds, enough for the serial
+  startup and contract budgets. Reports retain exit code, signal, and spawn errors
+  instead of leaving truncated output indistinguishable from an assertion failure.
+
+The complete released-server rerun passed all 137 applicable checks:
+
+| Scope | Tested behavior | Issues found | All cases complete |
+| --- | --- | --- | --- |
+| v1.16.0 | 30 passed, 11 family/platform skips | None after fixes | Yes, applicable automated cases |
+| v1.19.0 | 30 passed, 11 family/platform skips | None after fixes | Yes, applicable automated cases |
+| v2.0.5 | 38 passed, 3 family/platform skips | None after fixes | Yes, applicable automated cases |
+| v2.0.26 | 39 passed, 2 family/platform skips | None after fixes | Yes, applicable automated cases |
+| Live VS Code v1.19.0 and v2.0.26 | Targeted queue, steer, stop, follow-up, and reload checks | None in verified actions | No, full action/layout matrix not run |
+
+All 804 focused unit checks and five rest-proxy steering checks passed. Lint,
+formatting, lint check, both TypeScript checks, build, and diff checks passed.
+Isolated VS Code sandbox checks passed
+healthy startup, crash recovery, and released v2 startup. The live checks used
+`openai/gpt-6.1-sol` through the OpenAI subscription in separate databases and the
+clean `tmp/opencode` fixture. V1 required `OPENCODE_DISABLE_PROJECT_CONFIG=true`
+on its test server to skip the fixture's unresolved custom-tool plugin imports.
+Native UI and canonical history agree on the successful queue edit/removal and
+steering sequences. This is not a full visual performance or action-matrix pass.
+
+Evidence: `artifacts/opencode-adapters/run-M0Ymhj/` and
+`artifacts/ai-fuzzy/2026-10-12-recovery-19190.md`. Keep the published-server matrix
+as a version-bump gate; ordinary mocked unit runs cannot establish native wake
+semantics or released CLI compatibility.
+
 ### 2.0.26 compatibility review
 
 Reviewed v2.0.25 to v2.0.26, `62e087ff7b` through `8059cdcbdf`.

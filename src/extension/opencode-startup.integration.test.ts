@@ -330,7 +330,12 @@ describe.skipIf(!process.env.VARRO_OPENCODE_TEST_BINARY)('released managed start
             process.kill(lease.pid, 'SIGKILL');
             if (launched.pid !== lease.pid) launched.kill('SIGKILL');
             await exited;
-            const route = info.health.version?.startsWith('2.') ? '/api/info' : '/global/health';
+            const route =
+              info.health.version === '2.0.5'
+                ? '/api/status'
+                : info.health.version?.startsWith('2.')
+                  ? '/api/info'
+                  : '/global/health';
             const stopDeadline = Date.now() + 10000;
             let stopped = false;
             while (!stopped && Date.now() < stopDeadline) {
@@ -792,6 +797,19 @@ describe.skipIf(!process.env.VARRO_OPENCODE_TEST_BINARY)('released multi-window 
         );
       } finally {
         await writeFile(join(root, 'timeline.json'), JSON.stringify(timeline, null, 2));
+        await writeFile(join(root, 'startup-diagnostics.md'), diagnosticTimeline.export(''));
+        await writeFile(
+          join(root, 'startup-log.json'),
+          JSON.stringify(
+            {
+              info: logs.info.mock.calls,
+              warn: logs.warn.mock.calls,
+              error: logs.error.mock.calls,
+            },
+            null,
+            2
+          )
+        );
         await follower.dispose();
         await owner.dispose();
         vi.unstubAllEnvs();

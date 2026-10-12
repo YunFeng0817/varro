@@ -125,8 +125,8 @@ describe('v2 prompt delivery', () => {
     expect(wire).toHaveBeenNthCalledWith(
       2,
       'POST',
-      '/api/session/ses_resume/prompt',
-      { id: 'msg_steer', text: '', delivery: 'steer', resume: true },
+      '/api/session/ses_resume/interrupt?resume=true',
+      {},
       expect.anything()
     );
   });

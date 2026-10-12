@@ -46,7 +46,9 @@ for (const version of versions) {
     {
       cwd: root,
       encoding: 'utf8',
-      timeout: 180_000,
+      // Startup has nine serial cases with 60s budgets plus 90s recovery.
+      // The outer deadline must allow Vitest to finish and report assertions.
+      timeout: 900_000,
       maxBuffer: 10 * 1024 * 1024,
       env: {
         ...process.env,
@@ -55,12 +57,15 @@ for (const version of versions) {
       },
     }
   );
-  const log = `${test.stdout ?? ''}${test.stderr ?? ''}`;
+  const log = `${test.stdout ?? ''}${test.stderr ?? ''}${test.error ? `\nAdapter runner error: ${test.error.message}\n` : ''}`;
   await writeFile(join(run, `${version}.log`), log);
   results.push({
     package: packageName,
     version,
     passed: test.status === 0,
+    exitCode: test.status,
+    signal: test.signal,
+    error: test.error?.message ?? null,
     log: join(run, `${version}.log`),
   });
   process.stdout.write(log);
