@@ -25,6 +25,7 @@ afterAll(async () => {
 });
 
 describe('cross-process thumbnail service', () => {
+  // Cold process and WASM startup need the same CI budget as the other integration cases.
   it('never uploads images to a replacement listener without a valid same-connection proof', async () => {
     const stateDirectory = join(directory, 'identity-account');
     const client = new SharedThumbnailClient({ servicePath, stateDirectory, idleMs: 200 });
@@ -62,7 +63,7 @@ describe('cross-process thumbnail service', () => {
       impostor.closeAllConnections();
       await new Promise<void>((resolve) => impostor.close(() => resolve()));
     }
-  });
+  }, 20_000);
 
   it('arbitrates concurrent starts from independent extension hosts and survives their exits', async () => {
     const stateDirectory = join(directory, 'shared-account');
