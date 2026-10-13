@@ -31,7 +31,7 @@ for (const width of [280, 320]) {
     const composerBox = await composer.boundingBox();
     expect(feedbackBox).not.toBeNull();
     expect(composerBox).not.toBeNull();
-    expect(feedbackBox!.y + feedbackBox!.height).toBeLessThanOrEqual(composerBox!.y);
+    expect(feedbackBox!.y + feedbackBox!.height).toBeLessThanOrEqual(composerBox!.y - 24);
     expect(feedbackBox!.x).toBeGreaterThanOrEqual(0);
     expect(feedbackBox!.x + feedbackBox!.width).toBeLessThanOrEqual(width);
   });

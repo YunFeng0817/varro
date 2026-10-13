@@ -230,7 +230,7 @@ test('pastes an image, sends it as a file part, and clears the chip', async ({ p
   await expect(page.locator('.chat-attachment-chip').filter({ hasText: 'Image' })).toHaveCount(0);
 });
 
-test('shows the duplicate-image warning directly above the input', async ({ page }) => {
+test('shows the duplicate-image warning above the input and list fade', async ({ page }) => {
   await page.setViewportSize({ width: 520, height: 1040 });
   await page.goto('/e2e/harness/index.html?scenario=blank');
   const composer = page.locator('.rich-composer').first();
@@ -273,7 +273,17 @@ test('shows the duplicate-image warning directly above the input', async ({ page
         inputShift: Math.round(inputBounds.y - initialBounds.y),
       };
     })
-    .toEqual({ gap: 8, centerOffset: 0, inputShift: 0 });
+    .toEqual({ gap: 24, centerOffset: 0, inputShift: 0 });
+
+  const layers = await shell.evaluate((element) => {
+    const fade = document.querySelector('.interactive-list-bottom-fade-wrap');
+    if (!fade) throw new Error('Expected list fade');
+    return {
+      shell: Number(getComputedStyle(element).zIndex),
+      fade: Number(getComputedStyle(fade).zIndex),
+    };
+  });
+  expect(layers.shell).toBeGreaterThan(layers.fade);
 });
 
 test('keeps a line-start pasted image from creating a trailing line', async ({ page }) => {

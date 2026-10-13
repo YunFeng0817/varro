@@ -2641,6 +2641,10 @@ kbd {
   z-index: var(--z-modal-raised);
 }
 
+.session-action-feedback.chat-image-preview-feedback {
+  z-index: var(--z-modal-raised);
+}
+
 .chat-image-preview-context-menu > button:disabled {
   opacity: 0.5;
   cursor: default;

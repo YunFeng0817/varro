@@ -46,13 +46,19 @@ for (const mime of ['image/png', 'image/jpeg']) {
     await expect
       .poll(() => preview.evaluate((element: HTMLImageElement) => element.naturalWidth))
       .toBe(320);
+    const initialImageBox = await preview.boundingBox();
     await preview.click({ button: 'right' });
     const menu = page.getByRole('menu', { name: 'Image actions' });
     await expect(menu.getByRole('menuitem', { name: 'Copy image' })).toBeEnabled();
     await menu.getByRole('menuitem', { name: 'Copy image' }).click();
     await expect(menu).toHaveCount(0);
-    await expect(page.getByRole('status').filter({ hasText: 'Image copied' })).toBeVisible();
+    const feedback = page.getByRole('status').filter({ hasText: 'Image copied' });
+    await expect(feedback).toBeVisible();
+    await expect(feedback).toHaveClass(/session-action-feedback/);
+    await expect(feedback).toHaveCSS('position', 'fixed');
+    await expect(feedback.locator('.session-action-feedback-glyph')).toBeVisible();
     await expect(preview).toBeVisible();
+    expect(await preview.boundingBox()).toEqual(initialImageBox);
 
     const copied = await page.evaluate(async () => {
       const items = await navigator.clipboard.read();
@@ -80,6 +86,8 @@ for (const mime of ['image/png', 'image/jpeg']) {
     expect(copied.red[2]).toBeLessThanOrEqual(5);
     expect(copied.red[3]).toBe(255);
     if (mime === 'image/png') expect(copied.transparent[3]).toBe(0);
+    await expect(feedback).toHaveCount(0);
+    expect(await preview.boundingBox()).toEqual(initialImageBox);
     expect(errors).toEqual([]);
   });
 }

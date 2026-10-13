@@ -3,7 +3,7 @@ import { createSignal } from 'solid-js';
 import { render } from 'solid-js/web';
 import { ImagePreviewOverlay } from './ImagePreview';
 import type { PreviewImage } from './ImagePreview';
-import { navArrowLeftIcon, navArrowRightIcon, xmarkIcon } from '../lib/ui-icons';
+import { checkIcon, navArrowLeftIcon, navArrowRightIcon, xmarkIcon } from '../lib/ui-icons';
 import { toCssUrl } from './UiIcon';
 import { fixture } from '../test-fixtures';
 import { IMAGE_PLACEHOLDER } from '../lib/deferred-content';
@@ -151,6 +151,7 @@ describe('ImagePreviewOverlay image copying', () => {
     });
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
+    vi.useRealTimers();
   });
 
   function openMenu(loaded = true) {
@@ -173,22 +174,68 @@ describe('ImagePreviewOverlay image copying', () => {
     return overlay()!.querySelector<HTMLButtonElement>('[role="menuitem"]')!;
   }
 
-  it('copies the image from its context menu without closing the preview', async () => {
+  it('copies the image without closing the preview or changing its figure content', async () => {
+    let finishWrite!: () => void;
+    write.mockReturnValue(
+      new Promise<void>((resolve) => {
+        finishWrite = resolve;
+      })
+    );
     const onClose = vi.fn();
     dispose = render(() => <ImagePreviewOverlay image={image} onClose={onClose} />, container);
     await Promise.resolve();
     const button = openMenu();
+    const figure = overlay()!.querySelector('.chat-image-preview-figure')!;
+    const figureContent = figure.innerHTML;
     expect(button.textContent).toBe('Copy image');
     expect(document.activeElement).toBe(button);
     button.click();
     expect(write).toHaveBeenCalledOnce();
     expect(overlay()!.querySelector('[role="menu"]')).toBeNull();
-    expect(overlay()!.querySelector('[role="status"]')?.textContent).toBe('Copying image…');
+    expect(figure.innerHTML).toBe(figureContent);
+    const pendingCopyButton = openMenu();
+    expect(pendingCopyButton.disabled).toBe(true);
+    expect(overlay()!.querySelector('[role="status"]')).toBeNull();
+    encode(new Blob(['pixels'], { type: 'image/png' }));
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(overlay()!.querySelector('[role="status"]')).toBeNull();
+    finishWrite();
+    await vi.waitFor(() => expect(pendingCopyButton.disabled).toBe(false));
+    expect(figure.innerHTML).toBe(figureContent);
+    const feedback = overlay()!.querySelector('[role="status"]');
+    expect(feedback?.textContent).toBe('Image copied');
+    expect(feedback?.classList.contains('session-action-feedback')).toBe(true);
+    expect(feedback?.getAttribute('aria-live')).toBe('polite');
+    expect(
+      feedback?.querySelector<HTMLElement>('.ui-icon')?.style.getPropertyValue('--ui-icon-mask')
+    ).toBe(toCssUrl(checkIcon));
+    expect(figure.contains(feedback)).toBe(false);
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('dismisses successful copy feedback automatically', async () => {
+    vi.useFakeTimers();
+    dispose = render(() => <ImagePreviewOverlay image={image} onClose={() => {}} />, container);
+    openMenu().click();
     encode(new Blob(['pixels'], { type: 'image/png' }));
     await vi.waitFor(() =>
       expect(overlay()!.querySelector('[role="status"]')?.textContent).toBe('Image copied')
     );
-    expect(onClose).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1_600);
+    expect(overlay()!.querySelector('[role="status"]')).toBeNull();
+  });
+
+  it('clears successful copy feedback when navigating to another image', async () => {
+    const [current, setCurrent] = createSignal(image);
+    dispose = render(() => <ImagePreviewOverlay image={current()} onClose={() => {}} />, container);
+    openMenu().click();
+    encode(new Blob(['pixels'], { type: 'image/png' }));
+    await vi.waitFor(() =>
+      expect(overlay()!.querySelector('[role="status"]')?.textContent).toBe('Image copied')
+    );
+    setCurrent({ ...image, url: 'data:image/jpeg;base64,BBBB', title: 'next.jpg' });
+    expect(overlay()!.querySelector('[role="status"]')).toBeNull();
   });
 
   it('disables copying until the original is loaded and never copies placeholders', () => {
@@ -238,6 +285,7 @@ describe('ImagePreviewOverlay image copying', () => {
         'Clipboard permission denied'
       )
     );
+    expect(overlay()!.querySelector('[role="status"]')).toBeNull();
   });
 
   it('clears the menu and ignores old copy results when navigating to another image', async () => {
