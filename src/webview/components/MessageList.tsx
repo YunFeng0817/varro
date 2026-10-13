@@ -11,7 +11,6 @@ import {
   untrack,
   type Accessor,
 } from 'solid-js';
-import chatLogoUri from '../../../assets/icon.png?inline';
 import {
   isAbortedAssistantError,
   isPermissionRejectedToolError,
@@ -135,6 +134,7 @@ import {
 } from './message-list/MessageListChrome';
 import { Tooltip } from './Tooltip';
 import { UiIcon } from './UiIcon';
+import { StarterLogo } from './message-list/StarterLogo';
 import {
   getSubagentSessionIds,
   getStickyUserMessagePreview,
@@ -430,67 +430,6 @@ export function getActiveTurnNavigationMessageId(
   const selectedIndex = turns.findIndex((turn) => turn.id === selectedTurnId);
   const viewportIndex = turns.findIndex((turn) => turn.id === viewportTurnId);
   return viewportIndex > selectedIndex ? viewportTurnId : selectedTurnId;
-}
-
-function StarterLogo() {
-  // oxlint-disable-next-line no-unassigned-vars
-  let logoRef: HTMLImageElement | undefined;
-  const [position, setPosition] = createSignal<{ top: string; left: string }>();
-
-  onMount(() => {
-    const logo = logoRef;
-    const area = logo?.closest<HTMLElement>('.interactive-list-shell');
-    const hints = logo?.parentElement?.querySelector<HTMLElement>('.chat-empty-hints');
-    if (!logo || !area || !hints) return;
-
-    const updateOverlap = () => {
-      const logoBox = logo.getBoundingClientRect();
-      const hintsBox = hints.getBoundingClientRect();
-      const overlaps =
-        logoBox.left < hintsBox.right &&
-        logoBox.right > hintsBox.left &&
-        logoBox.top < hintsBox.bottom &&
-        logoBox.bottom > hintsBox.top;
-      hints.classList.toggle('is-logo-overlapping', overlaps);
-    };
-
-    const updatePosition = () => {
-      const box = area.getBoundingClientRect();
-      setPosition({
-        top: `${box.top + box.height / 2}px`,
-        left: `${box.left + box.width / 2}px`,
-      });
-      updateOverlap();
-    };
-
-    // Capture the initial message area, not its later composer-driven resizing.
-    updatePosition();
-    const observer = new ResizeObserver(updateOverlap);
-    observer.observe(area);
-    observer.observe(logo);
-    observer.observe(hints);
-    window.addEventListener('resize', updatePosition);
-    onCleanup(() => {
-      observer.disconnect();
-      window.removeEventListener('resize', updatePosition);
-      hints.classList.remove('is-logo-overlapping');
-    });
-  });
-
-  return (
-    <img
-      ref={logoRef}
-      class="chat-empty-logo"
-      style={position()}
-      src={chatLogoUri}
-      decoding="sync"
-      width="256"
-      height="256"
-      alt=""
-      aria-hidden="true"
-      draggable="false"
-    />
-  );
 }
 
 export function MessageList() {

@@ -2012,11 +2012,28 @@ body:is(.vscode-high-contrast, .vscode-high-contrast-light) .assistant-activity-
   line-height: 14px;
 }
 
-.chat-empty-logo {
+.chat-empty-logo-shell {
   position: fixed;
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
+  width: 64px;
+  pointer-events: auto;
+}
+
+.chat-empty-logo-waves {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  color: rgb(232 137 54);
+  mask-size: 100% 100%;
+  mask-repeat: no-repeat;
+  pointer-events: none;
+}
+
+.chat-empty-logo {
+  display: block;
   width: 64px;
   height: auto;
   opacity: 0.5;
@@ -2024,10 +2041,21 @@ body:is(.vscode-high-contrast, .vscode-high-contrast-light) .assistant-activity-
     drop-shadow(0 1px 1px var(--vscode-keybindingLabel-shadow, rgb(0 0 0 / 28%)));
   user-select: none;
   -webkit-user-drag: none;
+  pointer-events: auto;
+}
+
+body:is(.vscode-light, .vscode-high-contrast-light) .chat-empty-logo-waves {
+  color: rgb(255 255 255);
 }
 
 body:is(.vscode-light, .vscode-high-contrast-light) .chat-empty-logo {
   filter: drop-shadow(0 1px 1px var(--vscode-keybindingLabel-shadow, rgb(0 0 0 / 28%)));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-empty-logo-waves {
+    display: none;
+  }
 }
 
 .rendered-markdown {
