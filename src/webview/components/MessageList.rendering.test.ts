@@ -26,6 +26,7 @@ import { getRenderEmptyMessageIds } from './message-list/row-layout';
 import { getVisibleThreadMessages } from './message-list/thread-visibility';
 import { markSessionHistoryLoadFailed, setSessionHistoryCursor } from '../lib/message-window';
 import { fixture } from '../test-fixtures';
+import { STORAGE_KEYS, readStored, writeStored } from '../lib/state-storage';
 import {
   assistantMessage,
   filePart,
@@ -3145,6 +3146,7 @@ describe('MessageList empty state', () => {
   });
 
   it('shows the starter logo for a blank new chat', () => {
+    vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('Windows NT 10.0');
     setState('emptyStateLogoUri', 'https://example.test/logo.svg');
     setState('sessions', [
       {
@@ -3167,18 +3169,52 @@ describe('MessageList empty state', () => {
     expect(logo?.height).toBe(256);
     expect(logo?.getAttribute('decoding')).toBe('sync');
     const hints = container?.querySelectorAll('.chat-empty-hint');
-    expect(hints).toHaveLength(5);
+    expect(hints).toHaveLength(6);
     expect([...hints!].map((hint) => hint.textContent)).toEqual([
       '@ add files / agents',
       '/ run commands',
       '$ select skills',
       '& link sessions',
       'ShiftEnter new line',
+      'CtrlV paste images',
     ]);
-    expect(container?.querySelectorAll('.chat-empty-hint-grid > .chat-empty-hint')).toHaveLength(4);
-    expect(container?.querySelector('.chat-empty-hints > .chat-empty-hint')?.textContent).toBe(
-      'ShiftEnter new line'
-    );
+    expect(container?.querySelectorAll('.chat-empty-hint-grid > .chat-empty-hint')).toHaveLength(6);
+    expect(
+      container?.querySelector('.chat-empty-hint-grid > .chat-empty-hint:nth-child(5)')?.textContent
+    ).toBe('ShiftEnter new line');
+  });
+
+  it('shows Cmd+V for pasting images on macOS', () => {
+    vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('Macintosh; Intel Mac OS X 10_15_7');
+
+    cleanup = render(() => MessageList(), container!);
+
+    expect(
+      container?.querySelector('.chat-empty-hint-grid > .chat-empty-hint:nth-child(6)')?.textContent
+    ).toBe('CmdV paste images');
+  });
+
+  it('remembers dismissed starter hints without focusing the composer', () => {
+    const previousDismissal = readStored<unknown>(STORAGE_KEYS.starterHintsDismissed);
+    try {
+      writeStored(STORAGE_KEYS.starterHintsDismissed, null);
+      cleanup = render(() => MessageList(), container!);
+      const hints = container?.querySelector<HTMLElement>('.chat-empty-hints');
+      const previousFocusKey = composerFocusKey();
+      expect(hints?.hidden).toBe(false);
+
+      container?.querySelector<HTMLButtonElement>('.chat-empty-hints-dismiss')?.click();
+
+      expect(hints?.hidden).toBe(true);
+      expect(readStored<unknown>(STORAGE_KEYS.starterHintsDismissed)).toBe(true);
+      expect(composerFocusKey()).toBe(previousFocusKey);
+
+      cleanup();
+      cleanup = render(() => MessageList(), container!);
+      expect(container?.querySelector<HTMLElement>('.chat-empty-hints')?.hidden).toBe(true);
+    } finally {
+      writeStored(STORAGE_KEYS.starterHintsDismissed, previousDismissal);
+    }
   });
 
   it('omits the logo image when no logo URI is available but keeps the hints', () => {
@@ -3199,7 +3235,7 @@ describe('MessageList empty state', () => {
 
     expect(container?.querySelector('.chat-empty-state')).toBeInstanceOf(HTMLDivElement);
     expect(container?.querySelector('.chat-empty-logo')).toBeNull();
-    expect(container?.querySelectorAll('.chat-empty-hint')).toHaveLength(5);
+    expect(container?.querySelectorAll('.chat-empty-hint')).toHaveLength(6);
   });
 
   it('does not show the starter logo while switching to an existing chat with no loaded messages yet', () => {

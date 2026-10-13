@@ -2909,7 +2909,10 @@ function createScenarioState(name: ScenarioName): ScenarioState {
               ['All OpenCode projects'],
               ['Today, Last 7 days, Last 30 days, plus all time'],
               [
-                'Token stats by provider and model are calculated to the API cost. The current model can fetch the prices. Include input, output, and cached tokens separately for each provider and model. Keep the original token counts alongside estimated costs so the calculation can be checked. Record the price source and retrieval date, and flag models whose prices are unavailable. Do not treat missing prices as zero-cost usage. Include the full reporting period and project scope in the generated report.',
+                // Overflow three lines at wide widths even with narrower Linux font metrics.
+                'Token stats by provider and model are calculated to the API cost. The current model can fetch the prices. Include input, output, and cached tokens separately for each provider and model. Keep the original token counts alongside estimated costs so the calculation can be checked. Record the price source and retrieval date, and flag models whose prices are unavailable. Do not treat missing prices as zero-cost usage. Include the full reporting period and project scope in the generated report. '.repeat(
+                  2
+                ),
               ],
               ['Untitled Markdown'],
             ],

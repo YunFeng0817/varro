@@ -61,57 +61,62 @@ test('skips linked tool questions inline', async ({ page }) => {
   expect(rejectRequest).toMatchObject({ method: 'POST' });
 });
 
-test('keeps completed question answers stacked and clamped to three lines at wide and narrow widths', async ({
-  page,
-}) => {
-  for (const viewport of [
-    { width: 1000, height: 720 },
-    { width: 480, height: 720 },
-  ]) {
-    await page.setViewportSize(viewport);
-    await page.goto('/e2e/harness/index.html?scenario=completed-tool-question');
+for (const fontFamily of ['system-ui', 'Arial, sans-serif']) {
+  test(`keeps completed question answers stacked and clamped to three lines at wide and narrow widths with ${fontFamily}`, async ({
+    page,
+  }) => {
+    for (const viewport of [
+      { width: 1000, height: 720 },
+      { width: 480, height: 720 },
+    ]) {
+      await page.setViewportSize(viewport);
+      await page.goto('/e2e/harness/index.html?scenario=completed-tool-question');
+      await page.addStyleTag({
+        content: `.question-summary-card { font-family: ${fontFamily}; }`,
+      });
 
-    const summary = page.locator('.question-summary-card');
-    await expect(summary).toBeVisible();
-    await expect(summary.locator('.question-summary-item')).toHaveCount(4);
+      const summary = page.locator('.question-summary-card');
+      await expect(summary).toBeVisible();
+      await expect(summary.locator('.question-summary-item')).toHaveCount(4);
 
-    const layout = await summary.evaluate((element) => {
-      const rows = [...element.querySelectorAll<HTMLElement>('.question-summary-item')];
-      return {
-        hasOverflow: element.scrollWidth > element.clientWidth,
-        rows: rows.map((row) => {
-          const question = row.querySelector<HTMLElement>('.question-summary-question');
-          const answer = row.querySelector<HTMLElement>('.question-summary-answer');
-          if (!question || !answer) throw new Error('Question summary row is incomplete');
+      const layout = await summary.evaluate((element) => {
+        const rows = [...element.querySelectorAll<HTMLElement>('.question-summary-item')];
+        return {
+          hasOverflow: element.scrollWidth > element.clientWidth,
+          rows: rows.map((row) => {
+            const question = row.querySelector<HTMLElement>('.question-summary-question');
+            const answer = row.querySelector<HTMLElement>('.question-summary-answer');
+            if (!question || !answer) throw new Error('Question summary row is incomplete');
 
-          const questionRect = question.getBoundingClientRect();
-          const answerRect = answer.getBoundingClientRect();
-          const answerStyle = getComputedStyle(answer);
-          return {
-            answerWidth: answerRect.width,
-            answerHeight: answerRect.height,
-            lineHeight: Number.parseFloat(answerStyle.lineHeight),
-            lineClamp: answerStyle.webkitLineClamp,
-            overflow: answerStyle.overflow,
-            clipped: answer.scrollHeight > answer.clientHeight,
-            leftDifference: Math.abs(questionRect.left - answerRect.left),
-            textAlign: answerStyle.textAlign,
-          };
-        }),
-      };
-    });
+            const questionRect = question.getBoundingClientRect();
+            const answerRect = answer.getBoundingClientRect();
+            const answerStyle = getComputedStyle(answer);
+            return {
+              answerWidth: answerRect.width,
+              answerHeight: answerRect.height,
+              lineHeight: Number.parseFloat(answerStyle.lineHeight),
+              lineClamp: answerStyle.webkitLineClamp,
+              overflow: answerStyle.overflow,
+              clipped: answer.scrollHeight > answer.clientHeight,
+              leftDifference: Math.abs(questionRect.left - answerRect.left),
+              textAlign: answerStyle.textAlign,
+            };
+          }),
+        };
+      });
 
-    expect(layout.hasOverflow).toBe(false);
-    expect(layout.rows.every((row) => row.leftDifference < 1)).toBe(true);
-    expect(layout.rows.every((row) => row.textAlign === 'left')).toBe(true);
-    expect(layout.rows.every((row) => row.lineClamp === '3' && row.overflow === 'hidden')).toBe(
-      true
-    );
-    expect(layout.rows.every((row) => row.answerHeight <= row.lineHeight * 3 + 1)).toBe(true);
-    expect(layout.rows[0]?.clipped).toBe(false);
-    expect(layout.rows[2]?.clipped).toBe(true);
-    if (viewport.width === 1000) {
-      expect(layout.rows.every((row) => row.answerWidth > 260)).toBe(true);
+      expect(layout.hasOverflow).toBe(false);
+      expect(layout.rows.every((row) => row.leftDifference < 1)).toBe(true);
+      expect(layout.rows.every((row) => row.textAlign === 'left')).toBe(true);
+      expect(layout.rows.every((row) => row.lineClamp === '3' && row.overflow === 'hidden')).toBe(
+        true
+      );
+      expect(layout.rows.every((row) => row.answerHeight <= row.lineHeight * 3 + 1)).toBe(true);
+      expect(layout.rows[0]?.clipped).toBe(false);
+      expect(layout.rows[2]?.clipped).toBe(true);
+      if (viewport.width === 1000) {
+        expect(layout.rows.every((row) => row.answerWidth > 260)).toBe(true);
+      }
     }
-  }
-});
+  });
+}
