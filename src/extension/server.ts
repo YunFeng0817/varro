@@ -1910,6 +1910,7 @@ export class OpenCodeServer extends EventEmitter {
     const health = await this.readHealthInfo();
     const connectionUrl = this.url;
     const serverPid = this.transport.serverPid ?? this.processManager.managedProcessId;
+    let processId = health.healthy && this._status.state === 'running' ? serverPid : null;
     let connections: ServerConnectionInfo = {
       startedAt: null,
       vscodeClients: null,
@@ -1935,6 +1936,7 @@ export class OpenCodeServer extends EventEmitter {
       (this.transport.serverPid ?? this.processManager.managedProcessId) !== serverPid
     ) {
       connections = { startedAt: null, vscodeClients: null, otherClients: null };
+      processId = null;
     }
 
     return {
@@ -1948,7 +1950,7 @@ export class OpenCodeServer extends EventEmitter {
       autoStart: this.processManager.isAutoStartEnabled,
       managedProcess: this.managedProcess,
       ownership: this.processManager.serverOwnership,
-      processId: this.processManager.managedProcessId,
+      processId,
       cliVersion,
       cliVersionError,
       cliInstalledAt,

@@ -2132,6 +2132,7 @@ describe('OpenCodeServer maintenance', () => {
     const server = new OpenCodeServer(4096, false);
     const api = server as unknown as {
       processManager: OpenCodeProcess;
+      transport: { readonly serverPid: number | null };
       readInstalledCliVersion: () => Promise<string | null>;
       readHealthInfo: () => Promise<{ healthy: boolean; version?: string }>;
       readActiveAgentCount: () => Promise<number>;
@@ -2146,6 +2147,7 @@ describe('OpenCodeServer maintenance', () => {
     const info = await server.readServerInfo();
     expect(readLocalServerConnectionInfo).toHaveBeenCalledWith(4096, 1234);
     expect(info.connections).toEqual(connections);
+    expect(info.processId).toBe(1234);
     expect(info.activeAgentCount).toBe(2);
     expect(info.ownership).toBe('unmanaged');
 
@@ -2154,6 +2156,7 @@ describe('OpenCodeServer maintenance', () => {
       return connections;
     });
     const replaced = await server.readServerInfo();
+    expect(replaced.processId).toBeNull();
     expect(replaced.connections).toEqual({
       startedAt: null,
       vscodeClients: null,
@@ -2163,12 +2166,22 @@ describe('OpenCodeServer maintenance', () => {
     api.readHealthInfo = vi.fn().mockResolvedValue({ healthy: false });
     vi.mocked(readLocalServerConnectionInfo).mockClear();
     const unhealthy = await server.readServerInfo();
+    expect(unhealthy.processId).toBeNull();
     expect(readLocalServerConnectionInfo).not.toHaveBeenCalled();
     expect(unhealthy.connections).toEqual({
       startedAt: null,
       vscodeClients: null,
       otherClients: null,
     });
+
+    // Health identifies the actual server listener, which can differ from the CLI wrapper.
+    api.readHealthInfo = vi.fn().mockResolvedValue({ healthy: true, version: '2.0.21' });
+    vi.spyOn(api.transport, 'serverPid', 'get').mockReturnValue(5678);
+    vi.mocked(readLocalServerConnectionInfo).mockResolvedValueOnce(connections);
+    const nativeServer = await server.readServerInfo();
+    expect(nativeServer.processId).toBe(5678);
+    expect(readLocalServerConnectionInfo).toHaveBeenLastCalledWith(4096, 5678);
+    expect(nativeServer.ownership).toBe('unmanaged');
   });
 
   it.each([

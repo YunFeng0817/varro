@@ -12,6 +12,7 @@ import { OpenCodeTransport } from './open-code-transport';
 import { diagnosticTimeline } from './diagnostics';
 import { findListeningPids, inspectLocalServerAccount } from './process-inspection';
 import { getVarroStateDirectory } from './varro-state-paths';
+import { completeTestCleanup, IsolatedProcessTree } from './isolated-process.test-support';
 
 const editor = vi.hoisted(() => ({ directory: '' }));
 const logs = vi.hoisted(() => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }));
@@ -114,7 +115,10 @@ describe.skipIf(!process.env.VARRO_OPENCODE_TEST_BINARY)('released managed start
       let server = new OpenCodeServer(address.port, true, command, false, leasePath);
       let attached: OpenCodeServer | undefined;
       let replacement: ChildProcess | undefined;
+      let replacementTree: IsolatedProcessTree | undefined;
       let unownedLaunch: ChildProcess | undefined;
+      let unownedTree: IsolatedProcessTree | undefined;
+      const launchedTrees: IsolatedProcessTree[] = [];
       let unownedListener: number | undefined;
       const desktopBinary = process.env.VARRO_OPENCODE_DESKTOP_TEST_BINARY || binary;
       let desktopStarted = false;
@@ -127,16 +131,18 @@ describe.skipIf(!process.env.VARRO_OPENCODE_TEST_BINARY)('released managed start
             .mockResolvedValue(false)
         : undefined;
       const launchServer = OpenCodeProcess.prototype.launchServer;
-      const launchObservation = credentialLaunch
-        ? vi.spyOn(OpenCodeProcess.prototype, 'launchServer').mockImplementation(function (
-            this: OpenCodeProcess,
-            options
-          ) {
-            const child = launchServer.call(this, options);
+      const launchObservation = vi
+        .spyOn(OpenCodeProcess.prototype, 'launchServer')
+        .mockImplementation(function (this: OpenCodeProcess, options) {
+          const child = launchServer.call(this, options);
+          const tree = new IsolatedProcessTree(child);
+          launchedTrees.push(tree);
+          if (credentialLaunch) {
             unownedLaunch = child;
-            return child;
-          })
-        : undefined;
+            unownedTree = tree;
+          }
+          return child;
+        });
       let phase = 'initial startup';
       const probes: Array<{
         phase: string;
@@ -213,7 +219,10 @@ describe.skipIf(!process.env.VARRO_OPENCODE_TEST_BINARY)('released managed start
         const lease = asRecord(JSON.parse(initialRecord));
         const initialListeners = await findListeningPids(address.port);
         expect(initialListeners).toHaveLength(1);
-        if (credentialLaunch) unownedListener = initialListeners[0];
+        await launchedTrees.at(-1)?.captureListener(address.port);
+        if (credentialLaunch) {
+          unownedListener = initialListeners[0];
+        }
         expect(lease?.password).toBeTruthy();
         const anonymous = await fetch(
           `${url}${info.health.version?.startsWith('2.') ? '/api/session?limit=1' : '/session'}`
@@ -364,8 +373,10 @@ describe.skipIf(!process.env.VARRO_OPENCODE_TEST_BINARY)('released managed start
                 cwd: editor.directory,
                 env: { ...process.env, OPENCODE_SERVER_PASSWORD: String(lease?.password) },
                 stdio: 'ignore',
+                detached: process.platform !== 'win32',
               }
             );
+            replacementTree = new IsolatedProcessTree(replacement);
             const deadline = Date.now() + 10000;
             let ready = false;
             while (!ready && Date.now() < deadline) {
@@ -382,6 +393,7 @@ describe.skipIf(!process.env.VARRO_OPENCODE_TEST_BINARY)('released managed start
               if (!ready) await new Promise<void>((done) => setTimeout(done, 50));
             }
             expect(ready).toBe(true);
+            await replacementTree.captureListener(address.port);
           } else await server.disconnect();
           if (mode === 'marker-reload') await rm(leasePath);
           const reconnects: Array<{
@@ -466,10 +478,7 @@ describe.skipIf(!process.env.VARRO_OPENCODE_TEST_BINARY)('released managed start
           await server.dispose();
           if (credentialLaunch && unownedListener && unownedLaunch) {
             unownedLaunch.removeAllListeners('exit');
-            const stopped = new Promise<void>((done) => unownedLaunch!.once('exit', () => done()));
-            process.kill(unownedListener, 'SIGKILL');
-            if (unownedLaunch.pid !== unownedListener) unownedLaunch.kill('SIGKILL');
-            await stopped;
+            await unownedTree?.stop();
             unownedListener = undefined;
             unownedLaunch = undefined;
           }
@@ -503,7 +512,9 @@ describe.skipIf(!process.env.VARRO_OPENCODE_TEST_BINARY)('released managed start
             cwd: editor.directory,
             env: { ...process.env, OPENCODE_SERVER_PASSWORD: password },
             stdio: 'ignore',
+            detached: process.platform !== 'win32',
           });
+          replacementTree = new IsolatedProcessTree(replacement);
           const deadline = Date.now() + 10000;
           const healthPath = info.health.version === '2.0.5' ? '/api/status' : '/api/info';
           let ready = false;
@@ -522,6 +533,7 @@ describe.skipIf(!process.env.VARRO_OPENCODE_TEST_BINARY)('released managed start
             await new Promise<void>((done) => setTimeout(done, 100));
           }
           expect(ready).toBe(true);
+          await replacementTree.captureListener(replacementPort);
           attached = new OpenCodeServer(
             'auto',
             true,
@@ -614,35 +626,41 @@ describe.skipIf(!process.env.VARRO_OPENCODE_TEST_BINARY)('released managed start
           cause: error,
         });
       } finally {
-        fetchObservation.mockRestore();
-        await writeFile(join(root, 'connection-probes.json'), JSON.stringify(probes, null, 2));
-        healthObservation.mockRestore();
-        await attached?.dispose();
-        await server.dispose();
-        if (desktopStarted) {
-          const stopped = spawnSync(desktopBinary, ['service', 'stop'], {
-            cwd: editor.directory,
-            encoding: 'utf8',
-            timeout: 15000,
-          });
-          expect(stopped.status, stopped.stderr).toBe(0);
-        }
-        ownershipFailure?.mockRestore();
-        launchObservation?.mockRestore();
-        if (unownedListener) {
-          // The test owns this isolated launch even though the simulated editor
-          // cannot prove lifecycle ownership. Teardown never targets production.
-          unownedLaunch?.removeAllListeners('exit');
-          process.kill(unownedListener, 'SIGKILL');
-          if (unownedLaunch?.pid !== unownedListener) unownedLaunch?.kill('SIGKILL');
-        }
-        if (replacement && replacement.exitCode === null && replacement.signalCode === null) {
-          const exited = new Promise<void>((done) => replacement!.once('exit', () => done()));
-          replacement.kill();
-          await exited;
-        }
-        vi.unstubAllEnvs();
-        await writeFile(join(root, 'startup-diagnostics.md'), diagnosticTimeline.export(''));
+        await completeTestCleanup([
+          () => {
+            fetchObservation.mockRestore();
+            healthObservation.mockRestore();
+          },
+          () => attached?.dispose(),
+          () => server.dispose(),
+          () => {
+            if (!desktopStarted) return;
+            const stopped = spawnSync(desktopBinary, ['service', 'stop'], {
+              cwd: editor.directory,
+              encoding: 'utf8',
+              timeout: 15000,
+            });
+            expect(stopped.status, stopped.stderr).toBe(0);
+          },
+          () => {
+            ownershipFailure?.mockRestore();
+            launchObservation?.mockRestore();
+          },
+          async () => {
+            // The test owns this isolated launch even though the simulated editor
+            // cannot prove lifecycle ownership. Teardown never targets production.
+            unownedLaunch?.removeAllListeners('exit');
+            await unownedTree?.stop();
+          },
+          () => replacementTree?.stop(),
+          // Simulated reload/disconnect relinquishes editor ownership, not fixture ownership.
+          ...launchedTrees.map((tree) => () => tree.stop()),
+          () => {
+            vi.unstubAllEnvs();
+          },
+          () => writeFile(join(root, 'connection-probes.json'), JSON.stringify(probes, null, 2)),
+          () => writeFile(join(root, 'startup-diagnostics.md'), diagnosticTimeline.export('')),
+        ]);
       }
     }
   );
@@ -796,23 +814,28 @@ describe.skipIf(!process.env.VARRO_OPENCODE_TEST_BINARY)('released multi-window 
           }
         );
       } finally {
-        await writeFile(join(root, 'timeline.json'), JSON.stringify(timeline, null, 2));
-        await writeFile(join(root, 'startup-diagnostics.md'), diagnosticTimeline.export(''));
-        await writeFile(
-          join(root, 'startup-log.json'),
-          JSON.stringify(
-            {
-              info: logs.info.mock.calls,
-              warn: logs.warn.mock.calls,
-              error: logs.error.mock.calls,
-            },
-            null,
-            2
-          )
-        );
-        await follower.dispose();
-        await owner.dispose();
-        vi.unstubAllEnvs();
+        await completeTestCleanup([
+          () => follower.dispose(),
+          () => owner.dispose(),
+          () => {
+            vi.unstubAllEnvs();
+          },
+          () => writeFile(join(root, 'timeline.json'), JSON.stringify(timeline, null, 2)),
+          () => writeFile(join(root, 'startup-diagnostics.md'), diagnosticTimeline.export('')),
+          () =>
+            writeFile(
+              join(root, 'startup-log.json'),
+              JSON.stringify(
+                {
+                  info: logs.info.mock.calls,
+                  warn: logs.warn.mock.calls,
+                  error: logs.error.mock.calls,
+                },
+                null,
+                2
+              )
+            ),
+        ]);
       }
     }
   );

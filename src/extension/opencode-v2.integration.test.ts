@@ -22,6 +22,7 @@ import { logger } from './logger';
 import { readLocalSessionSummary } from './local-session-summary';
 import { sessionSummary } from './session-summary';
 import { formatSkillAttachment, parseSkillAttachment } from '../shared/skill-reference';
+import { completeTestCleanup, IsolatedProcessTree } from './isolated-process.test-support';
 
 const exportEditor = vi.hoisted(() => ({
   openTextDocument: vi.fn(async (options: { content: string; language: string }) => options),
@@ -42,6 +43,7 @@ const binary = process.env.VARRO_OPENCODE_TEST_BINARY;
 
 describe.skipIf(!binary)('released OpenCode adapter contract', () => {
   let child: ChildProcess;
+  let childTree: IsolatedProcessTree | undefined;
   let modelServer: Server;
   let transport: OpenCodeTransport;
   let root: string;
@@ -249,7 +251,9 @@ describe.skipIf(!binary)('released OpenCode adapter contract', () => {
       cwd: join(root, 'workspace'),
       env,
       stdio: ['ignore', 'pipe', 'pipe'],
+      detached: process.platform !== 'win32',
     });
+    childTree = new IsolatedProcessTree(child);
     const collect = (chunk: Buffer) => {
       logs += output.write(chunk);
       url = logs.match(/server listening on (http:\/\/\S+)/)?.[1] ?? '';
@@ -276,6 +280,7 @@ describe.skipIf(!binary)('released OpenCode adapter contract', () => {
     await vi.waitFor(async () => expect((await transport.readHealthInfo()).healthy).toBe(true), {
       timeout: 20000,
     });
+    await childTree.captureListener(Number(new URL(url).port));
     if (process.env.VARRO_OPENCODE_TEST_VERSION)
       expect((await transport.readHealthInfo()).version).toBe(
         process.env.VARRO_OPENCODE_TEST_VERSION
@@ -285,15 +290,21 @@ describe.skipIf(!binary)('released OpenCode adapter contract', () => {
   }, 60000);
 
   afterAll(async () => {
-    transport?.stopEventStream();
-    transport?.abortRequests();
-    child?.kill('SIGTERM');
-    if (child) await Promise.race([new Promise((done) => child.once('exit', done)), delay(3000)]);
-    if (child && child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
-    modelServer?.closeAllConnections();
-    for (const socket of silentSockets) socket.destroy();
-    await new Promise<void>((done) => (modelServer ? modelServer.close(() => done()) : done()));
-    if (root) await writeFile(join(root, 'events.json'), JSON.stringify(events, null, 2));
+    await completeTestCleanup([
+      () => {
+        transport?.stopEventStream();
+        transport?.abortRequests();
+      },
+      () => childTree?.stop(),
+      async () => {
+        modelServer?.closeAllConnections();
+        for (const socket of silentSockets) socket.destroy();
+        await new Promise<void>((done) => (modelServer ? modelServer.close(() => done()) : done()));
+      },
+      async () => {
+        if (root) await writeFile(join(root, 'events.json'), JSON.stringify(events, null, 2));
+      },
+    ]);
   });
 
   it('bounds silent provider WebSockets after reloading an old runtime timeout policy', async (context) => {

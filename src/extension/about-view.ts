@@ -11,6 +11,7 @@ export type AboutViewData = {
   binary: string;
   serverVersion: string;
   serverUrl: string;
+  serverProcessId: string;
   ownership: string;
   serverStatus: string;
   healthy: boolean;
@@ -186,6 +187,7 @@ export function renderAboutHtml(data: AboutViewData, cspSource: string): string 
         <div class="card-heading"><h2>OpenCode server</h2><span class="card-version" data-about-field="serverVersion">${escapeHtml(data.serverVersion)}</span></div>
         <dl>
           <dt>Endpoint</dt><dd><code data-about-field="serverUrl">${escapeHtml(data.serverUrl)}</code></dd>
+          <dt>PID</dt><dd><code data-about-field="serverProcessId">${escapeHtml(data.serverProcessId)}</code></dd>
           <dt>Ownership</dt><dd data-about-field="ownership">${escapeHtml(data.ownership)}</dd>
           <dt>Started on</dt><dd data-about-field="serverStartedOn">${escapeHtml(data.serverStartedOn)}</dd>
           <dt>Active sessions</dt><dd data-about-field="activeAgents">${escapeHtml(data.activeAgents)}</dd>

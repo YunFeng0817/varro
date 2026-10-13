@@ -1,7 +1,7 @@
-import { spawnSync } from 'node:child_process';
 import crossSpawn from 'cross-spawn';
 import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
+import { AdapterProcessCleanup } from './process-cleanup.mjs';
 
 const root = resolve(import.meta.dirname, '../..');
 const manifest = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'));
@@ -17,7 +17,15 @@ const directory = join(root, 'artifacts', 'opencode-adapters');
 await mkdir(directory, { recursive: true });
 const run = await mkdtemp(join(directory, 'run-'));
 const results = [];
+const cancellation = new AbortController();
+for (const signal of ['SIGINT', 'SIGTERM']) {
+  process.once(signal, () => {
+    process.exitCode = signal === 'SIGINT' ? 130 : 143;
+    cancellation.abort(new Error(`Adapter run interrupted by ${signal}`));
+  });
+}
 for (const version of versions) {
+  cancellation.signal.throwIfAborted();
   const packageName = version.startsWith('2.') ? '@opencode/cli' : 'opencode-ai';
   const prefix = join(run, version);
   const install = crossSpawn.sync(
@@ -36,7 +44,8 @@ for (const version of versions) {
     process.platform === 'win32' ? 'opencode.cmd' : 'opencode'
   );
   process.stdout.write(`Testing ${packageName}@${version}\n`);
-  const test = spawnSync(
+  const cleanup = new AdapterProcessCleanup(prefix);
+  const test = await cleanup.run(
     process.execPath,
     [
       'scripts/run-tests.mjs',
@@ -50,6 +59,7 @@ for (const version of versions) {
       // The outer deadline must allow Vitest to finish and report assertions.
       timeout: 900_000,
       maxBuffer: 10 * 1024 * 1024,
+      signal: cancellation.signal,
       env: {
         ...process.env,
         VARRO_OPENCODE_TEST_BINARY: binary,
@@ -57,22 +67,27 @@ for (const version of versions) {
       },
     }
   );
+  const { recoveredProcesses } = test;
+  if (recoveredProcesses.length)
+    test.stderr += `\nTeardown leaked adapter servers, recovered PIDs: ${recoveredProcesses.join(', ')}\n`;
   const log = `${test.stdout ?? ''}${test.stderr ?? ''}${test.error ? `\nAdapter runner error: ${test.error.message}\n` : ''}`;
   await writeFile(join(run, `${version}.log`), log);
   results.push({
     package: packageName,
     version,
-    passed: test.status === 0,
+    passed: test.status === 0 && !test.error && recoveredProcesses.length === 0,
     exitCode: test.status,
     signal: test.signal,
     error: test.error?.message ?? null,
     log: join(run, `${version}.log`),
+    recoveredProcesses,
   });
   process.stdout.write(log);
+  if (cancellation.signal.aborted) break;
 }
 await writeFile(
   join(directory, 'verified.json'),
   JSON.stringify({ date: new Date().toISOString(), versions, results }, null, 2)
 );
-if (results.some((result) => !result.passed)) process.exitCode = 1;
+if (results.some((result) => !result.passed) && !process.exitCode) process.exitCode = 1;
 process.stdout.write(`Adapter compatibility report: ${join(directory, 'verified.json')}\n`);

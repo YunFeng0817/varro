@@ -53,6 +53,9 @@ type RalphMessage = Extract<
 >;
 
 export interface MessageRouterCallbacks {
+  requestHandy(
+    payload: Extract<WebviewMessage, { type: 'handy/request' }>['payload']
+  ): Promise<void>;
   ready(documentId?: number): Promise<void>;
   updateCommandState(
     canAbort: boolean,
@@ -149,6 +152,9 @@ export class MessageRouter {
   async handleMessage(msg: WebviewMessage) {
     try {
       switch (msg.type) {
+        case 'handy/request':
+          await this.callbacks.requestHandy(msg.payload);
+          break;
         case 'ready':
           await this.handleReadyMessage(msg);
           break;

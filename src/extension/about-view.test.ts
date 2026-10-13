@@ -14,6 +14,7 @@ const data: AboutViewData = {
   binary: '/bin/opencode',
   serverVersion: '1.18.4',
   serverUrl: 'http://localhost:4096',
+  serverProcessId: '1234',
   ownership: 'Managed by Varro',
   serverStatus: 'Running',
   healthy: true,
@@ -58,6 +59,13 @@ function openPage(hiddenInitially = false) {
 }
 
 describe('About page', () => {
+  it.each(['1234', 'Unknown'])('shows the server PID as %s', (serverProcessId) => {
+    const root = document.createElement('div');
+    root.innerHTML = renderAboutHtml({ ...data, serverProcessId }, 'vscode-webview-resource:');
+    expect(root.querySelector('[data-about-field="serverProcessId"]')?.textContent).toBe(
+      serverProcessId
+    );
+  });
   it.each(['0', 'Unknown', '1', '2'])(
     'shows the other clients row initially only for a positive count: %s',
     (otherClients) => {
@@ -133,6 +141,7 @@ describe('About page', () => {
       binary: '/new/opencode',
       serverVersion: 'Unknown',
       serverUrl: 'http://localhost:5096',
+      serverProcessId: '5678',
       ownership: 'Unmanaged',
       activeAgents: '2',
       serverStartedOn: 'Oct 2, 2026, 11:00:00 AM',
@@ -151,6 +160,7 @@ describe('About page', () => {
     expect(field('binary')).toBe('/new/opencode');
     expect(field('serverVersion')).toBe('Unknown');
     expect(field('serverUrl')).toBe('http://localhost:5096');
+    expect(field('serverProcessId')).toBe('5678');
     expect(field('ownership')).toBe('Unmanaged');
     expect(field('activeAgents')).toBe('2');
     expect(field('serverStartedOn')).toBe('Oct 2, 2026, 11:00:00 AM');
@@ -172,6 +182,7 @@ describe('About page', () => {
     expect(field('statusLabel')).toBe('System ready');
     expect(field('autoUpdate')).toBe('Enabled');
     expect(field('installedOn')).toBe('Oct 1, 2026, 9:45:12 AM');
+    expect(field('serverProcessId')).toBe('1234');
     for (const element of otherClientsRow) expect(element.hidden).toBe(true);
     update({ ...data, otherClients: 'Unknown' });
     for (const element of otherClientsRow) expect(element.hidden).toBe(true);

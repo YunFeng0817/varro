@@ -16,6 +16,7 @@ test('About copies diagnostics without local paths and waits for export acknowle
       binary: '/Users/alex/opencode',
       serverVersion: '1.18.4',
       serverUrl: 'http://localhost:4096',
+      serverProcessId: '1234',
       ownership: 'Managed by Varro',
       serverStatus: 'Running',
       healthy: true,
@@ -43,6 +44,7 @@ test('About copies diagnostics without local paths and waits for export acknowle
     route.fulfill({ contentType: 'text/html', body: html })
   );
   await page.goto('/about-diagnostics');
+  await expect(page.locator('[data-about-field="serverProcessId"]')).toHaveText('1234');
   await page.getByRole('button', { name: 'Copy diagnostics' }).click();
   await expect(page.locator('body')).toHaveAttribute(
     'data-diagnostic-action',

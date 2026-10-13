@@ -4,6 +4,7 @@ import { isAbsolute, resolve } from 'node:path';
 import * as vscode from 'vscode';
 import type { ContextProvider } from './context-provider';
 import { logger } from './logger';
+import { HandyIntegration } from './handy-integration';
 import type { MessageRouterCallbacks } from './message-router';
 import type { RestProxy } from './rest-proxy';
 import type { SessionExportService } from './session-export-service';
@@ -27,6 +28,9 @@ type ConfigPayload = Extract<
 >;
 
 type OpenPathPayload = Parameters<MessageRouterCallbacks['openPath']>[0];
+
+// All composer views share the command guard. Never run two toggles concurrently.
+const handyIntegration = new HandyIntegration();
 
 export interface SidebarProviderActionDeps {
   contextProvider: ContextProvider;
@@ -137,6 +141,10 @@ export function createSidebarProviderActions(
   };
 
   return {
+    requestHandy: async ({ requestId, action }) => {
+      const payload = await handyIntegration.request(action);
+      deps.post({ type: 'handy/result', payload: { requestId, ...payload } });
+    },
     ready: (documentId) => deps.handleReadyMessage(documentId),
     updateCommandState: (canAbort, canSwitchSessions, model, sessionId) => {
       deps.webviewSession.updateCommandState(canAbort, canSwitchSessions);

@@ -4,6 +4,7 @@ This changelog summarizes the main user-facing improvements in each Varro minor 
 
 ## 0.33.x - October 2026
 
+- Added Handy dictation detection and a composer mic button with toggle and cancellation controls.
 - Added opt-in inline prompt completion with configurable models. Requires OpenCode v2 and a supported API-key connection.
 - Added live background-process logs and non-blocking services with wait and stop controls.
 - Preserved conversations and drafts across folder transfers, with read-only history for unavailable destinations.

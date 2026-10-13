@@ -234,6 +234,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private openCodeCliVersion: string | null = null;
   private openCodeServerVersion: string | null = null;
   private openCodeServerStartedAt: number | null = null;
+  private openCodeServerProcessId: number | null = null;
   private openCodeUptimeTimer: ReturnType<typeof setInterval> | null = null;
   private readonly extensionVersion: string;
   private activeChatModel: ChatModelSelection | null = null;
@@ -3891,6 +3892,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       this.openCodeCliVersion = null;
       this.openCodeServerVersion = null;
       this.openCodeServerStartedAt = null;
+      this.openCodeServerProcessId = null;
       return;
     }
     if (this.openCodeVersionCheck !== 'idle') return;
@@ -3913,6 +3915,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         const startedAt = info.connections?.startedAt;
         this.openCodeServerStartedAt =
           startedAt != null && Number.isFinite(startedAt) && startedAt > 0 ? startedAt : null;
+        const processId = info.processId;
+        this.openCodeServerProcessId =
+          processId != null && Number.isSafeInteger(processId) && processId > 0 ? processId : null;
         const maximumTestedOpenCodeVersion = readMaximumTestedOpenCodeVersion(
           undefined,
           this.openCodeCliVersion?.startsWith('2.') ? 2 : 1
@@ -3952,6 +3957,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       `OpenCode Server: ${this.openCodeServerVersion ?? 'unknown'}`,
       `Server port: ${serverUrl.port || (serverUrl.protocol === 'https:' ? '443' : '80')}`,
     ];
+    if (this.openCodeServerProcessId !== null) {
+      versionLines.push(`Server PID: ${this.openCodeServerProcessId}`);
+    }
     if (this.openCodeServerStartedAt !== null) {
       versionLines.push(`Server uptime: ${formatServerUptime(this.openCodeServerStartedAt)}`);
       if (!this.openCodeUptimeTimer && !this.disposing) {

@@ -6330,6 +6330,16 @@ function installBridge(state: ScenarioState) {
     const webviewMessage = message as WebviewMessage;
 
     switch (webviewMessage.type) {
+      case 'handy/request':
+        dispatchToWebview({
+          type: 'handy/result',
+          payload: {
+            requestId: webviewMessage.payload.requestId,
+            available: false,
+            running: false,
+          },
+        });
+        return;
       case 'api/request': {
         const { id, method, path, body } = webviewMessage.payload;
         state.requests.push({ method, path, body });

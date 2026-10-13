@@ -1,6 +1,7 @@
 /* oxlint-disable anti-slop/no-module-mocking, anti-slop/no-object-parameters, anti-slop/no-unknown-parameters, anti-slop/require-safety-comment-for-type-assertion -- This support module supplies extension-host import fakes and protocol-shaped fixtures shared by sidebar tests. */
 import { beforeEach, vi } from 'vitest';
 import type * as FsPromises from 'fs/promises';
+import type * as ChildProcessModule from 'child_process';
 import type { EditorContext } from '../shared/protocol';
 import type { UriHandler } from 'vscode';
 
@@ -155,7 +156,10 @@ export function getConfigurationValue(key: string) {
 }
 
 vi.mock('vscode', () => mocks.vscode);
-vi.mock('child_process', () => ({ spawn: mocks.spawn, default: { spawn: mocks.spawn } }));
+vi.mock('child_process', async () => {
+  const actual = await vi.importActual<typeof ChildProcessModule>('child_process');
+  return { ...actual, spawn: mocks.spawn, default: { ...actual, spawn: mocks.spawn } };
+});
 vi.mock('cross-spawn', () => ({ default: mocks.spawn, spawn: mocks.spawn }));
 vi.mock('fs/promises', async () => {
   const actual = await vi.importActual<typeof FsPromises>('fs/promises');

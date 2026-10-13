@@ -60,6 +60,20 @@ function createRalphRun() {
 }
 
 describe('webview message validation', () => {
+  it('accepts only bounded Handy requests with fixed actions', () => {
+    for (const action of ['status', 'toggle', 'cancel']) {
+      const message = { type: 'handy/request', payload: { requestId: 'handy-1', action } };
+      expect(parseWebviewMessage(message)).toEqual(message);
+    }
+    for (const payload of [
+      {},
+      { requestId: '', action: 'toggle' },
+      { requestId: 'x'.repeat(129), action: 'toggle' },
+      { requestId: '1', action: '--anything' },
+    ]) {
+      expect(parseWebviewMessage({ type: 'handy/request', payload })).toBeNull();
+    }
+  });
   it('allows only read-only session-scoped background process inspection with valid byte cursors', () => {
     const list = '/session/ses_own/background-process';
     const output = `${list}/shell_1/output`;

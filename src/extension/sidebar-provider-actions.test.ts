@@ -41,6 +41,7 @@ vi.mock('./logger', () => ({ logger: mocks.logger }));
 
 import type { SidebarProviderActionDeps } from './sidebar-provider-actions';
 import { createSidebarProviderActions } from './sidebar-provider-actions';
+import { HandyIntegration } from './handy-integration';
 
 type SessionDiffProvider = Pick<SidebarProviderActionDeps['sessionDiffProvider'], 'open'>;
 type ToolOutputProvider = Pick<SidebarProviderActionDeps['toolOutputProvider'], 'open'>;
@@ -288,6 +289,22 @@ const nestedSessionActionCases: Array<{
 ];
 
 describe('createSidebarProviderActions', () => {
+  it('posts correlated Handy status and command results to the requesting view', async () => {
+    const request = vi
+      .spyOn(HandyIntegration.prototype, 'request')
+      .mockResolvedValue({ available: true, running: true });
+    try {
+      const { actions, deps } = createActionFixture();
+      await actions.requestHandy({ requestId: 'handy-1', action: 'toggle' });
+      expect(request).toHaveBeenCalledWith('toggle');
+      expect(deps.post).toHaveBeenCalledWith({
+        type: 'handy/result',
+        payload: { requestId: 'handy-1', available: true, running: true },
+      });
+    } finally {
+      request.mockRestore();
+    }
+  });
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.vscode.workspace.getConfiguration.mockReturnValue(mocks.config);

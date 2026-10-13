@@ -114,6 +114,7 @@ interface RalphContentBudget {
  * tests can assert their own tables stay exhaustive as the protocol grows.
  */
 export const WEBVIEW_MESSAGE_TYPES = {
+  'handy/request': true,
   'context/request': true,
   'workspace/select': true,
   'commands/state': true,
@@ -190,6 +191,18 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
   if (!type || !hasOwn(WEBVIEW_MESSAGE_TYPES, type)) return null;
 
   switch (type) {
+    case 'handy/request': {
+      const payload = asRecord(message?.payload);
+      const requestId = getString(payload?.requestId);
+      const action = payload?.action;
+      if (
+        !requestId ||
+        requestId.length > 128 ||
+        (action !== 'status' && action !== 'toggle' && action !== 'cancel')
+      )
+        return null;
+      return { type, payload: { requestId, action } };
+    }
     case 'context/request':
     case 'providers/refresh':
     case 'providers/auth-changed':

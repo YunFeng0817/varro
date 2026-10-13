@@ -109,6 +109,12 @@ With OpenCode V2, `/pause` interrupts the current session run and pauses its que
 
 Paused time is excluded from worked-duration summaries and usage statistics. Resuming starts a new work period, so returning hours later does not inflate the previous run's duration.
 
+### Handy dictation
+
+When [Handy](https://github.com/cjpais/Handy) is installed, a microphone button appears immediately before Attach. Start Handy and configure its model, microphone, and accessibility permissions. Click the mic to toggle dictation; click again to stop and let Handy paste into the focused composer. Right-click the button to cancel. Disable Handy's Auto Submit option if you want to review the text before sending.
+
+The speaking icon tracks toggles made in Varro, not recording changes made through Handy's global shortcut. Detection uses standard installation locations and PATH; set `varro.dictation.handyPath` to an absolute executable path for other installations. Requires Handy's CLI remote-control flags and a local desktop extension host. Remote SSH, WSL, and containers are unsupported.
+
 ## Permissions
 
 Permission requests provide `Reject`, `Once`, and `Always` actions. Each session has one of three modes:

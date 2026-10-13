@@ -75,6 +75,38 @@ import { upsertMessageInfo } from '../lib/state-messages';
 import * as imageCompression from '../lib/image-compression';
 import * as imageLoading from '../lib/image-loading';
 
+describe('composer dictation integration', () => {
+  it('places the mic immediately before Attach and focuses the composer on activation', async () => {
+    const sent: WebviewMessage[] = [];
+    defaultBridgeSend = (message) => {
+      sent.push(message);
+      if (message.type !== 'handy/request') return;
+      queueMicrotask(() =>
+        window.dispatchEvent(
+          new MessageEvent('message', {
+            data: {
+              type: 'handy/result',
+              payload: { requestId: message.payload.requestId, available: true, running: true },
+            },
+          })
+        )
+      );
+    };
+    fixture<{ __sendToExtension?: (message: WebviewMessage) => void }>(window).__sendToExtension =
+      defaultBridgeSend;
+    cleanup = render(() => ChatInput(), container!);
+    await Promise.resolve();
+    const mic = container?.querySelector<HTMLButtonElement>('.toolbar-dictation-button');
+    const attach = container?.querySelector<HTMLButtonElement>('.toolbar-attach-button');
+    expect(mic).toBeInstanceOf(HTMLButtonElement);
+    expect(mic?.closest('.toolbar-right')?.querySelectorAll('button')[0]).toBe(mic);
+    expect(mic?.closest('.toolbar-right')?.querySelectorAll('button')[1]).toBe(attach);
+    mic?.click();
+    expect(document.activeElement).toBe(container?.querySelector('.rich-composer'));
+    expect(sent.at(-1)).toMatchObject({ type: 'handy/request', payload: { action: 'toggle' } });
+  });
+});
+
 interface SessionEventProperties extends UnknownRecord {
   sessionID: string;
   status?: { type: 'idle' };

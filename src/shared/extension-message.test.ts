@@ -2,6 +2,24 @@ import { describe, expect, it } from 'vitest';
 import { isEditorContext, parseExtensionMessage } from './extension-message';
 
 describe('parseExtensionMessage', () => {
+  it('validates Handy results', () => {
+    const message = {
+      type: 'handy/result',
+      payload: { requestId: '1', available: true, running: true },
+    };
+    expect(parseExtensionMessage(message)).toEqual(message);
+    expect(
+      parseExtensionMessage({ ...message, payload: { ...message.payload, error: 'Start Handy' } })
+    ).toEqual({ ...message, payload: { ...message.payload, error: 'Start Handy' } });
+    for (const payload of [
+      {},
+      { ...message.payload, running: 'true' },
+      { ...message.payload, error: 1 },
+      { ...message.payload, requestId: '' },
+    ]) {
+      expect(parseExtensionMessage({ ...message, payload })).toBeNull();
+    }
+  });
   it('validates session transfer notices without accepting malformed destinations', () => {
     const message = {
       type: 'session/transferred',

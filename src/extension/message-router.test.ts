@@ -18,6 +18,7 @@ import { VALID_WEBVIEW_MESSAGES } from './util/webview-message.test-support';
 
 function createCallbacks(): MessageRouterCallbacks {
   return {
+    requestHandy: vi.fn(() => Promise.resolve()),
     ready: vi.fn(() => Promise.resolve()),
     updateCommandState: vi.fn(),
     acknowledgeSessionSeen: vi.fn(),
@@ -479,6 +480,9 @@ type DispatchExpectation = {
  * that no other callback fired.
  */
 const DISPATCH_EXPECTATIONS = {
+  'handy/request': [
+    { callback: 'requestHandy', args: [{ requestId: 'handy-1', action: 'toggle' }] },
+  ],
   ready: [{ callback: 'ready', args: [undefined] }],
   'context/request': [{ callback: 'requestContext', args: [] }],
   'providers/refresh': [{ callback: 'refreshProviders', args: [] }],

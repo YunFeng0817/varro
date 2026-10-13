@@ -19,6 +19,48 @@ function getVersionItem() {
 }
 
 describe('SidebarProvider server uptime', () => {
+  it.each([false, true])(
+    'shows the connected server PID when attach-only is %s',
+    async (isAttachOnly) => {
+      const version = readMaximumTestedOpenCodeVersion(undefined, 2);
+      const server = createServer({
+        isAttachOnly,
+        readServerInfo: vi.fn(async () => ({
+          processId: 79285,
+          health: { healthy: true, version },
+        })),
+      });
+      const { provider } = await createSidebarProviderInstance({ server });
+      try {
+        const statusHandler = server.on.mock.calls.findLast(([event]) => event === 'status')?.[1];
+        statusHandler?.({ state: 'running', url: server.url });
+        await vi.waitFor(() =>
+          expect(getVersionItem().tooltip).toContain('Server port: 4096\nServer PID: 79285')
+        );
+      } finally {
+        await provider.dispose();
+      }
+    }
+  );
+
+  it.each([undefined, null, 0, -1, 1.5, NaN, Infinity])(
+    'omits an unknown or invalid server PID: %s',
+    async (processId) => {
+      const version = readMaximumTestedOpenCodeVersion(undefined, 2);
+      const server = createServer({
+        readServerInfo: vi.fn(async () => ({ processId, health: { healthy: true, version } })),
+      });
+      const { provider } = await createSidebarProviderInstance({ server });
+      try {
+        const statusHandler = server.on.mock.calls.findLast(([event]) => event === 'status')?.[1];
+        statusHandler?.({ state: 'running', url: server.url });
+        await vi.waitFor(() => expect(getVersionItem().text).toBe(`$(robot) OpenCode ${version}`));
+        expect(getVersionItem().tooltip).not.toContain('Server PID:');
+      } finally {
+        await provider.dispose();
+      }
+    }
+  );
   it.each([
     [0, 'less than a min'],
     [59_999, 'less than a min'],
@@ -86,11 +128,13 @@ describe('SidebarProvider server uptime', () => {
     vi.setSystemTime(NOW);
     const version = readMaximumTestedOpenCodeVersion(undefined, 2);
     let startedAt = NOW - HOUR - 59 * MINUTE;
+    let processId = 1234;
     const server = createServer({
       readServerInfo: vi.fn(async () => ({
         cliVersion: version,
         health: { healthy: true, version },
         connections: { startedAt },
+        processId,
       })),
     });
     const { provider } = await createSidebarProviderInstance({ server });
@@ -99,6 +143,7 @@ describe('SidebarProvider server uptime', () => {
       const item = getVersionItem();
       statusHandler?.({ state: 'running', url: server.url });
       await vi.waitFor(() => expect(item.tooltip).toContain('Server uptime: 1 hr 59 min'));
+      expect(item.tooltip).toContain('Server PID: 1234');
 
       await vi.advanceTimersByTimeAsync(MINUTE);
       expect(item.tooltip).toContain('Server uptime: 2 hrs');
@@ -106,12 +151,16 @@ describe('SidebarProvider server uptime', () => {
 
       statusHandler?.({ state: 'stopped' });
       expect(item.tooltip).not.toContain('Server uptime:');
+      expect(item.tooltip).not.toContain('Server PID:');
       await vi.advanceTimersByTimeAsync(MINUTE);
       expect(item.tooltip).not.toContain('Server uptime:');
 
       startedAt = Date.now();
+      processId = 5678;
       statusHandler?.({ state: 'running', url: server.url });
       await vi.waitFor(() => expect(item.tooltip).toContain('Server uptime: less than a min'));
+      expect(item.tooltip).toContain('Server PID: 5678');
+      expect(item.tooltip).not.toContain('Server PID: 1234');
       await vi.advanceTimersByTimeAsync(MINUTE);
       expect(item.tooltip).toContain('Server uptime: 1 min');
       expect(server.readServerInfo).toHaveBeenCalledTimes(2);

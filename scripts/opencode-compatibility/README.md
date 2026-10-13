@@ -36,6 +36,8 @@ This separate matrix installs the declared v1 floor, tested v1 SDK version, and 
 
 CLI installations and the generated verification report live under `artifacts/opencode-adapters/`. Each server gets a distinct database, configuration, state directory, and fixture repository under `artifacts/ai-test-data/`. The suite does not use production sessions. Native v2 form/permission cases are explicitly skipped for v1.
 
+Fixtures retain cleanup ownership across simulated editor reloads and stop the actual listener and launch tree, not only the CLI wrapper. Cleanup attempts every resource even when disposal or evidence writes fail. Each adapter run also checks its unique CLI installation for surviving servers and tool descendants after normal completion, failure, timeout, output-limit failure, or SIGINT/SIGTERM interruption. The guard rechecks process birth and command before signalling, escalates when needed, and verifies no scoped server remains. Recovered PIDs are recorded as `recoveredProcesses` in `verified.json`; any recovered process or cleanup error fails that version even when its assertions passed. Cleanup never targets the normal OpenCode installation or another run's CLI directory.
+
 To test an existing binary directly:
 
 ```sh
