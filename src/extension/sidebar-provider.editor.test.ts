@@ -2234,7 +2234,14 @@ describe('SidebarProvider editor panels', () => {
     await provider.deserializeWebviewPanel(duplicate.panel as never, state);
 
     expect(first.panel.title).toBe('Varro: Session');
-    expect(first.panel.iconPath).toEqual({ id: 'chat-sparkle' });
+    expect(getVscodeMock().Uri.joinPath).toHaveBeenCalledWith(
+      expect.anything(),
+      'assets',
+      'icon.png'
+    );
+    expect(first.panel.iconPath).toEqual(
+      expect.objectContaining({ toString: expect.any(Function) })
+    );
     expect(first.panel.reveal).toHaveBeenCalledOnce();
     expect(duplicate.panel.dispose).toHaveBeenCalledOnce();
   });

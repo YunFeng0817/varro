@@ -89,20 +89,22 @@ test(
     const tool = spawn(process.execPath, ['-e', 'process.on("SIGTERM", () => {}); console.log("ready"); setInterval(() => {}, 1000)'], {
       detached: true, stdio: ['ignore', 'pipe', 'ignore'],
     });
-    tool.stdout.once('data', () => console.log(tool.pid));
+    tool.stdout.once('data', () => process.send({ type: 'tool-ready', pid: tool.pid }));
     setInterval(() => {}, 1000);
   `,
         '--',
         'serve',
       ],
-      { stdio: ['ignore', 'pipe', 'inherit'] }
+      { stdio: ['ignore', 'ignore', 'inherit', 'ipc'] }
     );
     context.after(async () => {
       await cleanup.cleanup();
       server.kill('SIGKILL');
     });
-    const [chunk] = await once(server.stdout, 'data');
-    const descendant = Number(String(chunk).trim());
+    const [message] = await once(server, 'message');
+    assert.equal(message.type, 'tool-ready');
+    const descendant = message.pid;
+    assert.ok(Number.isSafeInteger(descendant) && descendant > 0, 'Expected a valid tool PID');
     const recovered = await cleanup.cleanup();
     assert.deepEqual(
       recovered.toSorted((a, b) => a - b),

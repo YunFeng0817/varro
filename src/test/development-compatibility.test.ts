@@ -4,6 +4,21 @@ import { describe, expect, it } from 'vitest';
 import packageJson from '../../package.json';
 
 describe('development compatibility', () => {
+  it('targets VS Code 1.107 APIs and documents the matching editor floor', async () => {
+    const [readme, developmentGuide] = await Promise.all([
+      readFile(resolve('README.md'), 'utf8'),
+      readFile(resolve('docs/development.md'), 'utf8'),
+    ]);
+
+    expect(packageJson.engines.vscode).toBe('^1.107.0');
+    expect(packageJson.devDependencies['@types/vscode']).toBe('1.107.0');
+    expect(readme).toContain('1.107 or newer');
+    expect(developmentGuide).toContain('1.107 or newer');
+    expect(packageJson.contributes.views['varro-primary']).toEqual([
+      expect.objectContaining({ id: 'varro.chat', type: 'webview' }),
+    ]);
+  });
+
   it('provides standards-compatible CSS identifier escaping in tests', () => {
     expect(CSS.escape('a b#c')).toBe('a\\ b\\#c');
     expect(CSS.escape('0a')).toBe('\\30 a');

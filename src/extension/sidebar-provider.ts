@@ -1695,7 +1695,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     }
 
     panel.title = this.editorTitle(route);
-    panel.iconPath = new vscode.ThemeIcon('chat-sparkle');
+    panel.iconPath = vscode.Uri.joinPath(this.extensionUri, 'assets', 'icon.png');
     const bridge = new SidebarProviderBridge(this.extensionUri);
     const endpoint = this.createEndpoint(
       bridge,

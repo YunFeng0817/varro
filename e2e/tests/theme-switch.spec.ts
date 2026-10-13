@@ -29,6 +29,29 @@ for (const themeId of ['Dark+', 'Default Dark+', 'Dark Modern', 'Visual Studio D
 }
 
 for (const theme of ['dark', 'light']) {
+  test(`${theme} composer uses the chat foreground when input foreground differs`, async ({
+    page,
+  }) => {
+    await page.goto(`/e2e/harness/index.html?scenario=blank&theme=${theme}`);
+    const composer = page.locator('.rich-composer').first();
+    await expect(composer).toBeVisible();
+    await page.evaluate(() => {
+      document.body.style.setProperty('--color-vscode-input-fg', 'rgb(255, 0, 255)');
+    });
+    await composer.fill('Readable prompt text');
+    const foreground = await composer.evaluate((element) => {
+      const probe = document.createElement('span');
+      probe.style.color = 'var(--color-vscode-fg)';
+      element.append(probe);
+      const color = getComputedStyle(probe).color;
+      probe.remove();
+      return color;
+    });
+
+    expect(foreground).not.toBe('rgb(255, 0, 255)');
+    await expect(composer).toHaveCSS('color', foreground);
+  });
+
   test(`${theme} completion selection keeps readable text`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width: 500, height: 800 });
     await page.goto(`/e2e/harness/index.html?scenario=slash-commands&theme=${theme}`);

@@ -25,7 +25,7 @@ update does not block later deletion. Cancelled updates check their signal befor
 reading, and before replacing the annotation file, so cancellation while queued or preparing a write
 does not commit that update.
 
-`npm run test:compatibility:adapters` installs published binaries into isolated directories and tests the production adapters. The current tested versions are v1 `1.19.0` and v2 `2.0.27`, alongside the v1 `1.16.0` and v2 `2.0.5` support floors. Release-specific results are recorded below. The checks cover managed startup, credential recovery in a second window, restart, multi-window recovery after process exit, bootstrap, workspace path encoding, v2 configuration precedence, session updates, deterministic streamed model responses, actual fixture-only tool execution, message pagination, tail editing, helper generation, fork/revert, deletion, and native v2 permissions/forms. The generated report is `artifacts/opencode-adapters/verified.json`.
+`npm run test:compatibility:adapters` installs published binaries into isolated directories and tests the production adapters. The current tested versions are v1 `1.19.0` and v2 `2.0.28`, alongside the v1 `1.16.0` and v2 `2.0.5` support floors. Release-specific results are recorded below. The checks cover managed startup, credential recovery in a second window, restart, multi-window recovery after process exit, bootstrap, workspace path encoding, v2 configuration precedence, session updates, deterministic streamed model responses, actual fixture-only tool execution, message pagination, tail editing, helper generation, fork/revert, deletion, and native v2 permissions/forms. The generated report is `artifacts/opencode-adapters/verified.json`.
 
 Fresh VS Code sandbox windows passed `v2-first-run` and the existing `healthy-first-run` scenario. These editor checks verify activation, ownership, health, and event-stream connection. `test:compatibility:ui` additionally exercises the actual composer, successful replies, pre-turn failures, HTTP 401 handling, recovery through a working provider, and reopening history. Full visual streaming performance remains a separate verification task.
 
@@ -83,6 +83,49 @@ resolve to `literal/directory`. V2 location queries retain their normal URL enco
 The released-server adapter tests cover exact workspace resolution for Japanese text, emoji,
 and literal percent escapes. Unit tests also cover header construction with embedded newlines
 and preservation of Windows separators and casing.
+
+### 2.0.28 compatibility review
+
+Reviewed v2.0.27 to v2.0.28, `03cb9b9946` through `c5aabae288`.
+Consumed HTTP routes, SSE names and envelopes, session/message/inbox shapes,
+permissions/forms, and managed `serve` arguments are unchanged. Client and OpenAPI
+add optional provider compatibility, cache-format, and request-encoding fields.
+Varro preserves provider/model settings and does not need new compatibility types.
+
+Provider changes add Gemini response continuation, fifteen-minute chunk timeouts,
+ChatGPT request compression, provider-level cache compatibility, and fixes for
+Azure startup and v1-format model options. OpenCode's built-in provider now uses
+the inference endpoint. System configuration and macOS managed preferences load
+below user/project defaults, with system policies retaining higher authority.
+These are server-owned behaviors; Varro's project/user config edits remain compatible.
+
+Promise plugin tool failures retain permission declines and question cancellation;
+the edit tool preserves mixed line endings. Credential activation for plugins,
+Windows ARM64 installation, WinGet upgrades, release highlights, Figma skills,
+app unread state and per-project auto-accept, desktop/TUI rendering, and Console
+changes require no Varro adaptation for this bump.
+
+The tested v2 client is `2.0.28`; v1 remains `1.19.0`. Support floors remain v2 `2.0.5`
+and v1 `1.16.0`. The unchanged v1 SDK does not require a new Docker support-range run.
+
+All 937 focused adapter, transcript, inbox, generation, process, transport, state,
+background-work, authentication, and server unit tests passed. Formatting, both
+TypeScript checks, and build passed. `npm run lint` and `npm run lint:check` pass
+with an unrelated `consistent-type-imports` warning at
+`src/webview/components/ChatInput.test.ts:159`. That file was left unchanged.
+Real-editor and visual streaming checks were not run for this dependency-only bump.
+
+The isolated published-server matrix passed all 137 applicable checks, with 27
+family/platform skips and no leaked adapter processes. All five shared compatibility
+tests passed after the matrix finished. Evidence is
+`artifacts/opencode-adapters/verified.json` and `artifacts/opencode-2.0.28-adapters.log`.
+
+| Published server | Passed | Skipped |
+| --- | ---: | ---: |
+| v1.16.0 | 30 | 11 |
+| v1.19.0 | 30 | 11 |
+| v2.0.5 | 38 | 3 |
+| v2.0.28 | 39 | 2 |
 
 ### 2.0.27 compatibility review
 

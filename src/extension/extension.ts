@@ -14,9 +14,10 @@ const CONTEXT_RESCOPE_RETRY_MS = 50;
 const CONTEXT_RESTART_GRACE_MS = 3000;
 const INITIAL_SIDEBAR_REVEAL_KEY = 'layout.initialSidebarReveal.v1';
 const PRIMARY_SIDEBAR_MIGRATION_KEY = 'layout.cursorPrimarySidebar.v1';
+const SECONDARY_SIDEBAR_MIGRATION_KEY = 'layout.standardSecondarySidebar.v1';
 const PRIMARY_SIDEBAR_CONTAINER = 'workbench.view.extension.varro-primary';
 const SECONDARY_SIDEBAR_CONTAINER = 'workbench.view.extension.varro';
-const PRIMARY_SIDEBAR_HOSTS = ['cursor', 'windsurf', 'devin'];
+const PRIMARY_SIDEBAR_HOSTS = ['cursor', 'windsurf', 'devin', 'trae', 'traecn'];
 const SHOW_FILE_DIFFS_CONTEXT = 'varro:showFileDiffs';
 
 function syncShowFileDiffsContext(config: vscode.WorkspaceConfiguration): void {
@@ -52,9 +53,14 @@ function usesPrimarySidebarForExtensions(): boolean {
   );
 }
 
-async function placeViewInPrimarySidebar(context: vscode.ExtensionContext): Promise<void> {
-  if (!usesPrimarySidebarForExtensions()) return;
-  if (context.globalState.get<boolean>(PRIMARY_SIDEBAR_MIGRATION_KEY)) {
+async function placeViewInSidebar(
+  context: vscode.ExtensionContext,
+  destinationId: string
+): Promise<void> {
+  const primary = destinationId === PRIMARY_SIDEBAR_CONTAINER;
+  const migrationKey = primary ? PRIMARY_SIDEBAR_MIGRATION_KEY : SECONDARY_SIDEBAR_MIGRATION_KEY;
+  const sidebarName = primary ? 'Primary Sidebar' : 'Secondary Sidebar';
+  if (!context.globalState || context.globalState.get<boolean>(migrationKey)) {
     return;
   }
 
@@ -62,27 +68,27 @@ async function placeViewInPrimarySidebar(context: vscode.ExtensionContext): Prom
     const commandIds = await vscode.commands.getCommands();
     if (!commandIds.includes('vscode.moveViews')) {
       logger.warn(
-        'The host does not expose the command required to move Varro to the Primary Sidebar'
+        `The host does not expose the command required to move Varro to the ${sidebarName}`
       );
       return;
     }
 
     await vscode.commands.executeCommand('vscode.moveViews', {
       viewIds: [SidebarProvider.viewType],
-      destinationId: PRIMARY_SIDEBAR_CONTAINER,
+      destinationId,
     });
   } catch (err) {
     logger.warn(
-      `Failed to move Varro to the Primary Sidebar: ${err instanceof Error ? err.message : String(err)}`
+      `Failed to move Varro to the ${sidebarName}: ${err instanceof Error ? err.message : String(err)}`
     );
     return;
   }
 
   try {
-    await context.globalState.update(PRIMARY_SIDEBAR_MIGRATION_KEY, true);
+    await context.globalState.update(migrationKey, true);
   } catch (err) {
     logger.warn(
-      `Failed to remember Varro's Primary Sidebar placement: ${err instanceof Error ? err.message : String(err)}`
+      `Failed to remember Varro's ${sidebarName} placement: ${err instanceof Error ? err.message : String(err)}`
     );
   }
 }
@@ -293,6 +299,7 @@ async function activateExtension(context: vscode.ExtensionContext) {
     })
   );
 
+  // Register in primary so restricted forks expose the view, then place normal hosts in secondary.
   const sidebarDestination = usesPrimarySidebarForExtensions()
     ? PRIMARY_SIDEBAR_CONTAINER
     : SECONDARY_SIDEBAR_CONTAINER;
@@ -307,7 +314,7 @@ async function activateExtension(context: vscode.ExtensionContext) {
   // Do not make activation wait for its own first-run reveal or placement.
   void (async () => {
     try {
-      await placeViewInPrimarySidebar(context);
+      await placeViewInSidebar(context, sidebarDestination);
       await revealSidebarOnFirstActivation(context, sidebarDestination);
     } catch (err) {
       logger.warn(

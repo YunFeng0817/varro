@@ -522,6 +522,9 @@ describe('extension activation', () => {
     ['Cursor', 'cursor'],
     ['Windsurf', 'windsurf'],
     ['Devin', 'devin'],
+    ['Trae', 'trae'],
+    ['Trae CN', 'trae-cn'],
+    ['TraeCN', 'traecn'],
   ])('moves the chat view to the primary sidebar once in %s', async (appName, uriScheme) => {
     envMock.appName = appName;
     envMock.uriScheme = uriScheme;
@@ -613,20 +616,33 @@ describe('extension activation', () => {
   it.each([
     ['Visual Studio Code', 'vscode'],
     ['VSCodium', 'vscodium'],
-  ])('keeps the secondary container in %s', async (appName, uriScheme) => {
+  ])('moves the chat view to the secondary sidebar once in %s', async (appName, uriScheme) => {
     envMock.appName = appName;
     envMock.uriScheme = uriScheme;
+    getCommandsMock.mockResolvedValueOnce(['vscode.moveViews']);
+    const globalState = {
+      get: vi.fn((key: string) => key === 'layout.initialSidebarReveal.v1'),
+      update: vi.fn(() => Promise.resolve()),
+    };
     const { activate } = await import('./extension');
 
     await activate({
       extensionUri: {},
       extension: { id: 'koltyakov.varro' },
+      globalState,
       workspaceState: {},
       subscriptions: [],
     } as never);
 
-    expect(getCommandsMock).not.toHaveBeenCalled();
-    expect(executeCommandMock).not.toHaveBeenCalledWith('vscode.moveViews', expect.anything());
+    await vi.waitFor(() => {
+      expect(globalState.update).toHaveBeenCalledWith('layout.standardSecondarySidebar.v1', true);
+    });
+    expect(executeCommandMock).toHaveBeenCalledWith('vscode.moveViews', {
+      viewIds: ['varro.chat'],
+      destinationId: 'workbench.view.extension.varro',
+    });
+    expect(globalState.update).not.toHaveBeenCalledWith('layout.cursorPrimarySidebar.v1', true);
+    expect(executeCommandMock).not.toHaveBeenCalledWith('varro.chat.focus');
     expect(registerCommandsMock).toHaveBeenCalledWith(
       expect.anything(),
       expect.anything(),
@@ -687,7 +703,8 @@ describe('extension activation', () => {
     }
   );
 
-  it('reveals the secondary sidebar once after installation in VS Code', async () => {
+  it('places and reveals the secondary sidebar once after installation in VS Code', async () => {
+    getCommandsMock.mockResolvedValueOnce(['vscode.moveViews']);
     const globalState = {
       get: vi.fn(() => false),
       update: vi.fn(() => Promise.resolve()),
@@ -702,9 +719,16 @@ describe('extension activation', () => {
       subscriptions: [],
     } as never);
 
+    await vi.waitFor(() => {
+      expect(globalState.update).toHaveBeenCalledWith('layout.initialSidebarReveal.v1', true);
+    });
     expect(executeCommandMock).toHaveBeenCalledWith('workbench.view.extension.varro');
     expect(executeCommandMock).toHaveBeenCalledWith('varro.chat.focus');
     expect(executeCommandMock.mock.calls.filter(([command]) => command !== 'setContext')).toEqual([
+      [
+        'vscode.moveViews',
+        { viewIds: ['varro.chat'], destinationId: 'workbench.view.extension.varro' },
+      ],
       ['workbench.view.extension.varro'],
       ['varro.chat.focus'],
     ]);
@@ -743,9 +767,12 @@ describe('extension activation', () => {
     }
   );
 
-  it('does not reveal the sidebar again after the initial activation', async () => {
+  it('preserves saved placement and visibility after secondary migration', async () => {
     const globalState = {
-      get: vi.fn((key: string) => key === 'layout.initialSidebarReveal.v1'),
+      get: vi.fn(
+        (key: string) =>
+          key === 'layout.initialSidebarReveal.v1' || key === 'layout.standardSecondarySidebar.v1'
+      ),
       update: vi.fn(() => Promise.resolve()),
     };
     const { activate } = await import('./extension');
@@ -758,8 +785,11 @@ describe('extension activation', () => {
       subscriptions: [],
     } as never);
 
+    expect(getCommandsMock).not.toHaveBeenCalled();
     expect(executeCommandMock).not.toHaveBeenCalledWith('workbench.view.extension.varro');
+    expect(executeCommandMock).not.toHaveBeenCalledWith('workbench.view.extension.varro-primary');
     expect(executeCommandMock).not.toHaveBeenCalledWith('varro.chat.focus');
+    expect(executeCommandMock).not.toHaveBeenCalledWith('vscode.moveViews', expect.anything());
     expect(globalState.update).not.toHaveBeenCalled();
   });
 
@@ -1248,7 +1278,7 @@ describe('extension manifest', () => {
   });
 
   it('activates on Varro use instead of every VS Code startup', () => {
-    expect(packageJson.contributes.views.varro).toContainEqual(
+    expect(packageJson.contributes.views['varro-primary']).toContainEqual(
       expect.objectContaining({ id: 'varro.chat' })
     );
     expect(packageJson.activationEvents).not.toContain('onView:varro.chat');

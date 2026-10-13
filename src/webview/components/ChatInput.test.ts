@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render } from 'solid-js/web';
 import { createRoot } from 'solid-js';
+import type * as SolidModule from 'solid-js';
 import { reconcile } from 'solid-js/store';
 import packageJson from '../../../package.json';
 import type * as UseOpenCodeModule from '../hooks/useOpenCode';
@@ -156,7 +157,7 @@ const {
 /* oxlint-disable anti-slop/no-module-mocking -- These tests exercise ChatInput's module-level hook and client integration. */
 const immediateComposerEffects = vi.hoisted(() => ({ enabled: false }));
 vi.mock('solid-js', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('solid-js')>();
+  const actual = await importOriginal<typeof SolidModule>();
   return {
     ...actual,
     // SAFETY: Both Solid effect APIs accept the same forwarded arguments; this preserves their overloads.
