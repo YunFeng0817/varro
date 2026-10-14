@@ -3,6 +3,7 @@ import type * as vscode from 'vscode';
 import type * as nodeFsPromises from 'node:fs/promises';
 import { Readable } from 'node:stream';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import packageJson from '../../package.json';
 
 import type { PermissionRule } from '../shared/opencode-types';
 
@@ -131,7 +132,7 @@ type RequestOptions = {
 };
 
 function uri(fsPath: string): vscode.Uri {
-  return { fsPath, scheme: 'file' } as vscode.Uri;
+  return { fsPath, scheme: 'file', toString: () => `file://${encodeURI(fsPath)}` } as vscode.Uri;
 }
 
 function createRepository(root = '/repo', patch = 'diff --git a/src/a.ts b/src/a.ts\n+change') {
@@ -250,7 +251,8 @@ function createService(
   workspacePath?: string,
   activeModel: { providerID: string; modelID: string; variant?: string } | null = null,
   openAIPro = false,
-  configuredModel: unknown = null
+  configuredModel: unknown = null,
+  getCommitRules: (repository: vscode.Uri) => string = () => ''
 ) {
   const ensureServerStarted = vi.fn(() => Promise.resolve());
   const isOpenAIPro = vi.fn(() => Promise.resolve(openAIPro));
@@ -261,7 +263,8 @@ function createService(
     () => workspacePath,
     () => activeModel,
     isOpenAIPro,
-    () => configuredModel
+    () => configuredModel,
+    getCommitRules
   );
   return { service, request, hiddenSessions, ensureServerStarted, isOpenAIPro };
 }
@@ -327,6 +330,234 @@ afterEach(() => {
 });
 
 describe('CommitMessageService', () => {
+  it('replaces Generate with Cancel in the same toolbar position for the active repository only', () => {
+    const menus = packageJson.contributes.menus['scm/title'];
+    expect(menus.find((menu) => menu.command === 'varro.generateCommitMessage')).toMatchObject({
+      when: 'scmProvider == git && scmProviderRootUri not in varro:commitMessageGenerationRoots',
+      group: 'navigation@99',
+    });
+    expect(menus.find((menu) => menu.command === 'varro.cancelCommitMessage')).toMatchObject({
+      when: 'scmProvider == git && scmProviderRootUri in varro:commitMessageGenerationRoots',
+      group: 'navigation@99',
+    });
+  });
+  it('resolves style rules for the selected repository and preserves safety instructions', async () => {
+    const repository = createRepository('/repo-b');
+    setGitRepositories([createRepository('/repo-a'), repository]);
+    const getRules = vi.fn((root: vscode.Uri) =>
+      root.fsPath === '/repo-b'
+        ? '  Use Conventional Commits with a scope.  '
+        : 'Use another style.'
+    );
+    const { service, request } = createService(
+      createRequest(),
+      createHiddenSessions(),
+      '/repo-a',
+      null,
+      false,
+      null,
+      getRules
+    );
+    await service.generate({ rootUri: repository.rootUri } as vscode.SourceControl);
+    expect(getRules).toHaveBeenCalledExactlyOnceWith(repository.rootUri);
+    const body = requestBody(request, '/message?');
+    expect(body?.system).toContain('Use Conventional Commits with a scope.');
+    expect(body?.system).not.toContain('Use another style.');
+    expect(body?.system).toContain('Do not use tools.');
+    expect(body?.system).toContain(
+      'not the grounding, honesty, length, output format, or no-tools'
+    );
+  });
+
+  it('includes configured style rules in v2 stateless generation', async () => {
+    const repository = createRepository();
+    setGitRepositories([repository]);
+    const request = vi.fn(async (_method: string, path: string) => {
+      if (path.startsWith('/config')) return {};
+      if (path === '/openapi.json')
+        return { paths: { '/api/experimental/generate': { post: {} } } };
+      if (path === '/api/experimental/generate')
+        return { data: { text: '{"subject":"fix: validate totals"}' } };
+      throw new Error(`Unexpected request ${path}`);
+    });
+    const service = new CommitMessageService(
+      { request, apiVersion: 2 },
+      createHiddenSessions(),
+      async () => {},
+      () => '/repo',
+      () => null,
+      async () => false,
+      () => null,
+      () => 'Write the subject in imperative mood.'
+    );
+    await service.generate();
+    expect(
+      request.mock.calls.find(([, path]) => path === '/api/experimental/generate')
+    ).toBeDefined();
+    expect(request).toHaveBeenCalledWith(
+      'POST',
+      '/api/experimental/generate',
+      expect.objectContaining({
+        prompt: expect.stringContaining('Write the subject in imperative mood.'),
+      }),
+      expect.anything()
+    );
+  });
+
+  it('cancels stalled Git preparation and allows an immediate retry', async () => {
+    const repository = createRepository();
+    setGitRepositories([repository]);
+    const status = deferred<void>();
+    repository.status.mockReturnValueOnce(status.promise);
+    const { service } = createService();
+    const first = service.generate();
+    await waitFor(() => repository.status.mock.calls.length === 1);
+    await service.cancel({ rootUri: repository.rootUri } as vscode.SourceControl);
+    await first;
+    await service.generate();
+    expect(repository.inputBox.value).toContain('feat: generated message');
+    status.resolve();
+    await flush();
+    expect(repository.diff).toHaveBeenCalledTimes(2);
+    expect(mocks.window.showErrorMessage).not.toHaveBeenCalled();
+  });
+
+  it('does not apply output cancelled during final repository validation', async () => {
+    const repository = createRepository();
+    setGitRepositories([repository]);
+    const validation = deferred<void>();
+    repository.status.mockResolvedValueOnce().mockReturnValueOnce(validation.promise);
+    const { service } = createService();
+    const generation = service.generate();
+    await waitFor(() => repository.status.mock.calls.length === 2);
+    await service.cancel();
+    await generation;
+    validation.resolve();
+    await flush();
+    expect(repository.inputBox.value).toBe('');
+    expect(mocks.window.showErrorMessage).not.toHaveBeenCalled();
+  });
+
+  it('does not replace or copy a draft after cancellation while awaiting user confirmation', async () => {
+    const repository = createRepository();
+    setGitRepositories([repository]);
+    const confirmation = deferred<string | undefined>();
+    mocks.window.showWarningMessage.mockReturnValueOnce(confirmation.promise);
+    const { service } = createService(
+      createRequest({
+        onMessage: () => {
+          repository.inputBox.value = 'User draft';
+        },
+      })
+    );
+    const generation = service.generate();
+    await waitFor(() => mocks.window.showWarningMessage.mock.calls.length === 1);
+    await service.cancel();
+    await generation;
+    confirmation.resolve('Replace Anyway');
+    await flush();
+    expect(repository.inputBox.value).toBe('User draft');
+    expect(mocks.clipboardWriteText).not.toHaveBeenCalled();
+  });
+
+  it('allows an explicit retry after failed generation without automatic resubmission', async () => {
+    const repository = createRepository();
+    setGitRepositories([repository]);
+    let messages = 0;
+    const request = createRequest({
+      messageResponse: () => ({
+        info: { structured: { subject: ++messages === 1 ? '' : 'fix: validate retry result' } },
+      }),
+    });
+    const { service } = createService(request);
+    await service.generate();
+    expect(messages).toBe(1);
+    expect(repository.inputBox.value).toBe('');
+    await service.generate();
+    expect(messages).toBe(2);
+    expect(repository.inputBox.value).toBe('fix: validate retry result');
+    expect(mocks.window.showInformationMessage).not.toHaveBeenCalled();
+  });
+
+  it('allows retry without awaiting cleanup and ignores the cancelled late response', async () => {
+    const repository = createRepository();
+    setGitRepositories([repository]);
+    const response = deferred<unknown>();
+    const deletion = deferred<unknown>();
+    let messages = 0;
+    let sessions = 0;
+    const request = createRequest({
+      sessionResponse: () => ({ id: `helper-${++sessions}` }),
+      messageResponse: () =>
+        ++messages === 1
+          ? response.promise
+          : { info: { structured: { subject: 'fix: fresh result' } } },
+      deleteResponse: () => deletion.promise,
+    });
+    const { service } = createService(request);
+    const first = service.generate();
+    await waitFor(() => messages === 1);
+    await service.cancel();
+    await first;
+    await service.generate();
+    expect(repository.inputBox.value).toBe('fix: fresh result');
+    response.resolve({ info: { structured: { subject: 'fix: stale result' } } });
+    deletion.resolve(true);
+    await flush();
+    expect(repository.inputBox.value).toBe('fix: fresh result');
+  });
+
+  it('cancels only the requested repository while another generation remains active', async () => {
+    const firstRepository = createRepository('/repo-a');
+    const secondRepository = createRepository('/repo-b');
+    const firstStatus = deferred<void>();
+    const secondStatus = deferred<void>();
+    firstRepository.status.mockReturnValueOnce(firstStatus.promise);
+    secondRepository.status.mockReturnValueOnce(secondStatus.promise);
+    setGitRepositories([firstRepository, secondRepository]);
+    const { service } = createService();
+    const first = service.generate({ rootUri: firstRepository.rootUri } as vscode.SourceControl);
+    const second = service.generate({ rootUri: secondRepository.rootUri } as vscode.SourceControl);
+    await waitFor(
+      () =>
+        firstRepository.status.mock.calls.length === 1 &&
+        secondRepository.status.mock.calls.length === 1
+    );
+    expect(mocks.executeCommand).toHaveBeenCalledWith(
+      'setContext',
+      'varro:commitMessageGenerationRoots',
+      ['file:///repo-a', 'file:///repo-b']
+    );
+    await service.cancel({ rootUri: firstRepository.rootUri } as vscode.SourceControl);
+    await first;
+    expect(mocks.executeCommand).toHaveBeenCalledWith(
+      'setContext',
+      'varro:commitMessageGenerationRoots',
+      ['file:///repo-b']
+    );
+    expect(mocks.executeCommand).toHaveBeenLastCalledWith(
+      'setContext',
+      'varro:generatingCommitMessage',
+      true
+    );
+    secondStatus.resolve();
+    await second;
+    firstStatus.resolve();
+    await flush();
+    expect(firstRepository.inputBox.value).toBe('');
+    expect(secondRepository.inputBox.value).toContain('feat: generated message');
+    expect(mocks.executeCommand).toHaveBeenLastCalledWith(
+      'setContext',
+      'varro:generatingCommitMessage',
+      false
+    );
+    expect(mocks.executeCommand).toHaveBeenCalledWith(
+      'setContext',
+      'varro:commitMessageGenerationRoots',
+      []
+    );
+  });
+
   it('uses v2 stateless generation and retains commit-draft validation', async () => {
     const repository = createRepository();
     setGitRepositories([repository]);
@@ -347,7 +578,7 @@ describe('CommitMessageService', () => {
     );
     await service.generate();
     expect(repository.inputBox.value).toBe('fix: validate order totals');
-    expect(mocks.executeCommand).not.toHaveBeenCalled();
+    expect(mocks.executeCommand).not.toHaveBeenCalledWith('workbench.view.scm');
     expect(hidden.registerPendingTitle).not.toHaveBeenCalled();
     expect(mocks.window.showErrorMessage).not.toHaveBeenCalled();
   });
@@ -466,7 +697,7 @@ describe('CommitMessageService', () => {
     expect(hiddenSessions.hide).toHaveBeenCalledWith('helper-1');
     expect(hiddenSessions.forgetPendingTitle).toHaveBeenCalledOnce();
     expect(hiddenSessions.retainUntilDeleted).toHaveBeenCalledWith('helper-1');
-    expect(mocks.executeCommand).not.toHaveBeenCalled();
+    expect(mocks.executeCommand).not.toHaveBeenCalledWith('workbench.view.scm');
     expect(mocks.logger.error).not.toHaveBeenCalled();
   });
 
@@ -1103,7 +1334,7 @@ describe('CommitMessageService', () => {
     expect(mocks.clipboardWriteText).toHaveBeenCalledWith(
       'feat: generated message\n\nExplain the generated change.'
     );
-    expect(mocks.executeCommand).not.toHaveBeenCalled();
+    expect(mocks.executeCommand).not.toHaveBeenCalledWith('workbench.view.scm');
   });
 
   it('replaces changed input without focusing Source Control', async () => {
@@ -1122,7 +1353,7 @@ describe('CommitMessageService', () => {
     expect(repository.inputBox.value).toBe(
       'feat: generated message\n\nExplain the generated change.'
     );
-    expect(mocks.executeCommand).not.toHaveBeenCalled();
+    expect(mocks.executeCommand).not.toHaveBeenCalledWith('workbench.view.scm');
   });
 
   it('does not write or copy when the changed-input prompt is dismissed', async () => {
@@ -1139,7 +1370,7 @@ describe('CommitMessageService', () => {
 
     expect(repository.inputBox.value).toBe('User edit');
     expect(mocks.clipboardWriteText).not.toHaveBeenCalled();
-    expect(mocks.executeCommand).not.toHaveBeenCalled();
+    expect(mocks.executeCommand).not.toHaveBeenCalledWith('workbench.view.scm');
   });
 
   it('does not apply output when the authoritative staged diff changes', async () => {
@@ -1156,7 +1387,7 @@ describe('CommitMessageService', () => {
     expect(mocks.window.showWarningMessage).toHaveBeenCalledWith(
       expect.stringContaining('Staged changes changed')
     );
-    expect(mocks.executeCommand).not.toHaveBeenCalled();
+    expect(mocks.executeCommand).not.toHaveBeenCalledWith('workbench.view.scm');
   });
 
   it('silently aborts and deletes a helper session when generation is cancelled', async () => {
@@ -1325,7 +1556,7 @@ describe('CommitMessageService', () => {
       'feat: generated message\n\nExplain the generated change.'
     );
     expect(request).toHaveBeenCalledWith('DELETE', '/session/helper-1?directory=%2Frepo');
-    expect(mocks.executeCommand).not.toHaveBeenCalled();
+    expect(mocks.executeCommand).not.toHaveBeenCalledWith('workbench.view.scm');
 
     deletion.resolve(true);
     await flush();

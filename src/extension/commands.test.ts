@@ -135,6 +135,7 @@ function register(
     captureContextTarget: vi.fn(() => 'sidebar'),
     revealContextTarget: vi.fn(async (_target: string, reveal: () => Promise<unknown>) => reveal()),
     generateCommitMessage: vi.fn(() => Promise.resolve()),
+    cancelCommitMessage: vi.fn(() => Promise.resolve()),
     generateUsageReport: vi.fn(() => Promise.resolve()),
     openMarkdownDocument: vi.fn(async (content: string, title: string, _show?: boolean) => {
       await vscodeMock.workspace.openTextDocument({
@@ -1335,6 +1336,13 @@ describe('sidebar navigation commands', () => {
     await runCommand('varro.generateCommitMessage', sourceControl);
 
     expect(sidebar.generateCommitMessage).toHaveBeenCalledWith(sourceControl);
+  });
+
+  it('forwards the selected source control to commit-message cancellation', async () => {
+    const { sidebar } = register();
+    const sourceControl = { id: 'git', rootUri: fileUri('/repo') };
+    await runCommand('varro.cancelCommitMessage', sourceControl);
+    expect(sidebar.cancelCommitMessage).toHaveBeenCalledWith(sourceControl);
   });
 
   it.each([

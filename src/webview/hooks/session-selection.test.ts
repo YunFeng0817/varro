@@ -108,6 +108,30 @@ function createSelectionDependencies(
 }
 
 describe('selection outcomes', () => {
+  it('reports missing-folder recovery without removing or importing the conversation', async () => {
+    const deps = createSelectionDependencies({
+      getActiveSessionId: () => 'session-1',
+      getSession: () => loadedSession('session-1').session,
+      loadSession: async () => {
+        throw new Error('404 Location not found');
+      },
+      removeUnavailableSession: vi.fn(),
+      importLegacySession: vi.fn(),
+    });
+    expect(
+      await selectSessionWithDependencies(deps, { next: () => 1 }, 'session-1', {
+        directory: '/old/repo',
+      })
+    ).toEqual({ state: 'failed' });
+    expect(deps.setError).toHaveBeenCalledWith(
+      expect.stringContaining('Workspace folder unavailable: /old/repo')
+    );
+    expect(deps.setMessagesLoading).toHaveBeenLastCalledWith(false);
+    expect(deps.removeUnavailableSession).not.toHaveBeenCalled();
+    expect(deps.importLegacySession).not.toHaveBeenCalled();
+    expect(deps.persistActiveSessionId).not.toHaveBeenCalled();
+  });
+
   it('refreshes a transferred session without clearing its transcript, draft state, or scroll anchor', async () => {
     const pending = deferred<Awaited<ReturnType<SelectionDependencies['loadSession']>>>();
     const deps = createSelectionDependencies({

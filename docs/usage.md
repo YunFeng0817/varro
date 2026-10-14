@@ -290,6 +290,13 @@ Use `Varro: Open Global AGENTS.md` to edit OpenCode's global instructions. `Varr
 
 Sessions from every open workspace root appear in one catalog. Use the folder filter above search to narrow the list; it defaults to `All folders`. Folder labels appear only when multiple roots are open. The default list is split into `Recent`, `Archive`, and `Recycle Bin`. `Archive` is a UI grouping for older ordinary sessions; opening it does not alter those sessions in OpenCode. Pinned and active-state sessions remain surfaced, while other sessions are ordered approximately by activity age.
 
+If a workspace folder was deleted or renamed, the session list reports an incomplete load rather than
+interpreting that folder as empty history. Available roots still load; cached history and queues for
+unavailable folders remain. Opening an affected conversation explains how to restore the folder or
+reopen its new location. Varro does not recreate folders, relocate conversations, or submit prompts
+automatically. Incomplete status and pending-decision snapshots are rejected so existing state is not
+cleared by a failed read.
+
 - Start a fresh session with `Varro: New Session` or the new chat button. Right-click the button to choose `New Chat` or `New Chat in Editor`. Crafted composer text is kept for the new session, while file, image, terminal, and message-edit context is cleared.
 - Open the session list from the back button in the header.
 - Search uses OpenCode's native root-session search across loaded and older history and returns up to 30 results. Matching fields depend on the installed OpenCode version. Run `Varro: Search Sessions` to open and focus search directly.
@@ -656,6 +663,17 @@ Varro integrates commit-message generation directly into VS Code Source Control.
 
 Varro uses staged changes when the index is non-empty. If nothing is staged, it uses tracked unstaged changes and untracked files instead. It never mixes the two scopes. Varro rejects unresolved merge changes and reports when neither scope has usable changes.
 
+The wand changes to a Stop action while that repository's generation is active. Select it to cancel,
+or run `Varro: Cancel Commit Message Generation`.
+The Source Control action cancels that repository; the Command Palette action cancels all active commit-message generations.
+Cancellation also covers preparation and final validation. Generate again to retry after cancellation or failure;
+Varro does not automatically resend model requests, and a cancelled attempt cannot apply a late result.
+
+Set `varro.commitMessage.rules` for custom style and format instructions, such as `Use Conventional Commits with a scope.`
+User settings provide a default. Workspace or folder settings override it for the selected Git repository,
+including in multi-root workspaces. These instructions take precedence over inferred commit style, but not
+grounding in the diff, output validation, or the prohibition on tools and automatic commits.
+
 The model is selected in this order:
 
 1. The `varro.commitMessage.model` VS Code user setting
@@ -749,6 +767,7 @@ Chat view:
 Commit messages:
 
 - `varro.commitMessage.model` - provider/model used to generate commit messages; stored in VS Code user settings and selected from Varro's Models view
+- `varro.commitMessage.rules` - style and format instructions, resolved from user, workspace, and folder settings for the selected Git repository
 
 There are also deprecated debug-only settings used for development and recovery testing:
 

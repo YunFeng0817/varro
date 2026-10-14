@@ -575,7 +575,11 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       () => this.contextProvider.context.workspacePath || undefined,
       () => this.activeChatModel,
       isOpenAIPro,
-      () => vscode.workspace.getConfiguration('varro').get<string>('commitMessage.model', '')
+      () => vscode.workspace.getConfiguration('varro').get<string>('commitMessage.model', ''),
+      (repository) =>
+        vscode.workspace
+          .getConfiguration('varro', repository)
+          .get<string>('commitMessage.rules', '')
     );
 
     this.serverEventBridge = new ServerEventBridge(
@@ -3378,6 +3382,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     await this.commitMessageService.generate(sourceControl);
   }
 
+  async cancelCommitMessage(sourceControl?: vscode.SourceControl) {
+    await this.commitMessageService.cancel(sourceControl);
+  }
+
   async generateUsageReport() {
     await this.usageReportService.openReport(false);
   }
@@ -3419,6 +3427,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   }
 
   async dispose() {
+    await this.commitMessageService.cancel();
     this.macOSTray?.dispose();
     this.notificationUriHandler.dispose();
     this.attentionNotifications.dispose();

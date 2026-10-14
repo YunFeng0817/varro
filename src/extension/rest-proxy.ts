@@ -41,6 +41,10 @@ import type { HiddenSessionManager } from './hidden-session-manager';
 import { isAllowedApiRequest } from './util/webview-message';
 import type { ContextProvider } from './context-provider';
 import { getWorkspaceProblems } from './workspace-problems';
+import {
+  isMissingWorkspaceDirectoryMessage,
+  workspaceDirectoryRecoveryMessage,
+} from '../shared/workspace-directory-error';
 import type { LocalSessionSummaryData } from './local-session-summary';
 import { sessionSummary } from './session-summary';
 import { logger } from './logger';
@@ -2109,6 +2113,25 @@ export class RestProxy {
         result.status === 'rejected' && roots[index] ? [roots[index]] : []
       );
       if (rootResults.length === 0) {
+        const allDirectoriesMissing = settledRootResults.every(
+          (result) =>
+            result.status === 'rejected' &&
+            result.reason instanceof Error &&
+            isMissingWorkspaceDirectoryMessage(result.reason.message)
+        );
+        if (allDirectoriesMissing && requestedLimit !== null) {
+          // A missing location is not an empty history. Keep the page incomplete
+          // so consumers retain previously loaded sessions and pending decisions.
+          return {
+            items: [],
+            hasMore: false,
+            incomplete: true,
+            unavailableDirectories,
+          };
+        }
+        if (allDirectoriesMissing) {
+          throw new Error(workspaceDirectoryRecoveryMessage(unavailableDirectories.join(', ')));
+        }
         throw settledRootResults.find(
           (result): result is PromiseRejectedResult => result.status === 'rejected'
         )?.reason;
@@ -2149,6 +2172,16 @@ export class RestProxy {
       const visible = this.filterWorkspaceVisibleSessions(catalogSessions);
       if (requestedLimit === null) {
         if (hasUnavailableRoot) {
+          if (
+            settledRootResults.some(
+              (result) =>
+                result.status === 'rejected' &&
+                result.reason instanceof Error &&
+                isMissingWorkspaceDirectoryMessage(result.reason.message)
+            )
+          ) {
+            throw new Error(workspaceDirectoryRecoveryMessage(unavailableDirectories.join(', ')));
+          }
           throw new Error(`Could not load sessions from: ${unavailableDirectories.join(', ')}`);
         }
         return visible;
@@ -2292,6 +2325,16 @@ export class RestProxy {
         logger.warn(
           `Could not load session statuses from one workspace root: ${result.reason instanceof Error ? result.reason.message : String(result.reason)}`
         );
+      }
+      if (
+        settledResults.some(
+          (result) =>
+            result.status === 'rejected' &&
+            result.reason instanceof Error &&
+            isMissingWorkspaceDirectoryMessage(result.reason.message)
+        )
+      ) {
+        throw new Error(workspaceDirectoryRecoveryMessage(unavailableDirectories.join(', ')));
       }
       throw new Error(`Could not load session statuses from: ${unavailableDirectories.join(', ')}`);
     }

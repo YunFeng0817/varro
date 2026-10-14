@@ -11,6 +11,29 @@ export function selectStaleVsixFiles(entries, packageName) {
   return entries.filter((entry) => entry.startsWith(prefix) && entry.endsWith('.vsix'));
 }
 
+export function parseInstallArgs(args) {
+  const targets = [];
+  let dryRun = false;
+  for (let index = 0; index < args.length; index += 1) {
+    const argument = args[index];
+    if (argument === '--dry-run') {
+      dryRun = true;
+    } else if (argument === '--force') {
+      // Installation already uses --force for every editor; retain explicit invocations too.
+      continue;
+    } else if (argument === '--target') {
+      const target = args[++index];
+      if (!target?.trim() || target.startsWith('--')) {
+        throw new Error('--target requires an editor CLI name or executable path');
+      }
+      targets.push(target.trim());
+    } else {
+      throw new Error(`Unknown argument ${argument}; use --target <editor>, --force, or --dry-run`);
+    }
+  }
+  return { targets, dryRun };
+}
+
 export function createVscodeInstallPlan(options) {
   if (!options.npmExecPath) {
     throw new Error('npm_execpath is unavailable; run this helper with npm run vscode:install');
@@ -21,8 +44,26 @@ export function createVscodeInstallPlan(options) {
     options.projectRoot,
     `${options.packageName}-${options.packageVersion}.vsix`
   );
-  const vscodeCli =
-    options.env.VARRO_VSCODE_CLI?.trim() || (options.platform === 'win32' ? 'code.cmd' : 'code');
+  const targets = options.targets?.length
+    ? options.targets
+    : [options.env.VARRO_VSCODE_CLI?.trim() || 'code'];
+  const commands = targets.map((target) =>
+    options.platform === 'win32' && !/[/\\.]/.test(target) ? `${target}.cmd` : target
+  );
+  const uniqueCommands = commands.filter(
+    (command, index) =>
+      commands.findIndex((candidate) =>
+        options.platform === 'win32'
+          ? candidate.toLowerCase() === command.toLowerCase()
+          : candidate === command
+      ) === index
+  );
+  const installCommands = uniqueCommands.map((command) => ({
+    command,
+    args: ['--install-extension', vsixPath, '--force'],
+    env: { ...options.env, NODE_NO_WARNINGS: '1' },
+    shell: false,
+  }));
 
   return {
     vsixPath,
@@ -32,12 +73,7 @@ export function createVscodeInstallPlan(options) {
       env: options.env,
       shell: false,
     },
-    installCommand: {
-      command: vscodeCli,
-      args: ['--install-extension', vsixPath, '--force'],
-      env: { ...options.env, NODE_NO_WARNINGS: '1' },
-      shell: false,
-    },
+    installCommands,
   };
 }
 
@@ -64,6 +100,7 @@ function runCommand(spec, cwd) {
 }
 
 async function main() {
+  const args = parseInstallArgs(process.argv.slice(2));
   const manifest = JSON.parse(await readFile(join(defaultProjectRoot, 'package.json'), 'utf8'));
   // oxlint-disable-next-line anti-slop/no-runtime-typeof -- JSON boundary validation must reject malformed manifest fields before use.
   if (typeof manifest.name !== 'string' || typeof manifest.version !== 'string') {
@@ -78,15 +115,18 @@ async function main() {
     nodePath: process.execPath,
     npmExecPath: process.env.npm_execpath,
     env: process.env,
+    targets: args.targets,
   });
   const staleVsixFiles = selectStaleVsixFiles(await readdir(defaultProjectRoot), manifest.name);
 
-  if (process.argv.includes('--dry-run')) {
+  if (args.dryRun) {
     process.stdout.write(
       [
         `Would remove: ${staleVsixFiles.join(', ') || '(none)'}`,
         `Would package: ${plan.packageCommand.command} ${plan.packageCommand.args.join(' ')}`,
-        `Would install: ${plan.installCommand.command} ${plan.installCommand.args.join(' ')}`,
+        ...plan.installCommands.map(
+          (install) => `Would install: ${install.command} ${install.args.join(' ')}`
+        ),
         '',
       ].join('\n')
     );
@@ -98,7 +138,18 @@ async function main() {
   );
   await runCommand(plan.packageCommand, defaultProjectRoot);
   await access(plan.vsixPath);
-  await runCommand(plan.installCommand, defaultProjectRoot);
+  const failures = [];
+  for (const install of plan.installCommands) {
+    try {
+      await runCommand(install, defaultProjectRoot);
+      process.stdout.write(`Installed into ${install.command}\n`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      process.stderr.write(`Could not install into ${install.command}: ${message}\n`);
+      failures.push(install.command);
+    }
+  }
+  if (failures.length > 0) throw new Error(`Installation failed for: ${failures.join(', ')}`);
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === scriptPath) {

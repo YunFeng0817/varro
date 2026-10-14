@@ -1205,19 +1205,40 @@ describe('extension manifest', () => {
     ]);
   });
 
-  it('contributes commit-message generation to the command palette and Source Control', () => {
+  it('contributes commit-message generation and repository-scoped cancellation', () => {
     expect(packageJson.contributes.commands).toContainEqual({
       command: 'varro.generateCommitMessage',
       title: 'Varro: Generate Commit Message',
       icon: '$(wand)',
     });
+    expect(packageJson.contributes.commands).toContainEqual({
+      command: 'varro.cancelCommitMessage',
+      title: 'Varro: Cancel Commit Message Generation',
+      icon: '$(debug-stop)',
+      enablement: 'varro:generatingCommitMessage',
+    });
     expect(packageJson.contributes.menus['scm/title']).toEqual([
       {
         command: 'varro.generateCommitMessage',
-        when: 'scmProvider == git',
+        when: 'scmProvider == git && scmProviderRootUri not in varro:commitMessageGenerationRoots',
+        group: 'navigation@99',
+      },
+      {
+        command: 'varro.cancelCommitMessage',
+        when: 'scmProvider == git && scmProviderRootUri in varro:commitMessageGenerationRoots',
         group: 'navigation@99',
       },
     ]);
+  });
+
+  it('contributes repository-scoped commit-message rules', () => {
+    expect(
+      packageJson.contributes.configuration.properties['varro.commitMessage.rules']
+    ).toMatchObject({
+      type: 'string',
+      scope: 'resource',
+      default: '',
+    });
   });
 
   it('constrains the server port setting to valid TCP ports', () => {

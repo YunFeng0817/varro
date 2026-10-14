@@ -6644,6 +6644,112 @@ describe('RestProxy handleRequest', () => {
     });
   });
 
+  it('retains healthy-root sessions and marks a deleted sibling folder incomplete', async () => {
+    const serverRequest = vi.fn(
+      async (_method: string, _path: string, _body: unknown, options?: { directory?: string }) => {
+        if (options?.directory === '/repo-b') throw new Error('404 Location not found');
+        return [{ id: 'healthy', directory: '/repo-a' }];
+      }
+    );
+    const callbacks = createCallbacks({
+      server: { ...createCallbacks().server, request: serverRequest } as never,
+    });
+    callbacks.contextProvider.context.workspaceFolders = [
+      { name: 'a', path: '/repo-a' },
+      { name: 'b', path: '/repo-b' },
+    ];
+    const { proxy } = createProxy(callbacks);
+    await proxy.handleRequest(makePayload(2247, 'GET', '/session?limit=100'));
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 2247,
+      data: {
+        items: [{ id: 'healthy', directory: '/repo-a' }],
+        hasMore: false,
+        incomplete: true,
+        unavailableDirectories: ['/repo-b'],
+      },
+    });
+  });
+
+  it.each(['directory', 'project'] as const)(
+    'returns an incomplete page when every %s-scoped folder is missing',
+    async (scope) => {
+      const serverRequest = vi.fn(async () => {
+        throw new Error('404 Location not found');
+      });
+      const callbacks = createCallbacks({
+        server: { ...createCallbacks().server, request: serverRequest } as never,
+        getSessionHistoryScope: () => scope,
+      });
+      const { proxy } = createProxy(callbacks);
+      await proxy.handleRequest(makePayload(2248, 'GET', '/session?limit=100'));
+      expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+        id: 2248,
+        data: { items: [], hasMore: false, incomplete: true, unavailableDirectories: ['/repo'] },
+      });
+    }
+  );
+
+  it.each(['404 route not found', '401 unauthorized', '500 Location not found'])(
+    'does not reinterpret %s as an empty missing-folder page',
+    async (message) => {
+      const serverRequest = vi.fn(async () => {
+        throw new Error(message);
+      });
+      const { proxy, callbacks } = createProxy({
+        server: { ...createCallbacks().server, request: serverRequest } as never,
+      });
+      await proxy.handleRequest(makePayload(2249, 'GET', '/session?limit=100'));
+      expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, { id: 2249, error: message });
+    }
+  );
+
+  it('explains missing folders instead of returning an authoritative empty unpaginated history', async () => {
+    const serverRequest = vi.fn(async () => {
+      throw new Error('404 Location not found');
+    });
+    const { proxy, callbacks } = createProxy({
+      server: { ...createCallbacks().server, request: serverRequest } as never,
+    });
+    await proxy.handleRequest(makePayload(2250, 'GET', '/session'));
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 2250,
+      error: expect.stringContaining('Workspace folder unavailable: /repo'),
+    });
+  });
+
+  it.each(['/permission', '/question'])(
+    'preserves pending requests when a required folder disappears during %s reconciliation',
+    async (path) => {
+      const serverRequest = vi.fn(async () => {
+        throw new Error('404 Location not found');
+      });
+      const { proxy, callbacks } = createProxy({
+        server: { ...createCallbacks().server, request: serverRequest } as never,
+      });
+      await proxy.handleRequest(makePayload(2251, 'GET', path));
+      expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+        id: 2251,
+        error: '404 Location not found',
+      });
+      expect(callbacks.sessionState.reconcilePendingAttention).not.toHaveBeenCalled();
+    }
+  );
+
+  it('preserves status snapshots and reports recovery when a required folder disappears', async () => {
+    const serverRequest = vi.fn(async () => {
+      throw new Error('404 Location not found');
+    });
+    const { proxy, callbacks } = createProxy({
+      server: { ...createCallbacks().server, request: serverRequest } as never,
+    });
+    await proxy.handleRequest(makePayload(2252, 'GET', '/session/status'));
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 2252,
+      error: expect.stringContaining('Workspace folder unavailable: /repo'),
+    });
+  });
+
   it('rejects partial status snapshots when one workspace root fails', async () => {
     const serverRequest = vi.fn(
       async (_method: string, path: string, _body: unknown, options?: { directory?: string }) => {

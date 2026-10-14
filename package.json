@@ -1,7 +1,7 @@
 {
   "name": "varro",
   "displayName": "Varro: OpenCode Workbench",
-  "version": "0.33.2",
+  "version": "0.33.3",
   "description": "OpenCode agent workbench with project-aware chat, parallel sessions, plan and change review, model and permission controls, commit messages, and usage insights.",
   "categories": [
     "AI",
@@ -113,7 +113,7 @@
     "material-icon-theme": "5.39.0",
     "oxfmt": "0.73.0",
     "oxlint": "1.88.0",
-    "oxlint-plugin-anti-slop": "github:dmmulroy/anti-slop#c44ef22",
+    "oxlint-plugin-anti-slop": "github:dmmulroy/anti-slop#13909c9",
     "oxlint-tsgolint": "7.0.2004",
     "tailwindcss": "4.3.3",
     "typescript": "7.0.2",
@@ -246,6 +246,12 @@
         "icon": "$(wand)"
       },
       {
+        "command": "varro.cancelCommitMessage",
+        "title": "Varro: Cancel Commit Message Generation",
+        "icon": "$(debug-stop)",
+        "enablement": "varro:generatingCommitMessage"
+      },
+      {
         "command": "varro.agents.openGlobal",
         "title": "Varro: Open Global AGENTS.md"
       },
@@ -343,7 +349,12 @@
       "scm/title": [
         {
           "command": "varro.generateCommitMessage",
-          "when": "scmProvider == git",
+          "when": "scmProvider == git && scmProviderRootUri not in varro:commitMessageGenerationRoots",
+          "group": "navigation@99"
+        },
+        {
+          "command": "varro.cancelCommitMessage",
+          "when": "scmProvider == git && scmProviderRootUri in varro:commitMessageGenerationRoots",
           "group": "navigation@99"
         }
       ],
@@ -600,6 +611,12 @@
           "pattern": "^$|^[^/\\s]+/[^\\s]+$",
           "patternErrorMessage": "Use provider/model, or leave the setting empty.",
           "markdownDescription": "Provider/model used to generate commit messages. Leave empty to let Varro select a suitable model automatically. Select a configured model from Varro's Models view."
+        },
+        "varro.commitMessage.rules": {
+          "type": "string",
+          "scope": "resource",
+          "default": "",
+          "markdownDescription": "Style and format instructions for generated commit messages. User settings provide a default; workspace and folder settings override it for the selected Git repository. For example: `Use Conventional Commits with a scope.` Rules cannot override grounding in the supplied changes or enable tools and commits."
         },
         "varro.decisions.jev.autoApprove": {
           "type": "boolean",

@@ -373,6 +373,13 @@ export function registerCommands(
       }
     ),
 
+    vscode.commands.registerCommand(
+      'varro.cancelCommitMessage',
+      async (sourceControl?: vscode.SourceControl) => {
+        await sidebar.cancelCommitMessage(sourceControl);
+      }
+    ),
+
     vscode.commands.registerCommand('varro.agents.openGlobal', async () => {
       try {
         if (server.isAttachOnly) {

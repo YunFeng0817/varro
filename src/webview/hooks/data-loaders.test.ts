@@ -1415,6 +1415,55 @@ describe('data loaders', () => {
     expect(setSessionsLoadError).toHaveBeenLastCalledWith('Could not load sessions from: /repo-b');
   });
 
+  it('retains nested-folder history and queues when its workspace root is missing', async () => {
+    const nested = { ...session('nested'), directory: '/repo-b/nested' };
+    const healthy = { ...session('healthy'), directory: '/repo-a' };
+    let currentSessions = [nested];
+    const clearQueuedMessagesForSession = vi.fn();
+    const operations = createDataLoaderOperations(
+      createLoaderDeps({
+        listSessions: async () => ({
+          items: [healthy],
+          hasMore: false,
+          incomplete: true,
+          unavailableDirectories: ['/repo-b'],
+        }),
+        getSessions: () => currentSessions,
+        applySessions: (sessions) => {
+          currentSessions = sessions;
+        },
+        clearQueuedMessagesForSession,
+      })
+    );
+    await operations.loadSessions();
+    expect(currentSessions).toEqual([healthy, nested]);
+    expect(clearQueuedMessagesForSession).not.toHaveBeenCalled();
+  });
+
+  it('does not prune any cached project history or queues when every folder is missing', async () => {
+    const worktree = { ...session('worktree'), directory: '/other-worktree' };
+    let currentSessions = [worktree];
+    const clearQueuedMessagesForSession = vi.fn();
+    const operations = createDataLoaderOperations(
+      createLoaderDeps({
+        listSessions: async () => ({
+          items: [],
+          hasMore: false,
+          incomplete: true,
+          unavailableDirectories: ['/old-repo'],
+        }),
+        getSessions: () => currentSessions,
+        applySessions: (sessions) => {
+          currentSessions = sessions;
+        },
+        clearQueuedMessagesForSession,
+      })
+    );
+    await operations.loadSessions();
+    expect(currentSessions).toEqual([worktree]);
+    expect(clearQueuedMessagesForSession).not.toHaveBeenCalled();
+  });
+
   it('clears pagination loading state when workspace work is invalidated', async () => {
     const response = deferred<{ items: Session[]; hasMore: boolean }>();
     const setSessionsLoadingMore = vi.fn();
