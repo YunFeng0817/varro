@@ -674,6 +674,8 @@ User settings provide a default. Workspace or folder settings override it for th
 including in multi-root workspaces. These instructions take precedence over inferred commit style, but not
 grounding in the diff, output validation, or the prohibition on tools and automatic commits.
 
+See [Custom commit-message prompts](commit-message-prompts.md) for short examples and settings instructions.
+
 The model is selected in this order:
 
 1. The `varro.commitMessage.model` VS Code user setting
