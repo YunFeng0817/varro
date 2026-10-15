@@ -9446,6 +9446,35 @@ describe('ChatInput', () => {
     expect(sideQuestionView()).toBeNull();
   });
 
+  it.each(['/b', '/bt'])(
+    'opens the /btw suggestion from %s without treating the draft as a command',
+    async (draft) => {
+      setState('serverStatus', { state: 'running', url: 'http://localhost:4096', apiVersion: 2 });
+      setState('activeSessionId', 'session-1');
+      setState('sessions', [session('session-1', 1, { directory: '/repo' })]);
+      setInputText(draft);
+      cleanup = render(() => ChatInput(), container!);
+      const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+      if (!editor?.firstChild) throw new Error('Expected populated composer editor');
+      editor.focus();
+      setCollapsedSelection(editor.firstChild, draft.length);
+      editor.dispatchEvent(new KeyboardEvent('keyup', { key: 't', bubbles: true }));
+      await flushAsyncWork();
+      const suggestion = [
+        ...container!.querySelectorAll<HTMLElement>('.composer-completion-item'),
+      ].find((option) => option.textContent?.includes('/btw'));
+      expect(suggestion).toBeDefined();
+      suggestion!.click();
+      await flushAsyncWork();
+      expect(sideQuestionView()).toMatchObject({ sessionID: 'session-1', question: '' });
+      expect(inputText()).toBe('');
+      expect(state.queuedMessages).toEqual([]);
+      expect(sendMessageMock).not.toHaveBeenCalled();
+      expect(abortSessionMock).not.toHaveBeenCalled();
+      expect(runSlashCommandByNameMock).not.toHaveBeenCalled();
+    }
+  );
+
   it('opens /btw without sending or consuming existing attachments', async () => {
     setState('serverStatus', { state: 'running', url: 'http://localhost:4096', apiVersion: 2 });
     setState('activeSessionId', 'session-1');

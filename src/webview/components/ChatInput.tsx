@@ -3126,14 +3126,14 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     }
   }
 
-  function sideQuestionSendUnavailableReason() {
+  function sideQuestionSendUnavailableReason(draft = inputText()) {
     if (pendingTableCount() > 0 || pendingProblems() || pendingPasteTransactions.length > 0) {
       return 'Wait for attachments to finish';
     }
-    return sideQuestionUnavailableReason();
+    return sideQuestionUnavailableReason(true, draft);
   }
 
-  function requestSideQuestion(question: string) {
+  function requestSideQuestion(question: string, draft = inputText()) {
     if (!composerSessionId() || props.newSession) {
       showSessionActionFeedback('Open a conversation', 'warning');
       return;
@@ -3142,12 +3142,12 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       showSessionActionFeedback('Finish editing first', 'warning');
       return;
     }
-    const reason = sideQuestionSendUnavailableReason();
+    const reason = sideQuestionSendUnavailableReason(draft);
     if (reason) {
       showSessionActionFeedback(reason, 'warning');
       return;
     }
-    if (!openSideQuestion(question)) return;
+    if (!openSideQuestion(question, draft)) return;
     setInputText('');
     setCompletionIndex(0);
   }
@@ -3160,7 +3160,8 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   async function runSlashCommand(raw: string, options?: SessionCommandOptions) {
     const sideQuestion = getSideQuestionText(raw);
     if (sideQuestion !== null) {
-      requestSideQuestion(sideQuestion);
+      // Completion supplies the full command while the editor can still contain /bt.
+      requestSideQuestion(sideQuestion, raw);
       return true;
     }
     const parsed = getLeadingSlashCommand(raw);
