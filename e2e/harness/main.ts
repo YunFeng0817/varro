@@ -2352,6 +2352,9 @@ function createScenarioState(name: ScenarioName): ScenarioState {
       },
     };
     state.nextSequence = 120;
+    if (new URLSearchParams(window.location.search).get('nativeCommand') === '1') {
+      state.readyStatus = { state: 'running', url: 'mock://opencode', apiVersion: 2 };
+    }
     return state;
   }
 
@@ -3271,6 +3274,31 @@ function createScenarioState(name: ScenarioName): ScenarioState {
     state.persistedActiveSessionId = null;
     persistRecentSessionsListView(state);
     state.nextSequence = 310;
+    if (new URLSearchParams(window.location.search).get('subagentResult') === '1') {
+      const result = makeUserMessage(
+        parent.id,
+        'native-result',
+        ['<subagent sessionID="session-child-b">\nAudit result\n</subagent>'],
+        BASE_TIME - 200
+      );
+      result.parts = result.parts.map((part) =>
+        part.type === 'text'
+          ? {
+              ...part,
+              synthetic: true,
+              subagentResult: {
+                sessionID: childA.id,
+                state: 'completed',
+                description: 'Audit auth',
+                agent: 'general',
+              },
+            }
+          : part
+      );
+      state.messagesBySessionId[parent.id] = [result];
+      state.persistedActiveSessionId = parent.id;
+      persistRecentSessionView(state, parent.id);
+    }
     return state;
   }
 
@@ -5641,6 +5669,9 @@ async function handleApiRequest(
       throw new Error('Command catalog unavailable');
     if (new URLSearchParams(window.location.search).get('skillCommand') === '1') {
       return [{ name: 'control', template: 'Check machines', source: 'skill' }];
+    }
+    if (new URLSearchParams(window.location.search).get('nativeCommand') === '1') {
+      return [{ name: 'audit', source: 'command', description: '', template: '', hints: [] }];
     }
     return [];
   }

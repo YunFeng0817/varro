@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ProviderLimitStatus, RecycleBinEntry } from '../../shared/protocol';
-import type { Agent, QuestionRequest, Session, SessionStatus } from '../types';
+import type { Agent, Command, QuestionRequest, Session, SessionStatus } from '../types';
 import {
   applyModelPreferencesSnapshot,
   getModelPreferencesSnapshot,
@@ -786,6 +786,13 @@ describe('data loaders', () => {
     const startupProviders =
       deferred<Awaited<ReturnType<DataLoaderDependencies['listProviders']>>>();
     const eventProviders = deferred<Awaited<ReturnType<DataLoaderDependencies['listProviders']>>>();
+    const startupCommands = deferred<Command[]>();
+    const eventCommands = deferred<Command[]>();
+    const listCommands = vi
+      .fn<DataLoaderDependencies['listCommands']>()
+      .mockReturnValueOnce(startupCommands.promise)
+      .mockReturnValueOnce(eventCommands.promise);
+    const setCommands = vi.fn();
     const listAgents = vi
       .fn<DataLoaderDependencies['listAgents']>()
       .mockReturnValueOnce(startupAgents.promise)
@@ -799,7 +806,8 @@ describe('data loaders', () => {
     const operations = createDataLoaderOperations(
       createLoaderDeps({
         listAgents,
-        listCommands: vi.fn<DataLoaderDependencies['listCommands']>().mockResolvedValue([]),
+        listCommands,
+        setCommands,
         listProviders,
         setAllAgents,
         finishWorkspaceCatalogReload,
@@ -811,13 +819,19 @@ describe('data loaders', () => {
     const eventRefresh = operations.refreshRoutingState();
     eventAgents.resolve([buildAgent('latest')]);
     eventProviders.resolve({ providers: [provider('latest', {})], default: {} });
+    eventCommands.resolve([{ name: 'latest-command', template: '', source: 'command' }]);
     await eventRefresh;
     startupAgents.resolve([buildAgent('stale')]);
     startupProviders.resolve({ providers: [provider('stale', {})], default: {} });
+    startupCommands.resolve([{ name: 'stale-command', template: 'Private template' }]);
 
     await expect(startup).resolves.toBe(true);
     expect(listAgents).toHaveBeenCalledTimes(2);
     expect(listProviders).toHaveBeenCalledTimes(2);
+    expect(listCommands).toHaveBeenCalledTimes(2);
+    expect(setCommands).toHaveBeenCalledExactlyOnceWith([
+      { name: 'latest-command', template: '', source: 'command' },
+    ]);
     expect(setAllAgents).toHaveBeenCalledExactlyOnceWith([buildAgent('latest')]);
     expect(finishWorkspaceCatalogReload).toHaveBeenCalledOnce();
   });

@@ -92,6 +92,39 @@ describe('getSlashCommands', () => {
     expect(commands.some((command) => command.name === 'abort')).toBe(false);
   });
 
+  it.each([1, 2] as const)('keeps command presentation neutral on API %s', (apiVersion) => {
+    setState('serverStatus', { state: 'running', url: 'http://localhost:4096', apiVersion });
+    const commands = getSlashCommands({
+      hasCurrentSession: true,
+      canInit: false,
+      onConnectProvider: () => {},
+      onOpenSettings: () => {},
+      onExportSession: () => {},
+      onPauseSession: vi.fn(async () => {}),
+      onGenerateStats: () => {},
+      customCommands: [
+        {
+          name: 'audit-background',
+          source: 'command',
+          template: 'Private prompt',
+          agent: 'general',
+          subtask: true,
+        },
+        { name: 'ordinary', source: 'command', template: '', description: 'Review code' },
+      ],
+    });
+    const audit = commands.find((command) => command.name === 'audit-background');
+    expect(audit?.description).toBe('Runs according to its OpenCode definition');
+    expect(audit?.acceptsArguments).toBe(true);
+    expect(audit?.help).toEqual(
+      apiVersion === 2 ? expect.stringContaining('OpenCode decides') : undefined
+    );
+    expect(commands.find((command) => command.name === 'ordinary')?.description).toBe(
+      'Review code'
+    );
+    expect(JSON.stringify(commands)).not.toContain('Private prompt');
+  });
+
   it('keeps reserved built-ins hidden when a custom command reuses the name', () => {
     const commands = getSlashCommands({
       hasCurrentSession: true,

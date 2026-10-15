@@ -81,6 +81,31 @@ describe('command helpers', () => {
     expect(clientMocks.sessionGet).toHaveBeenCalled();
   });
 
+  it('reconciles an uncertain command admission without replay or changing parent controls', async () => {
+    const { stateModule, hookModule } = await loadModules();
+    stateModule.setState('activeSessionId', 'session-1');
+    stateModule.setState('selectedAgent', 'build');
+    stateModule.setState('selectedModel', { providerID: 'openai', modelID: 'parent-model' });
+    stateModule.setState('commands', [{ name: 'audit', template: '', source: 'command' }]);
+    clientMocks.sessionCommand.mockRejectedValue(new Error('Connection lost after admission'));
+    clientMocks.sessionGet.mockResolvedValue(session('session-1'));
+    clientMocks.sessionMessages.mockResolvedValue([]);
+    expect(await hookModule.runSlashCommandByName('audit', 'src/auth "error handling"')).toBe(
+      false
+    );
+    expect(clientMocks.sessionCommand).toHaveBeenCalledOnce();
+    expect(clientMocks.sessionGet).toHaveBeenCalled();
+    expect(clientMocks.sessionMessages).toHaveBeenCalled();
+    expect(stateModule.state.activeSessionId).toBe('session-1');
+    expect(stateModule.state.selectedAgent).toBe('build');
+    expect(stateModule.state.selectedModel).toEqual({
+      providerID: 'openai',
+      modelID: 'parent-model',
+    });
+    expect(stateModule.error()).toBe('Connection lost after admission');
+    expect(sessionSendAsync).not.toHaveBeenCalled();
+  });
+
   it('runs custom slash commands against the session command API', async () => {
     const { stateModule, hookModule } = await loadModules();
 

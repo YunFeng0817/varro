@@ -2,6 +2,33 @@
 import { expect, test } from '@playwright/test';
 import { getE2EState } from './helpers';
 
+test('opens a native child result by canonical identity and returns to the parent', async ({
+  page,
+}) => {
+  await page.goto('/e2e/harness/index.html?scenario=subagent-sessions&subagentResult=1');
+  const title = page.locator('.interactive-session > .chat-header .chat-header-title-text');
+  await expect(title).toHaveText('Parent orchestration');
+  const composer = page.locator('[role="textbox"][aria-multiline="true"]').first();
+  await composer.fill('Keep this parent draft');
+  await expect(page.locator('.tool-invocation-title')).toContainText(
+    'Subagent completed: Audit auth'
+  );
+  await expect(page.locator('.tool-invocation-header-shell')).not.toContainText(
+    'Open subagent session'
+  );
+  await expect(page.locator('.tool-invocation-subagent-link')).toHaveCount(0);
+  await page.locator('.tool-invocation-header').click();
+  await expect(
+    page.locator('.tool-invocation-detail .tool-invocation-subagent-link')
+  ).toBeVisible();
+  await page.getByRole('button', { name: 'Open subagent session', exact: true }).click();
+  await expect(title).toHaveText('Inspect API routes');
+  await page.getByLabel('Back to parent session').click();
+  await expect(title).toHaveText('Parent orchestration');
+  await expect(composer).toHaveText('Keep this parent draft');
+  await expect(page.locator('.user-message-card-editable')).toHaveCount(0);
+});
+
 test('inherits auto mode for a child permission and replies once without a prompt', async ({
   page,
 }) => {

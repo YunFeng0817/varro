@@ -1720,6 +1720,67 @@ describe('useOpenCode session state flows', () => {
     }
   });
 
+  it('reconciles repeated native child result events through history without selecting the child or duplicating results', async () => {
+    const handlers = installServerEventHandlers();
+    mockRuntimeBootstrap();
+    const parent = session('session-1');
+    const child = { ...session('native-child'), parentID: parent.id };
+    const result: MessageEntry = {
+      info: { ...userMessage('native-result'), time: { created: 3 } },
+      parts: [
+        {
+          id: 'native-result:content:0',
+          messageID: 'native-result',
+          sessionID: parent.id,
+          type: 'text',
+          synthetic: true,
+          text: '<subagent sessionID="native-child">\nAudit complete\n</subagent>',
+          subagentResult: { sessionID: child.id, state: 'completed', description: 'Audit auth' },
+        },
+      ],
+    };
+    clientMocks.sessionGet.mockImplementation(async (id) => (id === child.id ? child : parent));
+    clientMocks.sessionMessages.mockResolvedValue([result]);
+    const { stateModule, hookModule } = await loadModules();
+    const dispose = createRoot((cleanup) => {
+      hookModule.useOpenCode();
+      return cleanup;
+    });
+    try {
+      await vi.waitFor(() => expect(handlers.has('session.next.synthetic')).toBe(true));
+      stateModule.setState('sessions', [parent]);
+      stateModule.setState('activeSessionId', parent.id);
+      stateModule.setState('selectedAgent', 'build');
+      stateModule.setState('selectedModel', { providerID: 'fixture', modelID: 'parent-model' });
+      handlers.get('session.created')?.({ properties: { info: child } });
+      handlers.get('session.next.synthetic')?.({ properties: { sessionID: parent.id } });
+      await vi.waitFor(() =>
+        expect(stateModule.state.messages.map((entry) => entry.info.id)).toEqual(['native-result'])
+      );
+      const retained = stateModule.state.messages[0];
+      handlers.get('session.next.synthetic')?.({ properties: { sessionID: parent.id } });
+      await vi.waitFor(() => expect(clientMocks.sessionMessages).toHaveBeenCalledTimes(2));
+      expect(stateModule.state.messages).toHaveLength(1);
+      expect(stateModule.state.messages[0]).toBe(retained);
+      expect(stateModule.state.messages[0]?.parts[0]).toMatchObject({
+        subagentResult: { sessionID: child.id, state: 'completed' },
+      });
+      expect(stateModule.state.sessions.find((entry) => entry.id === child.id)?.parentID).toBe(
+        parent.id
+      );
+      expect(stateModule.state.activeSessionId).toBe(parent.id);
+      expect(stateModule.state.selectedAgent).toBe('build');
+      expect(stateModule.state.selectedModel).toEqual({
+        providerID: 'fixture',
+        modelID: 'parent-model',
+      });
+      expect(clientMocks.sessionCommand).not.toHaveBeenCalled();
+      expect(clientMocks.sessionSendAsync).not.toHaveBeenCalled();
+    } finally {
+      dispose();
+    }
+  });
+
   it('inserts a child idle sync after its parent task anchor', async () => {
     const handlers = installServerEventHandlers();
     mockRuntimeBootstrap();

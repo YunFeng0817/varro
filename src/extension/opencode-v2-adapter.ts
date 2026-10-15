@@ -1158,29 +1158,17 @@ export class OpenCodeV2Adapter {
       }
     }
     if (route === '/command' && method === 'GET') {
-      // V2 exposes executable callbacks, not their templates. Keep the UI's text fields defined.
+      // The native registry owns precedence, including Markdown/plugin overrides. Config
+      // documents are not a command catalog and cannot establish delegation mode.
       const commands = (await data<CommandInfo[]>('GET', query('/api/command', true))).map(
         (command) => ({
-          ...command,
+          name: command.name,
           description: command.description ?? '',
+          source: 'command',
           template: '',
           hints: [],
         })
       );
-      const config = asRecord(await this.request('GET', '/config', undefined, options));
-      for (const [name, value] of Object.entries(asRecord(config?.commands) ?? {})) {
-        const command = asRecord(value);
-        if (!command || !isString(command.template)) continue;
-        const normalized = {
-          name,
-          description: isString(command.description) ? command.description : '',
-          template: command.template,
-          hints: [],
-        };
-        const existing = commands.findIndex((entry) => entry.name === name);
-        if (existing >= 0) commands[existing] = normalized;
-        else commands.push(normalized);
-      }
       const skills = await data<SkillInfo[]>('GET', query('/api/skill', true));
       return [
         ...commands,

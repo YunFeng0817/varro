@@ -449,7 +449,26 @@ export function projectV2Message(
     };
   }
   if (message.type === 'synthetic') {
-    return { info, parts: [part(0, 'text', { text: message.text, synthetic: true })] };
+    const metadata = message.metadata;
+    const state = metadata?.state;
+    const subagentResult =
+      metadata?.source === 'subagent' &&
+      isString(metadata.childID) &&
+      metadata.childID.length > 0 &&
+      (state === 'completed' || state === 'error' || state === 'cancelled')
+        ? {
+            sessionID: metadata.childID,
+            state,
+            description: message.description,
+            agent: isString(metadata.agent) ? metadata.agent : undefined,
+          }
+        : undefined;
+    const fields: UnknownRecord = { text: message.text, synthetic: true };
+    if (subagentResult) fields.subagentResult = subagentResult;
+    return {
+      info,
+      parts: [part(0, 'text', fields)],
+    };
   }
   if (message.type === 'compaction')
     return {

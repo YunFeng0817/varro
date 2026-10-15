@@ -1386,6 +1386,12 @@ describe('ToolCall', () => {
   });
 
   it('uses the resolved task metadata model before stale agent or parent state', () => {
+    setState('sessions', [
+      session('subagent-session-1', {
+        parentID: 'session-1',
+        model: { providerID: 'openai', id: 'stale-session-model', variant: 'low' },
+      }),
+    ]);
     setState('allAgents', [
       {
         name: 'explore',
@@ -1432,6 +1438,109 @@ describe('ToolCall', () => {
     const detail = container?.querySelector('.structured-tool-card')?.textContent || '';
     expect(detail).toContain('modelopenai/gpt-5.6-terra');
     expect(detail).toContain('reasoningdefault');
+  });
+
+  it.each(['running', 'completed', 'error'] as const)(
+    'shows the actual child session model for a %s task without loaded child messages',
+    (status) => {
+      setState('allAgents', [
+        {
+          name: 'explore',
+          mode: 'subagent',
+          permission: [],
+          model: { providerID: 'openai', modelID: 'agent-default' },
+          variant: 'high',
+        },
+      ]);
+      setState('sessions', [
+        session('subagent-session-1', {
+          parentID: 'session-1',
+          model: { providerID: 'fixture', id: 'command-override' },
+        }),
+      ]);
+      const common = {
+        input: { subagent_type: 'explore' },
+        metadata: { sessionID: 'subagent-session-1' },
+        time: { start: 0, end: 1 },
+      };
+      const part: ToolPart = {
+        id: 'tool-1',
+        sessionID: 'session-1',
+        messageID: 'message-1',
+        type: 'tool',
+        callID: 'call-1',
+        tool: 'task',
+        state:
+          status === 'error'
+            ? { ...common, status, error: 'Controlled provider failure' }
+            : status === 'completed'
+              ? { ...common, status, title: 'Command result', output: 'Done' }
+              : { ...common, status, title: 'Command running' },
+      };
+      setState('messages', [
+        {
+          info: assistantMessage('message-1', {
+            providerID: 'openai',
+            modelID: 'parent-model',
+            variant: 'medium',
+          }),
+          parts: [part],
+        },
+      ]);
+
+      cleanup = render(() => ToolCall({ part }), container!);
+      container?.querySelector<HTMLButtonElement>('.tool-invocation-header')?.click();
+
+      const detail = container?.querySelector('.structured-tool-card')?.textContent || '';
+      expect(detail).toContain('modelfixture/command-override');
+      expect(detail).toContain('reasoningdefault');
+      expect(detail).not.toContain('agent-default');
+      expect(detail).not.toContain('parent-model');
+    }
+  );
+
+  it('updates task details when child session metadata arrives and survives child history unloading', () => {
+    const part: ToolPart = {
+      id: 'tool-1',
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      type: 'tool',
+      callID: 'call-1',
+      tool: 'task',
+      state: {
+        ...completedState({ subagent_type: 'explore' }, 'Command result', 'Done'),
+        metadata: { sessionID: 'subagent-session-1' },
+      },
+    };
+    cleanup = render(() => ToolCall({ part }), container!);
+    container?.querySelector<HTMLButtonElement>('.tool-invocation-header')?.click();
+
+    setState('sessions', [
+      session('subagent-session-1', {
+        parentID: 'session-1',
+        model: { providerID: 'fixture', id: 'command-override', variant: 'low' },
+      }),
+    ]);
+    expect(container?.textContent).toContain('modelfixture/command-override');
+    expect(container?.textContent).toContain('reasoninglow');
+
+    setState('messages', [
+      {
+        info: assistantMessage('child-message', {
+          sessionID: 'subagent-session-1',
+          providerID: 'fixture',
+          modelID: 'executed-model',
+          variant: 'high',
+        }),
+        parts: [],
+      },
+    ]);
+    expect(container?.textContent).toContain('modelfixture/executed-model');
+    expect(container?.textContent).toContain('reasoninghigh');
+
+    setState('messages', []);
+    expect(container?.textContent).toContain('modelfixture/command-override');
+    expect(container?.textContent).toContain('reasoninglow');
   });
 
   it('shows inherited model details for agents without a configured model', () => {
@@ -1604,6 +1713,53 @@ describe('ToolCall', () => {
     expect(selectSessionMock).toHaveBeenCalledWith('subagent-session-1');
     expect(getDirectSessionReturnId('subagent-session-1')).toBe('session-1');
   });
+
+  it.each(['completed', 'error'] as const)(
+    'opens a %s child using native metadata instead of a matching title',
+    (status) => {
+      setState('activeSessionId', 'session-1');
+      setState('sessions', [
+        session('wrong-child', { title: 'Audit auth', parentID: 'session-1' }),
+      ]);
+      const part: ToolPart = {
+        id: 'native-result',
+        sessionID: 'session-1',
+        messageID: 'native-message',
+        type: 'tool',
+        tool: 'task',
+        callID: 'native-result',
+        state:
+          status === 'completed'
+            ? {
+                ...completedState({ description: 'Audit auth' }, 'Audit auth', 'Result'),
+                metadata: { sessionID: 'native-child' },
+              }
+            : {
+                status: 'error',
+                input: { description: 'Audit auth' },
+                error: 'Child failed',
+                metadata: { sessionID: 'native-child' },
+                time: { start: 0, end: 1 },
+              },
+      };
+      cleanup = render(() => ToolCall({ part }), container!);
+      expect(selectSessionMock).not.toHaveBeenCalled();
+      expect(container?.querySelector('.tool-invocation-header-shell')?.textContent).not.toContain(
+        'Open subagent session'
+      );
+      expect(container?.querySelector('.tool-invocation-subagent-link')).toBeNull();
+      container?.querySelector<HTMLButtonElement>('.tool-invocation-header')?.click();
+      const open = container?.querySelector<HTMLButtonElement>(
+        '.tool-invocation-detail .tool-invocation-subagent-link'
+      );
+      expect(open?.textContent).toBe('Open subagent session');
+      open?.click();
+      expect(selectSessionMock).toHaveBeenCalledExactlyOnceWith('native-child');
+      expect(getDirectSessionReturnId('native-child')).toBe('session-1');
+      container?.querySelector<HTMLButtonElement>('.tool-invocation-header')?.click();
+      expect(container?.querySelector('.tool-invocation-subagent-link')).toBeNull();
+    }
+  );
 
   it('opens a resumed subagent session from task_id', () => {
     setState('activeSessionId', 'session-1');

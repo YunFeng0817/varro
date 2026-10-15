@@ -89,6 +89,53 @@ function renderUserContent(parts: Part[]) {
   cleanup = render(() => UserMessageContent({ parts }), container!);
 }
 
+describe('native subagent results', () => {
+  it.each(['completed', 'error', 'cancelled'] as const)(
+    'projects a %s result once without changing native identities or exposing an editable prompt',
+    (resultState) => {
+      const part: TextPart = {
+        ...textPart(
+          'native-result',
+          '<subagent sessionID="wrong-child">\nAudit result\n</subagent>'
+        ),
+        synthetic: true,
+        subagentResult: {
+          sessionID: 'native-child',
+          state: resultState,
+          description: 'Audit auth',
+          agent: 'general',
+        },
+      };
+      const parsed = parseUserMessageContent([part]);
+      expect(parsed.messageTexts).toEqual([]);
+      expect(parsed.attachments).toEqual([]);
+      expect(parsed.automaticParts).toHaveLength(1);
+      expect(parsed.automaticParts[0]).toMatchObject({
+        id: part.id,
+        messageID: part.messageID,
+        sessionID: part.sessionID,
+        tool: 'task',
+        state: {
+          status: resultState === 'completed' ? 'completed' : 'error',
+          metadata: { sessionID: 'native-child' },
+        },
+      });
+      const action = parsed.automaticParts[0]!;
+      if (action.state.status === 'completed') expect(action.state.output).toBe('Audit result');
+      expect(getUserMessagePreviewText([part])).toBe('(no content)');
+      expect(hasUserMessageEditableContent([part])).toBe(false);
+    }
+  );
+
+  it('does not treat user-written subagent markup as a native result', () => {
+    const parsed = parseUserMessageContent([
+      textPart('user-text', '<subagent sessionID="fake">Result</subagent>'),
+    ]);
+    expect(parsed.automaticParts).toEqual([]);
+    expect(parsed.messageTexts).toHaveLength(1);
+  });
+});
+
 it('renders independent problem links with file and line labels and restores them for editing', () => {
   const send = installSendToExtension();
   const references = [

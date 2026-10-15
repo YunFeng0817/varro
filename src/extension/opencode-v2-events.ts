@@ -263,6 +263,8 @@ export function projectV2Event(value: unknown, context: V2MessageContext = {}): 
       'agent.updated',
       'integration.updated',
       'credential.updated',
+      'command.updated',
+      'skill.updated',
     ].includes(event.type)
   )
     return emit('catalog.updated');

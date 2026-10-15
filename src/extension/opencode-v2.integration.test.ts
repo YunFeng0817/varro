@@ -77,6 +77,15 @@ describe.skipIf(!binary)('released OpenCode adapter contract', () => {
       for await (const chunk of request) chunks.push(Buffer.from(chunk));
       const payload = asRecord(JSON.parse(Buffer.concat(chunks).toString()));
       modelRequests.push(payload);
+      if (payload?.model === 'fixture-error') {
+        response.writeHead(400, { 'content-type': 'application/json' });
+        response.end(
+          JSON.stringify({
+            error: { message: 'Fixture child execution failed', type: 'invalid_request_error' },
+          })
+        );
+        return;
+      }
       if (payload?.stream === true) {
         await streamGate;
         response.writeHead(200, { 'content-type': 'text/event-stream' });
@@ -201,6 +210,20 @@ describe.skipIf(!binary)('released OpenCode adapter contract', () => {
       process.env.VARRO_OPENCODE_TEST_VERSION ??
       spawnSync(binary!, ['--version'], { encoding: 'utf8', timeout: 10000 }).stdout.trim();
     if (/^(?:opencode\s+v?)?2\./.test(version)) {
+      const commandDirectory = join(root, 'workspace/.opencode/commands');
+      await mkdir(commandDirectory, { recursive: true });
+      await writeFile(
+        join(commandDirectory, 'fixture-audit.md'),
+        '---\ndescription: Audit fixture\nagent: general\nmodel: fixture/fixture-command\nsubagent: true\n---\nAudit $ARGUMENTS. Do not call tools.\n'
+      );
+      await writeFile(
+        join(commandDirectory, 'fixture-launch-error.md'),
+        '---\nagent: fixture-agent-does-not-exist\nsubagent: true\n---\nReply.\n'
+      );
+      await writeFile(
+        join(commandDirectory, 'fixture-child-error.md'),
+        '---\nagent: general\nmodel: fixture/fixture-error\nsubagent: true\n---\nReply.\n'
+      );
       await mkdir(join(root, 'config/opencode'), { recursive: true });
       await writeFile(
         join(root, 'config/opencode/opencode.json'),
@@ -224,7 +247,17 @@ describe.skipIf(!binary)('released OpenCode adapter contract', () => {
             fixture: {
               package: '@opencode/ai/providers/openai-compatible',
               settings: { baseURL: `http://127.0.0.1:${address.port}/v1`, apiKey: 'fixture-only' },
-              models: { fixture: { name: 'Fixture', limit: { context: 32000, output: 1000 } } },
+              models: {
+                fixture: { name: 'Fixture', limit: { context: 32000, output: 1000 } },
+                'fixture-command': {
+                  name: 'Command fixture',
+                  limit: { context: 32000, output: 1000 },
+                },
+                'fixture-error': {
+                  name: 'Failing child fixture',
+                  limit: { context: 32000, output: 1000 },
+                },
+              },
             },
           },
         })
@@ -618,10 +651,20 @@ describe.skipIf(!binary)('released OpenCode adapter contract', () => {
       expect(health?.version).toBe(process.env.VARRO_OPENCODE_TEST_VERSION);
     const agents = await transport.request('GET', '/agent');
     expect(Array.isArray(agents)).toBe(true);
-    const commands = (await transport.request('GET', '/command')) as UnknownRecord[];
-    const command = commands.find((entry) => entry.name === 'fixture-note');
-    expect(command).toBeDefined();
-    expect(isString(command?.description || command?.template)).toBe(true);
+    // Native plugin activation and registry updates are asynchronous.
+    await vi.waitFor(
+      async () => {
+        const commands = (await transport.request('GET', '/command')) as UnknownRecord[];
+        const command = commands.find((entry) => entry.name === 'fixture-note');
+        expect(command).toBeDefined();
+        if (transport.version === 2) {
+          expect(command).toMatchObject({ description: '', source: 'command', template: '' });
+        } else {
+          expect(isString(command?.description || command?.template)).toBe(true);
+        }
+      },
+      { timeout: 10000 }
+    );
     const providers = asRecord(await transport.request('GET', '/provider'));
     await writeFile(
       join(root, 'native-bootstrap.json'),
@@ -1061,6 +1104,158 @@ describe.skipIf(!binary)('released OpenCode adapter contract', () => {
       await transport.request('DELETE', `/session/${id}`);
     }
   }, 45000);
+
+  it('delegates a native command once with arguments and attachments while preserving the parent model', async (context) => {
+    if (transport.version !== 2) {
+      context.skip();
+      return;
+    }
+    const parent = asRecord(
+      await transport.request('POST', '/session', { title: 'Delegated command fixture' })
+    );
+    const id = String(parent?.id);
+    let childID: string | undefined;
+    try {
+      await transport.request('POST', `/api/session/${id}/model`, {
+        model: { providerID: 'fixture', id: 'fixture' },
+      });
+      const before = asRecord(await transport.request('GET', `/session/${id}`));
+      const catalog = (await transport.request('GET', '/command')) as UnknownRecord[];
+      expect(catalog.find((entry) => entry.name === 'fixture-audit')).toEqual({
+        name: 'fixture-audit',
+        description: 'Audit fixture',
+        source: 'command',
+        template: '',
+        hints: [],
+      });
+      await transport.request('POST', `/session/${id}/command`, {
+        command: 'fixture-audit',
+        arguments: 'src/auth "error handling"',
+        parts: [
+          {
+            type: 'file',
+            mime: 'text/plain',
+            filename: 'context.txt',
+            url: 'data:text/plain;base64,Y29udGV4dA==',
+          },
+        ],
+      });
+      await vi.waitFor(
+        async () => {
+          const children = (await transport.request(
+            'GET',
+            `/session/${id}/children`
+          )) as UnknownRecord[];
+          expect(children).toHaveLength(1);
+          childID = String(children[0]?.id);
+          expect(children[0]).toMatchObject({
+            parentID: id,
+            agent: 'general',
+            model: { providerID: 'fixture', modelID: 'fixture-command' },
+          });
+          const messages = (await transport.request(
+            'GET',
+            `/session/${id}/message`
+          )) as MessageEntry[];
+          const results = messages
+            .flatMap((message) => message.parts)
+            .filter((part) => part.type === 'text' && part.subagentResult);
+          expect(results).toHaveLength(1);
+          expect(results[0]).toMatchObject({
+            subagentResult: { sessionID: childID, state: 'completed', agent: 'general' },
+          });
+        },
+        { timeout: 30000 }
+      );
+      const childMessages = (await transport.request(
+        'GET',
+        `/session/${childID}/message`
+      )) as MessageEntry[];
+      const childPrompt = childMessages.find((message) => message.info.role === 'user');
+      expect(childPrompt?.parts).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            type: 'text',
+            text: expect.stringContaining('Audit src/auth "error handling". Do not call tools.'),
+          }),
+          expect.objectContaining({ type: 'file', filename: 'context.txt' }),
+        ])
+      );
+      const after = asRecord(await transport.request('GET', `/session/${id}`));
+      expect(after?.model).toEqual(before?.model);
+      expect(after?.agent).toBe(before?.agent);
+      const recovered = (await transport.request(
+        'GET',
+        `/session/${id}/message`
+      )) as MessageEntry[];
+      const resultParts = recovered
+        .flatMap((message) => message.parts)
+        .filter((part) => part.type === 'text' && part.subagentResult);
+      expect(resultParts).toHaveLength(1);
+    } finally {
+      if (childID) await transport.request('DELETE', `/session/${childID}`);
+      await transport.request('DELETE', `/session/${id}`);
+    }
+  }, 45000);
+
+  it.for(['launch', 'child'] as const)(
+    'attributes a native command %s failure to the correct session',
+    { timeout: 45000 },
+    async (phase, context) => {
+      if (transport.version !== 2) {
+        context.skip();
+        return;
+      }
+      const parent = asRecord(
+        await transport.request('POST', '/session', { title: `${phase} failure fixture` })
+      );
+      const id = String(parent?.id);
+      let childID: string | undefined;
+      try {
+        if (phase === 'launch') {
+          await expect(
+            transport.request('POST', `/session/${id}/command`, {
+              command: 'fixture-launch-error',
+              arguments: '',
+              model: 'fixture/fixture',
+            })
+          ).rejects.toThrow('Agent not found');
+          expect(await transport.request('GET', `/session/${id}/children`)).toEqual([]);
+          return;
+        }
+        await transport.request('POST', `/session/${id}/command`, {
+          command: `fixture-${phase}-error`,
+          arguments: '',
+          model: 'fixture/fixture',
+        });
+        await vi.waitFor(
+          async () => {
+            const children = (await transport.request(
+              'GET',
+              `/session/${id}/children`
+            )) as UnknownRecord[];
+            expect(children).toHaveLength(1);
+            childID = String(children[0]?.id);
+            const messages = (await transport.request(
+              'GET',
+              `/session/${id}/message`
+            )) as MessageEntry[];
+            const results = messages
+              .flatMap((message) => message.parts)
+              .filter((part) => part.type === 'text' && part.subagentResult);
+            expect(results).toHaveLength(1);
+            expect(results[0]).toMatchObject({
+              subagentResult: { sessionID: childID, state: 'error' },
+            });
+          },
+          { timeout: 30000 }
+        );
+      } finally {
+        if (childID) await transport.request('DELETE', `/session/${childID}`);
+        await transport.request('DELETE', `/session/${id}`);
+      }
+    }
+  );
 
   it('attaches a selected skill to a v2 prompt without exposing generated instructions', async () => {
     if (transport.version !== 2) return;

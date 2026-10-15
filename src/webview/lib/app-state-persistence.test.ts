@@ -201,26 +201,55 @@ describe('composer draft persistence', () => {
     expect(vscodeState[STORAGE_KEYS.inputDraft]).toBe('Keep this VS Code draft');
   });
 
-  it('coalesces draft writes, keeps pending reads coherent, and flushes on pagehide', () => {
+  it.each(['sidebar', 'editor'] as const)(
+    'checkpoints the latest %s draft before a reload can snapshot the old value',
+    (surface) => {
+      vi.useFakeTimers();
+      let vscodeState: UnknownRecord = {
+        [STORAGE_KEYS.inputDraft]: 'Older persisted draft',
+        unrelated: 'Preserve other webview state',
+      };
+      // SAFETY: These fixtures provide the native host context and state API.
+      (window as { __initialWebviewState?: unknown }).__initialWebviewState = {
+        webviewContext: { viewId: surface, surface, initialRoute: { type: 'new-session' } },
+      };
+      const setState = vi.fn((state: UnknownRecord) => {
+        vscodeState = state;
+      });
+      // SAFETY: These fixtures provide the native host context and state API.
+      (window as { __vscodeWebviewState?: unknown }).__vscodeWebviewState = {
+        getState: () => vscodeState,
+        setState,
+      };
+      const appState = createAppState();
+      setState.mockClear();
+
+      appState.setInputText('Newest visible draft');
+
+      // VS Code can snapshot state before pagehide or the draft debounce fires.
+      expect(vscodeState[STORAGE_KEYS.inputDraft]).toBe('Newest visible draft');
+      expect(vscodeState.unrelated).toBe('Preserve other webview state');
+      expect(setState).toHaveBeenCalledOnce();
+      expect(window.localStorage.getItem(STORAGE_KEYS.inputDraft)).toBeNull();
+
+      appState.setInputText('Newest visible draft');
+      vi.runAllTimers();
+      window.dispatchEvent(new Event('pagehide'));
+      expect(setState).toHaveBeenCalledOnce();
+      expect(readInputDraft()).toBe('Newest visible draft');
+
+      appState.setInputText('');
+      expect(vscodeState[STORAGE_KEYS.inputDraft]).toBeUndefined();
+      expect(createAppState().inputText()).toBe('');
+      vi.runAllTimers();
+      expect(readInputDraft()).toBeNull();
+    }
+  );
+
+  it('coalesces browser draft writes, keeps pending reads coherent, and flushes on pagehide', () => {
     vi.useFakeTimers();
-    let vscodeState: UnknownRecord = {};
-    const setState = vi.fn((state: UnknownRecord) => {
-      vscodeState = state;
-    });
-    // SAFETY: The fixture provides the host-owned initial webview state.
-    (window as { __initialWebviewState?: unknown }).__initialWebviewState = {
-      webviewContext: {
-        viewId: 'sidebar',
-        surface: 'sidebar',
-        initialRoute: { type: 'new-session' },
-      },
-    };
-    // SAFETY: The fixture provides the unknown fields read by this statement.
-    (window as { __vscodeWebviewState?: unknown }).__vscodeWebviewState = {
-      getState: () => vscodeState,
-      setState,
-    };
     const appState = createAppState();
+    const setState = vi.spyOn(Storage.prototype, 'setItem');
     setState.mockClear();
 
     appState.setInputText('a');
@@ -230,42 +259,29 @@ describe('composer draft persistence', () => {
     expect(readInputDraft()).toBe('abc');
     expect(setState).not.toHaveBeenCalled();
     expect(createAppState().inputText()).toBe('abc');
-    expect(setState).toHaveBeenCalledOnce();
+    expect(setState).not.toHaveBeenCalled();
     setState.mockClear();
 
     vi.advanceTimersByTime(99);
     expect(setState).not.toHaveBeenCalled();
     vi.advanceTimersByTime(1);
     expect(setState).toHaveBeenCalledOnce();
-    expect(vscodeState[STORAGE_KEYS.inputDraft]).toBe('abc');
+    expect(window.localStorage.getItem(STORAGE_KEYS.inputDraft)).toBe(JSON.stringify('abc'));
 
     appState.setInputText('flush before unload');
     window.dispatchEvent(new Event('pagehide'));
 
     expect(setState).toHaveBeenCalledTimes(2);
-    expect(vscodeState[STORAGE_KEYS.inputDraft]).toBe('flush before unload');
+    expect(window.localStorage.getItem(STORAGE_KEYS.inputDraft)).toBe(
+      JSON.stringify('flush before unload')
+    );
+    setState.mockRestore();
   });
 
   it('cancels a pending draft write when the draft is cleared', () => {
     vi.useFakeTimers();
-    let vscodeState: UnknownRecord = {};
-    const setState = vi.fn((state: UnknownRecord) => {
-      vscodeState = state;
-    });
-    // SAFETY: The fixture provides the host-owned initial webview state.
-    (window as { __initialWebviewState?: unknown }).__initialWebviewState = {
-      webviewContext: {
-        viewId: 'sidebar',
-        surface: 'sidebar',
-        initialRoute: { type: 'new-session' },
-      },
-    };
-    // SAFETY: The fixture provides the unknown fields read by this statement.
-    (window as { __vscodeWebviewState?: unknown }).__vscodeWebviewState = {
-      getState: () => vscodeState,
-      setState,
-    };
     const appState = createAppState();
+    const setState = vi.spyOn(Storage.prototype, 'setItem');
     setState.mockClear();
 
     appState.setInputText('do not restore this');
@@ -273,8 +289,9 @@ describe('composer draft persistence', () => {
     vi.runAllTimers();
 
     expect(readInputDraft()).toBeNull();
-    expect(vscodeState[STORAGE_KEYS.inputDraft]).toBeUndefined();
+    expect(window.localStorage.getItem(STORAGE_KEYS.inputDraft)).toBeNull();
     expect(setState).not.toHaveBeenCalled();
+    setState.mockRestore();
   });
 
   it('restores a manual editor workspace selection across path spelling changes', () => {

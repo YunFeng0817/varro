@@ -1,5 +1,23 @@
 import { expect, test } from '@playwright/test';
 
+test('explains native command execution without inventing a delegation badge', async ({ page }) => {
+  await page.goto('/e2e/harness/index.html?scenario=slash-commands&nativeCommand=1');
+  const composer = page.locator('[role="textbox"][aria-multiline="true"]').first();
+  await composer.fill('/aud');
+  await expect(
+    page.locator('.composer-completion-item').filter({ hasText: '/audit' })
+  ).toContainText('Runs according to its OpenCode definition');
+  await expect(page.locator('.composer-completion-help')).toContainText(
+    'Follow children in the session list'
+  );
+  await expect(page.locator('.composer-completion-help')).toContainText(
+    'results return to the parent'
+  );
+  await expect(page.locator('.composer-completion-item')).not.toContainText('Delegated');
+  await composer.press('Tab');
+  await expect(composer).toContainText('/audit');
+});
+
 test('sends multiple inline skill chips without duplicating them above the message', async ({
   page,
 }, testInfo) => {

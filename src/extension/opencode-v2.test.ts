@@ -1442,7 +1442,7 @@ describe('v2 transcript and permission projection', () => {
       return { data: [{ name: 'inspect' }] };
     });
     expect(await adapter.request('GET', '/command', undefined)).toEqual([
-      { name: 'inspect', description: '', template: '', hints: [] },
+      { name: 'inspect', description: '', source: 'command', template: '', hints: [] },
       {
         name: 'code-review',
         description: 'Inspect code',
@@ -1453,21 +1453,29 @@ describe('v2 transcript and permission projection', () => {
     ]);
   });
 
-  it('normalizes description-less native commands for slash-command search', async () => {
-    const adapter = new OpenCodeV2Adapter(async (_method, path) =>
-      path.startsWith('/api/config')
+  it('uses the native registry without leaking templates or guessing delegation from config', async () => {
+    const paths: string[] = [];
+    const adapter = new OpenCodeV2Adapter(async (_method, path) => {
+      paths.push(path);
+      return path.startsWith('/api/config')
         ? [{ type: 'document', info: { commands: { local: { template: 'Local prompt' } } } }]
         : {
             data: path.startsWith('/api/skill')
               ? []
               : [{ name: 'inspect' }, { name: 'explain', description: 'Explain this code' }],
-          }
-    );
+          };
+    });
     expect(await adapter.request('GET', '/command', undefined)).toEqual([
-      { name: 'inspect', description: '', template: '', hints: [] },
-      { name: 'explain', description: 'Explain this code', template: '', hints: [] },
-      { name: 'local', description: '', template: 'Local prompt', hints: [] },
+      { name: 'inspect', description: '', source: 'command', template: '', hints: [] },
+      {
+        name: 'explain',
+        description: 'Explain this code',
+        source: 'command',
+        template: '',
+        hints: [],
+      },
     ]);
+    expect(paths.some((path) => path.startsWith('/api/config'))).toBe(false);
   });
   const message: SessionMessageAssistant = {
     id: 'msg_assistant',

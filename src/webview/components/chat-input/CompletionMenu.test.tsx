@@ -102,6 +102,25 @@ afterEach(() => {
 });
 
 describe('CompletionMenu', () => {
+  it('shows native execution help only for the selected command', () => {
+    const [selectedIndex, setSelectedIndex] = createSignal(0);
+    cleanup = render(
+      () => (
+        <CompletionMenu
+          items={[{ ...slashItem, help: 'OpenCode decides where this runs.' }, agentItem]}
+          selectedIndex={selectedIndex()}
+          onSelect={vi.fn()}
+        />
+      ),
+      container!
+    );
+    expect(container?.querySelector('[role="note"]')?.textContent).toBe(
+      'OpenCode decides where this runs.'
+    );
+    setSelectedIndex(1);
+    expect(container?.querySelector('[role="note"]')).toBeNull();
+  });
+
   it('renders completion items, marks the selected entry, and forwards selection', () => {
     const onSelect = vi.fn();
 
