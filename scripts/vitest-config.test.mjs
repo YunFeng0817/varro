@@ -60,7 +60,9 @@ test('runs native Windows inspection after all other projects without relaxing c
   const native = config.test.projects.find((project) => project.test.name === 'windows-native');
   assert.equal(native.test.environment, 'node');
   assert.equal(native.test.setupFiles, undefined);
-  assert.deepEqual(await projectFiles(native), [
+  assert.equal(native.test.fileParallelism, false);
+  assert.deepEqual((await projectFiles(native)).toSorted(), [
+    'src/extension/isolated-process.test.ts',
     'src/extension/windows-process-inspector.integration.test.ts',
   ]);
   for (const project of config.test.projects.filter((candidate) => candidate !== native)) {

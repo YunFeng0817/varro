@@ -1,4 +1,5 @@
 /* oxlint-disable anti-slop/no-module-mocking -- Keep platform path tests away from the user's home while using real filesystem fixtures. */
+import type * as fs from 'node:fs/promises';
 import {
   mkdir,
   mkdtemp,
@@ -28,11 +29,17 @@ vi.mock('os', async (importOriginal) => {
   return { ...actual, default: { ...actual, homedir }, homedir };
 });
 
+vi.mock('node:fs/promises', async (importOriginal) => {
+  const actual = await importOriginal<typeof fs>();
+  return { ...actual, symlink: vi.fn(actual.symlink) };
+});
+
 const platform = process.platform;
 const kinds = ['servers', 'opencode-v2', 'provider-quota-v2', 'scratch'] as const;
 let root: string;
 
 beforeEach(async () => {
+  vi.mocked(symlink).mockClear();
   const parent = resolve('artifacts/ai-test-data');
   await mkdir(parent, { recursive: true });
   root = await mkdtemp(join(parent, 'state-paths-'));
@@ -167,10 +174,40 @@ describe('Varro state directories', () => {
     await Promise.all(
       Array.from({ length: 8 }, () => prepareVarroStateDirectory(directory, legacy))
     );
+    expect(symlink).toHaveBeenCalledTimes(1);
     expect(await realpath(directory)).toBe(await realpath(legacy));
     await writeFile(join(legacy, 'replacement.tmp'), '{"updated":true}');
     await rename(join(legacy, 'replacement.tmp'), join(legacy, 'ses_fixture.json'));
     expect(await readFile(join(directory, 'ses_fixture.json'), 'utf8')).toBe('{"updated":true}');
+  });
+
+  it('shares preparation failures only while in flight and permits a fresh attempt', async () => {
+    const legacy = join(root, 'legacy');
+    const directory = join(root, 'native', 'opencode-v2');
+    await mkdir(legacy);
+    const failure = Object.assign(new Error('Junction creation denied'), { code: 'EACCES' });
+    vi.mocked(symlink).mockRejectedValueOnce(failure);
+    const results = await Promise.allSettled(
+      Array.from({ length: 8 }, () => prepareVarroStateDirectory(directory, legacy))
+    );
+    for (const result of results) expect(result).toEqual({ status: 'rejected', reason: failure });
+    expect(symlink).toHaveBeenCalledTimes(1);
+    await expect(prepareVarroStateDirectory(directory, legacy)).resolves.toBe(
+      await realpath(legacy)
+    );
+    expect(symlink).toHaveBeenCalledTimes(2);
+  });
+
+  it('rechecks directory conflicts after a completed preparation', async () => {
+    const legacy = join(root, 'legacy');
+    const directory = join(root, 'native');
+    await mkdir(legacy);
+    await prepareVarroStateDirectory(directory, legacy);
+    await rm(directory);
+    await mkdir(directory);
+    await expect(prepareVarroStateDirectory(directory, legacy)).rejects.toThrow(
+      'Conflicting Varro state directories'
+    );
   });
 
   it('preserves metadata and generation timing across native and legacy annotation writers', async () => {

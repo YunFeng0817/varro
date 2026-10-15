@@ -1,8 +1,12 @@
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { describe, expect, it, vi } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { completeTestCleanup, IsolatedProcessTree } from './isolated-process.test-support';
-import { findListeningPids } from './process-inspection';
+import {
+  disposeProcessInspection,
+  findListeningPids,
+  prepareProcessInspection,
+} from './process-inspection';
 
 // Only the editor-owned output channel is replaced; process and listener inspection stay real.
 // oxlint-disable-next-line anti-slop/no-module-mocking
@@ -15,6 +19,11 @@ const serverSource = `
 `;
 
 describe('isolated process teardown', () => {
+  // Compile the Windows helper before launching fixtures, not inside an identity read.
+  // Preparation grants no process evidence; capture and teardown still inspect afresh.
+  beforeAll(() => prepareProcessInspection(), 20_000);
+  afterAll(() => disposeProcessInspection());
+
   it('attempts subsequent cleanup after disposal and evidence failures', async () => {
     const completed: string[] = [];
     await expect(

@@ -5,7 +5,10 @@ import solid from 'vite-plugin-solid';
 import { configDefaults, defineConfig } from 'vitest/config';
 
 const { version } = JSON.parse(readFileSync(resolve(import.meta.dirname, 'package.json'), 'utf8'));
-const windowsNativeTest = 'src/extension/windows-process-inspector.integration.test.ts';
+const nativeProcessTests = [
+  'src/extension/windows-process-inspector.integration.test.ts',
+  'src/extension/isolated-process.test.ts',
+];
 const backendTests = ['src/{extension,shared}/**/*.test.{ts,tsx}'];
 const jsdomBackendTests = [
   'src/extension/about-view.test.ts',
@@ -38,7 +41,7 @@ export default defineConfig({
           name: 'backend',
           environment: 'node',
           include: backendTests,
-          exclude: [...configDefaults.exclude, windowsNativeTest, ...jsdomBackendTests],
+          exclude: [...configDefaults.exclude, ...nativeProcessTests, ...jsdomBackendTests],
         },
       },
       {
@@ -55,10 +58,11 @@ export default defineConfig({
         test: {
           name: 'windows-native',
           environment: 'node',
-          include: [windowsNativeTest],
+          include: nativeProcessTests,
           // PowerShell startup and Add-Type must not compete with parallel unit workers.
           // Keep the production five-second bound rather than relaxing it for CI.
           sequence: { groupOrder: 1 },
+          fileParallelism: false,
         },
       },
     ],

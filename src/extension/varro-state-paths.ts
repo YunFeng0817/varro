@@ -5,6 +5,8 @@ import { dirname, isAbsolute, join } from 'node:path';
 import { asRecord } from '../shared/type-utils';
 import { getVarroTestStateDirectory, type VarroStateKind } from './varro-test-state';
 
+const stateDirectoryPreparations = new Map<string, Promise<string>>();
+
 /** Shared across editor distributions, profiles, workspaces, and extension versions. */
 export function getVarroStateDirectory(kind: VarroStateKind): string {
   const isolated = getVarroTestStateDirectory(kind);
@@ -57,6 +59,21 @@ export async function prepareVarroStateDirectory(
   directory: string,
   legacyDirectory?: string
 ): Promise<string> {
+  const key = JSON.stringify([directory, legacyDirectory]);
+  const pending = stateDirectoryPreparations.get(key);
+  if (pending) return pending;
+  // Windows creates the junction's directory before attaching its target. A second
+  // caller must not inspect that intermediate directory as a conflicting state root.
+  const preparation = prepareStateDirectory(directory, legacyDirectory);
+  stateDirectoryPreparations.set(key, preparation);
+  try {
+    return await preparation;
+  } finally {
+    stateDirectoryPreparations.delete(key);
+  }
+}
+
+async function prepareStateDirectory(directory: string, legacyDirectory?: string): Promise<string> {
   if (legacyDirectory && (await pathExists(legacyDirectory))) {
     const legacyInfo = await lstat(legacyDirectory);
     if (!legacyInfo.isDirectory()) {
