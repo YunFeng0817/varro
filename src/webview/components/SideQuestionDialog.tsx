@@ -3,6 +3,7 @@ import {
   Show,
   batch,
   createEffect,
+  createMemo,
   createSignal,
   createUniqueId,
   onCleanup,
@@ -64,6 +65,12 @@ export function SideQuestionDialog(props: {
   const [error, setError] = createSignal('');
   const [copied, setCopied] = createSignal<number | null>(null);
   const [minimumHeight, setMinimumHeight] = createSignal(0);
+  const canSend = createMemo(
+    () =>
+      !!question().trim() &&
+      !sideQuestionUnavailableReason(false) &&
+      !sideQuestionPromptUnavailableReason(question())
+  );
   const showWelcome = () => turns().length === 0 && !submittedQuestion() && !error();
   let dialogRef: HTMLElement | undefined;
   let controller: AbortController | undefined;
@@ -438,11 +445,7 @@ export function SideQuestionDialog(props: {
                             showBusyControls={false}
                             showBusyOptions={false}
                             busyMenuOpen={false}
-                            canSend={
-                              !!question().trim() &&
-                              !sideQuestionUnavailableReason(false) &&
-                              !sideQuestionPromptUnavailableReason(question())
-                            }
+                            canSend={canSend()}
                             onSend={() => void ask()}
                             onToggleBusyMenu={() => {}}
                           />

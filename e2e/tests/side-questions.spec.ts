@@ -335,7 +335,7 @@ for (const width of [390, 1100]) {
         .map((message) => (message.type === 'api/request' ? message.payload.path : ''));
     });
     expect(writes).toHaveLength(2);
-    expect(writes!.every((path) => path.includes('/side-question'))).toBe(true);
+    expect(writes!.every((requestPath) => requestPath.includes('/side-question'))).toBe(true);
   });
 
   test(`incompatible inline content and images disable side questions at ${width}px`, async ({

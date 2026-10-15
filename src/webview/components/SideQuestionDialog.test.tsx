@@ -123,6 +123,26 @@ afterEach(() => {
 });
 
 describe('SideQuestionDialog', () => {
+  it('sends successive questions without creating unowned computations', async () => {
+    const warn = vi.spyOn(console, 'warn');
+    mount();
+    await settle();
+    for (const question of ['First question', 'Second question', 'Third question']) {
+      expect(button('Send (Enter)').disabled).toBe(true);
+      edit(question);
+      expect(button('Send (Enter)').disabled).toBe(false);
+      button('Send (Enter)').click();
+      await settle();
+    }
+    expect(bridge.apiCall).toHaveBeenCalledTimes(3);
+    expect(dialog().querySelectorAll('.side-question-answer')).toHaveLength(3);
+    button('Close side question').click();
+    expect(document.querySelector('.side-question-dialog')).toBeNull();
+    expect(warn).not.toHaveBeenCalledWith(
+      'computations created outside a `createRoot` or `render` will never be disposed'
+    );
+  });
+
   it('sends captured context once and renders the usual attachment chips in the bubble', async () => {
     const context = '[Attached file: src/file.ts]\n\n[Selection from src/other.ts lines 2-4]';
     mount('Explain these', context);
