@@ -906,6 +906,7 @@ describe('mount bridge helpers', () => {
         expandThinking: true,
         showChangedFiles: true,
         showTurnTimer: true,
+        remoteImages: 'ask',
         debugShowQuotaWarning: true,
         enableProblemsContext: false,
         desktopSessionPaneSide: 'right',
@@ -925,6 +926,7 @@ describe('mount bridge helpers', () => {
     expect(setError).not.toHaveBeenCalled();
     expect(ensureConnectionInitialized).toHaveBeenCalledTimes(1);
     expect(setDefaultPermissionModePreference).toHaveBeenCalledWith('full');
+    expect(setState).toHaveBeenCalledWith('remoteImages', 'ask');
     expect(setShowFileDiffs).toHaveBeenCalledWith(true);
     expect(setExpandThinking).toHaveBeenCalledWith(true);
     expect(setShowChangedFiles).toHaveBeenCalledWith(true);

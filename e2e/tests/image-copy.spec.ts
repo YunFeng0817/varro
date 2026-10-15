@@ -43,6 +43,11 @@ for (const mime of ['image/png', 'image/jpeg']) {
     await chip.click();
     const preview = page.locator('.chat-image-preview-img');
     await expect(preview).toBeVisible();
+    for (const side of ['top', 'right', 'bottom', 'left']) {
+      await expect(preview).toHaveCSS(`border-${side}-width`, '1px');
+      await expect(preview).toHaveCSS(`border-${side}-style`, 'solid');
+    }
+    await expect(preview).not.toHaveCSS('box-shadow', 'none');
     await expect
       .poll(() => preview.evaluate((element: HTMLImageElement) => element.naturalWidth))
       .toBe(320);

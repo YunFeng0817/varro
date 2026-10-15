@@ -18,7 +18,10 @@ const mocks = vi.hoisted(() => ({
     workspace: {
       textDocuments: [],
       getWorkspaceFolder: vi.fn(() => undefined),
-      getConfiguration: vi.fn(() => ({ get: vi.fn<() => string | undefined>(() => undefined) })),
+      getConfiguration: vi.fn(() => ({
+        get: vi.fn<() => string | undefined>(() => undefined),
+        inspect: vi.fn(() => ({ globalValue: undefined as unknown })),
+      })),
       asRelativePath: vi.fn((uri: { fsPath: string }) => uri.fsPath),
       fs: {
         readFile: vi.fn(),
@@ -46,6 +49,7 @@ import {
 } from './rest-proxy';
 import type { RestProxyCallbacks } from './rest-proxy';
 import { SharedThumbnailClient } from './image-thumbnail-shared-client';
+import { RemoteImages } from './remote-images';
 import * as workspaceProblems from './workspace-problems';
 import { OpenCodeResponseTooLargeError } from './open-code-transport';
 import { HiddenSessionManager } from './hidden-session-manager';
@@ -437,6 +441,90 @@ describe('getOpenCodeDirectoryHeaders', () => {
 });
 
 describe('RestProxy handleRequest', () => {
+  it('refuses remote-image requests when disabled without network or server access', async () => {
+    const { proxy, callbacks } = createProxy();
+    mocks.vscode.workspace.getConfiguration.mockReturnValueOnce({
+      get: vi.fn<() => string | undefined>(() => undefined),
+      inspect: vi.fn(() => ({ globalValue: 'off' })),
+    });
+    const load = vi.spyOn(RemoteImages.prototype, 'load');
+    await proxy.handleRequest(
+      makePayload(99001, 'POST', '/varro/remote-image', { url: 'https://images.test/a.png' })
+    );
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 99001,
+      error: 'Remote image loading is disabled in Varro settings',
+    });
+    expect(load).not.toHaveBeenCalled();
+    expect(callbacks.server.request).not.toHaveBeenCalled();
+    load.mockRestore();
+    proxy.dispose();
+  });
+
+  it('requires on mode before admitting automatic image requests', async () => {
+    const { proxy, callbacks } = createProxy();
+    const load = vi.spyOn(RemoteImages.prototype, 'load');
+    await proxy.handleRequest(
+      makePayload(99003, 'POST', '/varro/remote-image', {
+        url: 'https://images.test/a.png',
+        automatic: true,
+      })
+    );
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 99003,
+      error: 'Automatic remote image loading is disabled',
+    });
+    expect(load).not.toHaveBeenCalled();
+    load.mockRestore();
+    proxy.dispose();
+  });
+
+  it('admits automatic image requests in explicit on mode', async () => {
+    const { proxy, callbacks } = createProxy();
+    const config = {
+      get: vi.fn<() => string | undefined>(() => undefined),
+      inspect: vi.fn(() => ({ globalValue: 'on' })),
+    };
+    mocks.vscode.workspace.getConfiguration
+      .mockReturnValueOnce(config)
+      .mockReturnValueOnce(config)
+      .mockReturnValueOnce(config)
+      .mockReturnValueOnce(config);
+    const data = { url: 'data:image/webp;base64,AAAA', hostname: 'images.test' };
+    const load = vi.spyOn(RemoteImages.prototype, 'load').mockResolvedValue(data);
+    await proxy.handleRequest(
+      makePayload(99004, 'POST', '/varro/remote-image', {
+        url: 'https://images.test/a.png',
+        automatic: true,
+      })
+    );
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, { id: 99004, data });
+    load.mockRestore();
+    proxy.dispose();
+  });
+
+  it('handles a manually admitted remote-image request locally', async () => {
+    const { proxy, callbacks } = createProxy();
+    const config = {
+      get: vi.fn<() => string | undefined>(() => undefined),
+      inspect: vi.fn(() => ({ globalValue: 'ask' })),
+    };
+    mocks.vscode.workspace.getConfiguration
+      .mockReturnValueOnce(config)
+      .mockReturnValueOnce(config)
+      .mockReturnValueOnce(config)
+      .mockReturnValueOnce(config);
+    const data = { url: 'data:image/webp;base64,AAAA', hostname: 'images.test' };
+    const load = vi.spyOn(RemoteImages.prototype, 'load').mockResolvedValue(data);
+    await proxy.handleRequest(
+      makePayload(99002, 'POST', '/varro/remote-image', { url: 'https://images.test/a.png' })
+    );
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, { id: 99002, data });
+    expect(load).toHaveBeenCalledWith('https://images.test/a.png', expect.any(AbortSignal));
+    expect(callbacks.server.request).not.toHaveBeenCalled();
+    load.mockRestore();
+    proxy.dispose();
+  });
   it.each([true, false])(
     'notifies completion test results without changing model assignment, success=%s',
     async (success) => {
@@ -560,6 +648,7 @@ describe('RestProxy handleRequest', () => {
   it('rejects manually configured unsupported completion without creating chats', async () => {
     mocks.vscode.workspace.getConfiguration.mockReturnValueOnce({
       get: vi.fn(() => 'openai/subscription-model'),
+      inspect: vi.fn(() => ({ globalValue: undefined })),
     });
     const { proxy, callbacks } = createProxy();
     await proxy.handleRequest(

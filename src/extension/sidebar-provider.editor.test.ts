@@ -391,13 +391,17 @@ describe('SidebarProvider editor panels', () => {
         })
       )
     );
-    const listener = vscode.workspace.onDidChangeConfiguration.mock.calls.at(-1)?.[0];
-    expect(listener).toBeTypeOf('function');
+    const changeConfiguredTheme = async (theme: string) => {
+      await vscode.workspace.getConfiguration('workbench').update('colorTheme', theme);
+      editor.panel.webview.postMessage.mockClear();
+      // Notify every subscriber, including those registered when the editor opens.
+      for (const [listener] of vscode.workspace.onDidChangeConfiguration.mock.calls) {
+        listener?.({ affectsConfiguration: (key) => key === 'workbench.colorTheme' });
+      }
+    };
     try {
       vscode.window.activeColorTheme.kind = vscode.ColorThemeKind.Light;
-      await vscode.workspace.getConfiguration('workbench').update('colorTheme', 'Light Modern');
-      editor.panel.webview.postMessage.mockClear();
-      listener?.({ affectsConfiguration: (key) => key === 'workbench.colorTheme' });
+      await changeConfiguredTheme('Light Modern');
       await vi.waitFor(() =>
         expect(editor.panel.webview.postMessage).toHaveBeenCalledWith(
           expect.objectContaining({
@@ -410,9 +414,7 @@ describe('SidebarProvider editor panels', () => {
         )
       );
       // A same-kind change has no active-color-theme event, but still changes the pair.
-      await vscode.workspace.getConfiguration('workbench').update('colorTheme', 'Light+');
-      editor.panel.webview.postMessage.mockClear();
-      listener?.({ affectsConfiguration: (key) => key === 'workbench.colorTheme' });
+      await changeConfiguredTheme('Light+');
       await vi.waitFor(() =>
         expect(editor.panel.webview.postMessage).toHaveBeenCalledWith(
           expect.objectContaining({
@@ -427,6 +429,7 @@ describe('SidebarProvider editor panels', () => {
     } finally {
       vscode.window.activeColorTheme.kind = vscode.ColorThemeKind.Dark;
       editor.panel.dispose();
+      await provider.dispose();
     }
   });
 

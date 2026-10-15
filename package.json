@@ -1,7 +1,7 @@
 {
   "name": "varro",
   "displayName": "Varro: OpenCode Workbench",
-  "version": "0.33.3",
+  "version": "0.33.4",
   "description": "OpenCode agent workbench with project-aware chat, parallel sessions, plan and change review, model and permission controls, commit messages, and usage insights.",
   "categories": [
     "AI",
@@ -89,7 +89,7 @@
   "dependencies": {
     "@imagemagick/magick-wasm": "0.0.44",
     "@opencode-ai/sdk": "^1.19.0",
-    "@opencode/client": "^2.0.28",
+    "@opencode/client": "^2.0.29",
     "cross-spawn": "7.0.6",
     "dompurify": "3.4.17",
     "highlight.js": "11.12.0",
@@ -99,7 +99,7 @@
     "solid-js": "^1.9.17"
   },
   "devDependencies": {
-    "@playwright/test": "1.64.0",
+    "@playwright/test": "1.64.1",
     "@tailwindcss/vite": "4.3.3",
     "@types/css.escape": "1.5.2",
     "@types/node": "26.6.5",
@@ -563,6 +563,22 @@
           "type": "boolean",
           "default": true,
           "description": "Show the elapsed duration of the active turn beside the chat input status controls."
+        },
+        "varro.chat.remoteImages": {
+          "type": "string",
+          "scope": "application",
+          "enum": [
+            "off",
+            "ask",
+            "on"
+          ],
+          "enumDescriptions": [
+            "Show image alt text without fetching remote images.",
+            "Show placeholders with Load image and Load all controls.",
+            "Automatically load remote image previews near the viewport."
+          ],
+          "default": "ask",
+          "markdownDescription": "Show HTTPS Markdown image previews manually by default, automatically with `on`, or as alt text with `off`. Load all loads the images in the current response. Downloads run on the extension host, without cookies or authorization headers, and only accept bounded public-network raster images. Loading exposes the extension host's IP address and requested URL to the image server. Repository workspace settings cannot enable automatic loading."
         },
         "varro.chat.desktopSessionPaneSide": {
           "type": "string",

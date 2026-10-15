@@ -17,6 +17,7 @@ import { findProviderLimitAdapter } from './provider-limits';
 import { OpenCodeV2SessionState } from './opencode-v2-session-state';
 import { OpenCodeTransport } from './open-code-transport';
 import { asRecord } from '../shared/type-utils';
+import type { UnknownRecord } from '../shared/type-utils';
 import { parseServerEvent } from '../shared/protocol';
 import { parseHealthResponse } from '../shared/health';
 import { normalizeRecycleBinSession } from '../shared/recycle-bin';
@@ -902,37 +903,53 @@ describe('v2 provider disconnect', () => {
     });
   });
 
-  it('offers local-provider disabling and does not restore disabled configured models', async () => {
-    let disabled = false;
-    const adapter = new OpenCodeV2Adapter(async (_method, path) => {
-      if (path === '/api/provider')
-        return { data: disabled ? [] : [{ id: 'ollama', name: 'Ollama' }] };
-      if (path === '/api/model' || path === '/api/integration') return { data: [] };
-      if (path === '/api/config')
-        return [
-          {
-            info: {
-              providers: { ollama: { models: { qwen3: {} } } },
-              experimental: {
-                policies: disabled
-                  ? [{ action: 'provider.use', resource: 'ollama', effect: 'deny' }]
-                  : [],
-              },
-            },
-          },
-        ];
-      throw new Error(`Unexpected request: ${path}`);
-    });
-    expect(await adapter.request('GET', '/provider', undefined)).toMatchObject({
-      all: [expect.objectContaining({ id: 'ollama', disconnectMode: 'disable' })],
-      connected: [],
-    });
-    disabled = true;
-    expect(await adapter.request('GET', '/provider', undefined)).toMatchObject({
-      all: [],
-      connected: [],
-    });
-  });
+  it.each(['experimental', 'native', 'mixed'])(
+    'offers local-provider disabling without restoring models denied by %s policies',
+    async (format) => {
+      let disabled = false;
+      const adapter = new OpenCodeV2Adapter(async (_method, path) => {
+        if (path === '/api/provider')
+          return { data: disabled ? [] : [{ id: 'ollama', name: 'Ollama' }] };
+        if (path === '/api/model') return { data: [] };
+        if (path === '/api/integration')
+          return { data: [{ id: 'ollama', name: 'Ollama', methods: [], connections: [] }] };
+        if (path === '/api/config') {
+          const info: UnknownRecord = { providers: { ollama: { models: { qwen3: {} } } } };
+          if (format !== 'native')
+            info.experimental = {
+              policies: [
+                {
+                  action: 'provider.use',
+                  resource: 'ollama',
+                  effect: format === 'mixed' || disabled ? 'deny' : 'allow',
+                },
+              ],
+            };
+          if (format !== 'experimental')
+            info.policies = [
+              { action: 'provider.use', resource: 'ollama', effect: disabled ? 'deny' : 'allow' },
+            ];
+          return [{ info }];
+        }
+        throw new Error(`Unexpected request: ${path}`);
+      });
+      expect(await adapter.request('GET', '/provider', undefined)).toMatchObject({
+        all: [
+          expect.objectContaining({
+            id: 'ollama',
+            disconnectMode: 'disable',
+            models: expect.objectContaining({ qwen3: expect.objectContaining({ enabled: true }) }),
+          }),
+        ],
+        connected: [],
+      });
+      disabled = true;
+      expect(await adapter.request('GET', '/provider', undefined)).toMatchObject({
+        all: [],
+        connected: [],
+      });
+    }
+  );
   it('does not report a missing integration as a successful disconnect', async () => {
     const wire = vi.fn(async (_method: string, path: string) => {
       if (path === '/api/provider/ollama') return { data: { id: 'ollama' } };

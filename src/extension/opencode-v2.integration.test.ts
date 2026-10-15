@@ -716,6 +716,47 @@ describe.skipIf(!binary)('released OpenCode adapter contract', () => {
     });
   });
 
+  it('does not restore configured providers denied by native v2 policies', async (context) => {
+    const health = await transport.readHealthInfo();
+    if (transport.version !== 2 || compareVersions(health.version ?? '0', '2.0.29') < 0)
+      return context.skip();
+    const directory = join(root, 'native-provider-policy');
+    await mkdir(directory);
+    await writeFile(
+      join(directory, 'opencode.json'),
+      JSON.stringify({
+        providers: {
+          'blocked-fixture': {
+            package: '@opencode/ai/providers/openai-compatible',
+            models: { fixture: {} },
+          },
+        },
+        policies: [{ action: 'provider.use', resource: 'blocked-fixture', effect: 'deny' }],
+      })
+    );
+    const config = asRecord(await transport.request('GET', '/config', undefined, { directory }));
+    expect(asRecord(config?.providers)?.['blocked-fixture']).toBeDefined();
+    expect(config?.policies).toContainEqual({
+      action: 'provider.use',
+      resource: 'blocked-fixture',
+      effect: 'deny',
+    });
+    const providers = asRecord(
+      await transport.request('GET', '/provider', undefined, { directory })
+    );
+    expect(providers?.all).toEqual(expect.any(Array));
+    expect(providers?.all).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: 'blocked-fixture' })])
+    );
+    const configured = asRecord(
+      await transport.request('GET', '/config/providers', undefined, { directory })
+    );
+    expect(configured?.providers).toEqual(expect.any(Array));
+    expect(configured?.providers).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: 'blocked-fixture' })])
+    );
+  });
+
   it('creates, updates, and reads a session through the common API', async () => {
     const session = asRecord(
       await transport.request('POST', '/session', {

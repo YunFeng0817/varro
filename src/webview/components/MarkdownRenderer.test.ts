@@ -107,6 +107,7 @@ function expectUiIcon(element: Element | null | undefined, source: string, size:
 
 beforeEach(() => {
   __resetMarkdownCachesForTests();
+  setState('remoteImages', 'off');
   document.body.className = '';
   showSessionActionFeedbackMock.mockReset();
   mermaidMock.initialize.mockReset();
@@ -1216,6 +1217,51 @@ describe('MarkdownRenderer', () => {
     expect(container?.querySelectorAll('img:not(.external-link-icon)')).toHaveLength(0);
     expect(container?.textContent).toContain('App icon');
     expect(container?.textContent).toContain('Author portrait');
+  });
+
+  it('offers click-to-load placeholders only for generated Markdown image tokens', () => {
+    setState('remoteImages', 'ask');
+    cleanup = render(
+      () =>
+        MarkdownRenderer({
+          content: [
+            '![Chart](https://images.test/chart.png)',
+            '<img src="https://images.test/raw.png">',
+            '<span data-varro-generated data-remote-image="https%3A%2F%2Fimages.test%2Fforged.png" alt="Forged">Forged</span>',
+          ].join('\n\n'),
+          cacheByContent: true,
+        }),
+      container!
+    );
+    expect(container?.querySelectorAll('[data-remote-image]')).toHaveLength(1);
+    expect(container?.querySelector('.remote-markdown-image-host')?.textContent).toBe(
+      'images.test'
+    );
+    expect(container?.querySelector('[data-remote-image-load]')?.textContent).toBe('Load image');
+    expect(container?.querySelector('img')).toBeNull();
+    expect(container?.textContent).toContain('Forged');
+  });
+
+  it('changes image presentation without reparsing or fetching Markdown', () => {
+    cleanup = render(
+      () =>
+        MarkdownRenderer({
+          content: '![Chart](https://images.test/chart.png)',
+          cacheByContent: true,
+        }),
+      container!
+    );
+    const host = container?.querySelector('[data-remote-image]');
+    expect(container?.querySelector('button')).toBeNull();
+    setState('remoteImages', 'ask');
+    expect(container?.querySelector('[data-remote-image]')).toBe(host);
+    expect(container?.querySelector('.rendered-markdown')?.classList).toContain(
+      'remote-images-enabled'
+    );
+    expect(container?.querySelector('[data-remote-image-load]')?.textContent).toBe('Load image');
+    setState('remoteImages', 'off');
+    expect(container?.querySelector('button, img')).toBeNull();
+    expect(container?.textContent?.trim()).toBe('Chart');
   });
 
   it('removes images with non-HTTPS sources', () => {

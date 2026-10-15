@@ -25,7 +25,7 @@ update does not block later deletion. Cancelled updates check their signal befor
 reading, and before replacing the annotation file, so cancellation while queued or preparing a write
 does not commit that update.
 
-`npm run test:compatibility:adapters` installs published binaries into isolated directories and tests the production adapters. The current tested versions are v1 `1.19.0` and v2 `2.0.28`, alongside the v1 `1.16.0` and v2 `2.0.5` support floors. Release-specific results are recorded below. The checks cover managed startup, credential recovery in a second window, restart, multi-window recovery after process exit, bootstrap, workspace path encoding, v2 configuration precedence, session updates, deterministic streamed model responses, actual fixture-only tool execution, message pagination, tail editing, helper generation, fork/revert, deletion, and native v2 permissions/forms. The generated report is `artifacts/opencode-adapters/verified.json`.
+`npm run test:compatibility:adapters` installs published binaries into isolated directories and tests the production adapters. The current tested versions are v1 `1.19.0` and v2 `2.0.29`, alongside the v1 `1.16.0` and v2 `2.0.5` support floors. Release-specific results are recorded below. The checks cover managed startup, credential recovery in a second window, restart, multi-window recovery after process exit, bootstrap, workspace path encoding, v2 configuration precedence, session updates, deterministic streamed model responses, actual fixture-only tool execution, message pagination, tail editing, helper generation, fork/revert, deletion, and native v2 permissions/forms. The generated report is `artifacts/opencode-adapters/verified.json`.
 
 Fresh VS Code sandbox windows passed `v2-first-run` and the existing `healthy-first-run` scenario. These editor checks verify activation, ownership, health, and event-stream connection. `test:compatibility:ui` additionally exercises the actual composer, successful replies, pre-turn failures, HTTP 401 handling, recovery through a working provider, and reopening history. Full visual streaming performance remains a separate verification task.
 
@@ -83,6 +83,70 @@ resolve to `literal/directory`. V2 location queries retain their normal URL enco
 The released-server adapter tests cover exact workspace resolution for Japanese text, emoji,
 and literal percent escapes. Unit tests also cover header construction with embedded newlines
 and preservation of Windows separators and casing.
+
+### 2.0.29 compatibility review
+
+Reviewed v2.0.28 to v2.0.29, `c5aabae288` through `34d8ded0c5`.
+Consumed HTTP routes, SSE names and envelopes, session/message/inbox shapes,
+permissions/forms, and managed `serve` arguments remain compatible. The generated
+client adds top-level `policies`; OpenAPI also catches up with the optional provider
+request-encoding fields introduced in the previous release.
+
+V2 now normalizes `experimental.policies` and migrated v1 provider lists into
+top-level `policies`. Varro reads both keys, with native entries after legacy entries,
+so a denied configured provider is not restored by the older-server catalog fallback.
+This also removes its empty integration placeholder, which the initial published-server
+regression caught even after configured model restoration had been blocked.
+Provider disabling updates the native list when present and otherwise retains the
+legacy key for compatibility with the v2 floor. Regression tests cover both formats,
+mixed-format precedence, comment preservation, and concurrent-write rejection. The
+published-server matrix includes a native-policy catalog regression on 2.0.29.
+
+Managed settings now override user/project settings, with managed policies retaining
+their higher authority. Automatic output-limit continuation and bounded incomplete
+tool-input diagnostics are server-owned behavior and use existing message/tool events.
+Plugin permission assertions and per-call Promise hook failures retain the native
+permission and tool contracts. Migrated v1 npm configuration accepts built-in provider
+routes. Desktop account management, remote pairing, question UI, media previews,
+client-side usage helpers, TUI changes, Figma fixes, Console, and updater-service
+changes require no additional Varro adaptation for this bump.
+
+The tested v2 client is `2.0.29`; v1 remains `1.19.0`. Support floors remain v2 `2.0.5`
+and v1 `1.16.0`. The unchanged v1 SDK does not require a new Docker support-range run.
+README, usage, and Docker example references now use 2.0.29; historical release
+observations remain unchanged.
+
+All 973 focused adapter, configuration, transcript, inbox, generation, process,
+transport, state, background-work, and server unit tests passed. `npm run lint`,
+`npm run fmt`, `npm run lint:check`, `npm run typecheck`,
+`npm run typecheck:suggestions`, and `npm run build` passed. Real-editor and visual
+streaming checks were not run for this bump.
+
+The isolated published-server matrix passed all 138 applicable checks, with 30
+family/platform skips and no leaked adapter processes. All five shared compatibility
+tests passed after the matrix finished. Evidence is
+`artifacts/opencode-adapters/verified.json` and
+`artifacts/opencode-2.0.29-adapters-rerun.log`. The initial failure is retained in
+`artifacts/opencode-2.0.29-adapters.log`; the focused published-policy rerun also
+passed in `artifacts/opencode-2.0.29-policy-rerun.log`.
+
+| Published server | Passed | Skipped |
+| --- | ---: | ---: |
+| v1.16.0 | 30 | 12 |
+| v1.19.0 | 30 | 12 |
+| v2.0.5 | 38 | 4 |
+| v2.0.29 | 40 | 2 |
+
+The broader `npm run test` run passed 9,906 tests, skipped 44, and reported two
+failures outside the focused OpenCode checks. The window-theme refresh expectation
+at `src/extension/sidebar-provider.editor.test.ts:402` also fails in isolation.
+It invokes only the last registered configuration listener, now the editor's remote-image
+listener rather than the sidebar theme listener. Dispatching the configuration event to
+all fixture listeners would test the intended VS Code behavior.
+The development-compatibility test detects the existing Playwright 1.64.1 manifest
+change against the CI image still pinned to 1.64.0; align the image with that separate
+dependency update. Those files were left unchanged.
+Evidence is `artifacts/opencode-2.0.29-unit-tests.log`.
 
 ### 2.0.28 compatibility review
 

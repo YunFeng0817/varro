@@ -50,6 +50,8 @@ import { sessionSummary } from './session-summary';
 import { logger } from './logger';
 import { projectDeferredPart, projectPartAttachments } from './message-content';
 import { ImageThumbnails } from './image-thumbnails';
+import { RemoteImages } from './remote-images';
+import { readExtensionConfigState } from './extension-config';
 import { ModelPricingCatalog } from './model-pricing';
 import type { ProviderLimitService } from './provider-limit-service';
 import type { PinnedSessionManager } from './pinned-session-manager';
@@ -445,6 +447,7 @@ export interface RestProxyCallbacks {
 
 export class RestProxy {
   private readonly imageThumbnails = new ImageThumbnails();
+  private readonly remoteImages = new RemoteImages();
   private readonly modelPricing = new ModelPricingCatalog();
   private readonly requestWorkspaceDirectory = new AsyncLocalStorage<string | undefined>();
   private sessionDirectories = new Map<string, string>();
@@ -486,8 +489,16 @@ export class RestProxy {
   private disposed = false;
   private readonly openCodeConfig: OpenCodeConfigService;
   private readonly promptCompletion: PromptCompletionService;
+  private readonly remoteImageConfigSubscription: vscode.Disposable | undefined;
 
   constructor(private readonly callbacks: RestProxyCallbacks) {
+    this.remoteImageConfigSubscription = vscode.workspace.onDidChangeConfiguration?.((event) => {
+      if (
+        event.affectsConfiguration('varro.chat.remoteImages') &&
+        readExtensionConfigState().remoteImages !== 'on'
+      )
+        this.remoteImages.cancel();
+    });
     this.promptCompletion = new PromptCompletionService(callbacks.server);
     this.openCodeConfig = new OpenCodeConfigService(
       callbacks,
@@ -696,6 +707,8 @@ export class RestProxy {
     this.cancelAllRequests('REST proxy disposed');
     this.promptCompletion.invalidate();
     this.imageThumbnails.dispose();
+    this.remoteImages.dispose();
+    this.remoteImageConfigSubscription?.dispose();
   }
 
   invalidatePromptCompletion() {
@@ -846,6 +859,28 @@ export class RestProxy {
         payload.body
       );
       const requestPathname = new URL(payload.path, 'http://localhost').pathname;
+      if (method === 'POST' && requestPathname === VARRO_API_ENDPOINTS.remoteImage) {
+        const mode = readExtensionConfigState().remoteImages;
+        if (mode === 'off') {
+          this.remoteImages.cancel();
+          throw new Error('Remote image loading is disabled in Varro settings');
+        }
+        const body = asRecord(payload.body);
+        const automatic = body?.automatic === true;
+        if (automatic && mode !== 'on')
+          throw new Error('Automatic remote image loading is disabled');
+        const source = body?.url;
+        if (typeof source !== 'string') throw new Error('Missing remote image URL');
+        const data = await this.remoteImages.load(
+          source,
+          request?.controller.signal ?? new AbortController().signal
+        );
+        const currentMode = readExtensionConfigState().remoteImages;
+        if (currentMode === 'off' || (automatic && currentMode !== 'on'))
+          throw new Error('Remote image loading was disabled');
+        this.callbacks.postApiResponse(requestGeneration, { id: payload.id, data });
+        return;
+      }
       const endpointWorkspaceDirectory =
         this.callbacks.getWorkspacePath?.() ??
         this.callbacks.contextProvider.context.workspacePath ??

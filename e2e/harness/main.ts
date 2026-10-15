@@ -5556,6 +5556,19 @@ async function handleApiRequest(
     return state.recycleBinEntries;
   }
 
+  if (method === 'POST' && path === '/varro/remote-image') {
+    // Deterministic host response only. This fixture never contacts the supplied URL.
+    await new Promise<void>((resolve) => window.setTimeout(resolve, 300));
+    const canvas = document.createElement('canvas');
+    canvas.width = 384;
+    canvas.height = 216;
+    const context = canvas.getContext('2d');
+    if (!context) throw new Error('Canvas unavailable');
+    context.fillStyle = '#4080c0';
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    return { url: canvas.toDataURL('image/webp'), hostname: 'images.example' };
+  }
+
   if (method === 'GET' && path === '/varro/workspace-problems') {
     return {
       total: 2,

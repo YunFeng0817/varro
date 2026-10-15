@@ -3,6 +3,7 @@ import type { ExtensionConfigState } from '../shared/provider-limit-config';
 import { DEFAULT_RESET_WARNING_DAYS } from '../shared/provider-limit-config';
 import { isPermissionMode } from '../shared/protocol';
 import { isNumber, isString } from '../shared/type-utils';
+import { parseRemoteImageMode } from '../shared/remote-images';
 
 const DEFAULT_CHAT_FONT_SIZE = 13;
 const DEFAULT_CHAT_EDITOR_FONT_SIZE = 12;
@@ -17,6 +18,8 @@ export function readExtensionConfigState(
     expandThinking: config.get<boolean>('chat.expandThinking', false),
     showChangedFiles: config.get<boolean>('chat.showChangedFiles', false),
     showTurnTimer: config.get<boolean>('chat.showTurnTimer', true),
+    // Never let a repository opt the user into network requests through workspace settings.
+    remoteImages: parseRemoteImageMode(config.inspect?.('chat.remoteImages')?.globalValue),
     promptCompletionModel: config.get<string>('chat.promptCompletionModel', ''),
     debugShowQuotaWarning: config.get<boolean>('debug.showQuotaWarning', false),
     debugResetWarningDays: readResetWarningDays(config),

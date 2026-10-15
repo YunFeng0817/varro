@@ -144,6 +144,15 @@ the shared invariants below remain true.
   prefixes. Switching states must not briefly mount both the loading label and dialog summary.
 - Asynchronous content must reserve its final layout space where practical. Images are the primary
   example: loading an image after its row remounts must not add hundreds of pixels to the row.
+- Remote Markdown images default to `ask`; `off` shows alt text and application-scoped `on` loads
+  only near the viewport. Both enabled modes reserve a 384 px-wide, 16:9 frame before hydration.
+  Load image and response-scoped Load all replace only the frame's contents with bounded host-generated
+  thumbnails. Automatic and bulk requests share a two-request queue; disposal or disabling automatic
+  loading cancels queued work. Ask-mode remounts never fetch, and cached thumbnails prevent repeat
+  downloads in on mode. Switching between off and enabled invalidates mounted and unmounted rows,
+  preserving detached anchoring. `remote-images.spec.ts` checks consent, frame geometry, preview opening,
+  virtual remounts, and setting changes above a detached viewport. Raw HTML images remain blocked
+  and the webview CSP does not admit remote sources.
 - History file parts carry scoped content references. Request bounded image thumbnails only near the
   viewport, and request the original only for an open preview or an edit draft. Single thumbnails reserve
   a 384 px frame, capped by the available width, with the existing 16:9 aspect ratio. Their intrinsic

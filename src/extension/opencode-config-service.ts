@@ -262,7 +262,9 @@ export class OpenCodeConfigService {
         }
         const initialStat = await this.readConfigStat(target.uri);
         const experimental = asRecord(current.config.experimental);
-        const policies = experimental?.policies;
+        // Preserve native policies when present; the legacy key still supports the v2 floor.
+        const nativePolicies = current.config.policies !== undefined;
+        const policies = nativePolicies ? current.config.policies : experimental?.policies;
         if (policies !== undefined && !Array.isArray(policies)) {
           throw new Error('Invalid OpenCode provider policies');
         }
@@ -275,7 +277,7 @@ export class OpenCodeConfigService {
         ];
         const raw = applyJsoncChange(
           target.raw.trim() ? target.raw : '{}\n',
-          ['experimental', 'policies'],
+          nativePolicies ? ['policies'] : ['experimental', 'policies'],
           nextPolicies
         );
         if (!this.areConfigStatsEqual(initialStat, await this.readConfigStat(target.uri))) {

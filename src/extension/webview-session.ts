@@ -543,6 +543,7 @@ export class WebviewSession {
       expandThinking: config.expandThinking,
       showChangedFiles: config.showChangedFiles,
       showTurnTimer: config.showTurnTimer,
+      remoteImages: config.remoteImages,
       promptCompletionModel: config.promptCompletionModel,
       debugShowQuotaWarning: config.debugShowQuotaWarning,
       debugResetWarningDays: config.debugResetWarningDays,

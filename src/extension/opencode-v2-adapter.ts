@@ -1469,18 +1469,27 @@ export class OpenCodeV2Adapter {
         });
     }
     // 2.0.5's catalog omits custom configuration entries even though prompt resolution accepts them.
-    const configured = asRecord(asRecord(configResult)?.providers) ?? {};
+    const config = asRecord(configResult);
+    const configured = asRecord(config?.providers) ?? {};
+    const experimentalPolicies = asRecord(config?.experimental)?.policies;
+    // 2.0.29 normalizes legacy policies into the top-level key, whose entries win within a file.
+    const policies = [
+      ...(Array.isArray(experimentalPolicies) ? experimentalPolicies : []),
+      ...(Array.isArray(config?.policies) ? config.policies : []),
+    ];
     for (const [id, entry] of Object.entries(configured)) {
       // Do not restore configured models that the native provider policy removed.
-      const policies = asRecord(asRecord(configResult)?.experimental)?.policies;
       if (
-        Array.isArray(policies) &&
         policies.findLast((value) => {
           const policy = asRecord(value);
           return policy?.action === 'provider.use' && policy.resource === id;
         })?.effect === 'deny'
-      )
+      ) {
+        // A denied provider may still have a connectable integration in the native catalog.
+        const index = all.findIndex((provider) => provider.id === id);
+        if (index !== -1) all.splice(index, 1);
         continue;
+      }
       const provider = asRecord(entry);
       if (!provider) continue;
       let target = all.find((item) => item.id === id);
