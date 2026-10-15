@@ -162,6 +162,7 @@ import {
   setMessageEditDraftBackup,
   startEditingMessage,
   type MessageEditContext,
+  type MessageEditRequest,
 } from '../lib/message-edit-state';
 import { ralphStore } from '../lib/stores/ralph-store';
 import { ralphRunner } from './ralph/ralph-runner';
@@ -900,6 +901,11 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     invalidatePendingPdfAttachments();
   });
   const composerEditingMessage = () => (props.newSession ? null : editingMessage());
+  const [submittingEdit, setSubmittingEdit] = createSignal<MessageEditRequest | null>(null);
+  const editReconciliationPending = () => {
+    const editing = composerEditingMessage();
+    return !!editing && editing === submittingEdit() && editing.sessionId === composerSessionId();
+  };
   const composerHasActiveQuestion = () => !props.newSession && hasActiveQuestion();
   const composerHasActivePermission = () => !props.newSession && hasActivePermission();
   const canSelectWorkspace = createMemo(
@@ -3285,6 +3291,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   }
 
   async function handleSend(mode?: 'queue' | 'steer' | 'after-stop') {
+    if (editReconciliationPending()) return;
     const text = inputText();
     const sideQuestion = getSideQuestionText(text);
     if (sideQuestion !== null) {
@@ -3401,41 +3408,46 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       setHistoryDraft('');
       setCompletionIndex(0);
       invalidatePendingPdfAttachments();
-      animateSubmittedContent();
+      setSubmittingEdit(editing);
       hideSubmittedAttachments(sendSessionId);
       setInputText('');
       const clearedInputVersion = inputTextMutationVersion();
       resetPastedImageIndex();
       let sent = false;
       let optimisticPublished = false;
-      if (editTargetExists) {
-        clearUsageLimitsForSessionTree(composerSessionId());
-        sent = await editMessage(editing.messageId, sendableText, {
-          allowEmptyText: hasEditableAttachments,
-          queuedAttachments: {
-            ...queuedAttachments,
-            issuesAttachment: editing.context.issues ?? null,
-            extensionContexts: activeContextEnabled(sendSessionId)
-              ? (editing.context.extensionContexts ?? [])
-              : [],
-          },
-          selectedModel,
-          onOptimisticPublish: () => {
-            optimisticPublished = true;
-            resetMessageEditState();
-          },
-        });
-      } else {
-        clearUsageLimitsForSessionTree(composerSessionId());
-        sent = await sendMessage(text, {
-          queuedAttachments: {
-            ...queuedAttachments,
-            issuesAttachment: editing.context.issues ?? null,
-            extensionContexts: activeContextEnabled(sendSessionId)
-              ? (editing.context.extensionContexts ?? [])
-              : [],
-          },
-        });
+      try {
+        if (editTargetExists) {
+          clearUsageLimitsForSessionTree(composerSessionId());
+          sent = await editMessage(editing.messageId, sendableText, {
+            allowEmptyText: hasEditableAttachments,
+            queuedAttachments: {
+              ...queuedAttachments,
+              issuesAttachment: editing.context.issues ?? null,
+              extensionContexts: activeContextEnabled(sendSessionId)
+                ? (editing.context.extensionContexts ?? [])
+                : [],
+            },
+            selectedModel,
+            onOptimisticPublish: () => {
+              optimisticPublished = true;
+              setSubmittingEdit(null);
+              resetMessageEditState();
+            },
+          });
+        } else {
+          clearUsageLimitsForSessionTree(composerSessionId());
+          sent = await sendMessage(text, {
+            queuedAttachments: {
+              ...queuedAttachments,
+              issuesAttachment: editing.context.issues ?? null,
+              extensionContexts: activeContextEnabled(sendSessionId)
+                ? (editing.context.extensionContexts ?? [])
+                : [],
+            },
+          });
+        }
+      } finally {
+        if (submittingEdit() === editing) setSubmittingEdit(null);
       }
       if (sent) {
         if (selectedModel) {
@@ -6177,8 +6189,21 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
 
   return (
     <div
-      class={`interactive-input-part ${composerEditingMessage() ? ' editing-message' : ''} ${showModelPicker() ? 'model-picker-open' : ''} ${showMcpPicker() || showLspPicker() ? 'mcp-picker-open' : ''} ${showMentionCompletionMenu() ? 'mention-completion-open' : ''}`}
+      class={`interactive-input-part ${composerEditingMessage() ? ' editing-message' : ''}${editReconciliationPending() ? ' is-edit-reconciling' : ''} ${showModelPicker() ? 'model-picker-open' : ''} ${showMcpPicker() || showLspPicker() ? 'mcp-picker-open' : ''} ${showMentionCompletionMenu() ? 'mention-completion-open' : ''}`}
+      aria-busy={editReconciliationPending()}
     >
+      <Show when={editReconciliationPending()}>
+        <div
+          class="composer-edit-loading chat-messages-loading"
+          role="status"
+          aria-label="Updating conversation"
+        >
+          <span class="composer-edit-loading-title">Updating conversation</span>
+          <span class="chat-messages-loading-dot" />
+          <span class="chat-messages-loading-dot" style={{ 'animation-delay': '0.3s' }} />
+          <span class="chat-messages-loading-dot" style={{ 'animation-delay': '0.6s' }} />
+        </div>
+      </Show>
       <Show when={isDraggingOver()}>
         <DropOverlay />
       </Show>
@@ -6238,7 +6263,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       </Show>
 
       <Show when={!hasExpandedDiffOverlay() && composerEditingMessage()}>
-        <div class="composer-edit-banner">
+        <div class="composer-edit-banner" inert={editReconciliationPending()}>
           <UiIcon
             source={editPencilIcon}
             class="composer-edit-banner-icon"
@@ -6307,6 +6332,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
           containerRef = el;
         }}
         class={`chat-input-shell ${showFloatingInputPopover() ? 'showing-floating-popover' : ''}`}
+        inert={editReconciliationPending()}
       >
         <Show when={showModelPicker()}>
           <Suspense>

@@ -7553,6 +7553,75 @@ describe('ChatInput', () => {
     expect(editMessageMock).not.toHaveBeenCalled();
   });
 
+  it.each(['published', 'failed', 'session-switched'] as const)(
+    'shows chat-loading dots while an edit reconciles and clears them when %s',
+    async (outcome) => {
+      setState('activeSessionId', 'session-1');
+      setState('messages', [
+        {
+          info: {
+            id: 'message-1',
+            sessionID: 'session-1',
+            role: 'user',
+            time: { created: 1 },
+            agent: 'build',
+            model: { providerID: 'openai', modelID: 'gpt-4o' },
+          },
+          parts: [],
+        },
+      ]);
+      let finishEdit: ((sent: boolean) => void) | undefined;
+      let publishEdit: (() => void) | undefined;
+      editMessageMock.mockImplementationOnce(
+        (_messageId, _text, options) =>
+          new Promise((resolve) => {
+            finishEdit = resolve;
+            publishEdit = options?.onOptimisticPublish;
+          })
+      );
+      cleanup = render(() => ChatInput(), container!);
+      startEditingMessage('message-1', 'session-1', 'corrected prompt');
+      await flushAsyncWork();
+      const editor = container!.querySelector<HTMLElement>('.rich-composer')!;
+      editor.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      await flushAsyncWork();
+
+      const loading = container!.querySelector(
+        '[role="status"][aria-label="Updating conversation"]'
+      );
+      expect(loading?.querySelector('.composer-edit-loading-title')?.textContent).toBe(
+        'Updating conversation'
+      );
+      expect(loading?.querySelectorAll('.chat-messages-loading-dot')).toHaveLength(3);
+      expect(inputText()).toBe('');
+      expect(container!.querySelector('.interactive-input-part')?.getAttribute('aria-busy')).toBe(
+        'true'
+      );
+      expect(container!.querySelector<HTMLElement>('.composer-edit-banner')?.inert).toBe(true);
+      expect(container!.querySelector<HTMLElement>('.chat-input-shell')?.inert).toBe(true);
+      editor.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      expect(editMessageMock).toHaveBeenCalledTimes(1);
+
+      if (outcome === 'published') {
+        publishEdit?.();
+        expect(container!.querySelector('.composer-edit-loading')).toBeNull();
+      }
+      if (outcome === 'session-switched') {
+        setState('activeSessionId', 'session-2');
+        expect(container!.querySelector('.composer-edit-loading')).toBeNull();
+      }
+      finishEdit?.(outcome === 'published');
+      await flushAsyncWork();
+
+      expect(container!.querySelector('.composer-edit-loading')).toBeNull();
+      expect(container!.querySelector<HTMLElement>('.chat-input-shell')?.inert).toBe(false);
+      if (outcome === 'failed') {
+        expect(inputText()).toBe('corrected prompt');
+        expect(container!.querySelector<HTMLElement>('.composer-edit-banner')?.inert).toBe(false);
+      }
+    }
+  );
+
   it('restores edited text and preserves the prior draft when an optimistic send fails', async () => {
     setState('activeSessionId', 'session-1');
     setInputText('original draft');

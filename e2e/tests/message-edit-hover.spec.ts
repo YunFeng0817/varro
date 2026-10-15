@@ -1,5 +1,114 @@
 import { expect, test } from '@playwright/test';
+import type { WebviewMessage } from '../../src/shared/protocol';
 import type { MessageEntry, Session } from '../../src/webview/types';
+
+for (const width of [480, 1280]) {
+  test(`reserves the empty inline editor size while reconciling an edit at ${width}px`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height: 900 });
+    const session: Session = {
+      id: 'session-edit-loading',
+      projectID: 'test',
+      directory: '/workspace',
+      title: 'Edit loading',
+      version: '1',
+      time: { created: 1, updated: 1 },
+    };
+    const initialMessages: MessageEntry[] = Array.from({ length: 25 }, (_, index) => ({
+      info: {
+        id: `prompt-${index}`,
+        sessionID: session.id,
+        role: 'user',
+        time: { created: index + 1 },
+        agent: 'build',
+        model: { providerID: 'openai', modelID: 'gpt-4.1' },
+      },
+      parts: [
+        {
+          id: `text-${index}`,
+          sessionID: session.id,
+          messageID: `prompt-${index}`,
+          type: 'text',
+          text: `Follow-up prompt ${index}`,
+        },
+      ],
+    }));
+    await page.addInitScript(
+      (fixture) => {
+        // SAFETY: The isolated playback harness reads this fixture before mounting.
+        (window as typeof window & { varroPlaybackCapture: typeof fixture }).varroPlaybackCapture =
+          fixture;
+      },
+      { session, initialMessages }
+    );
+    await page.goto('/e2e/harness/index.html?scenario=session-playback');
+    await page.evaluate(() => {
+      // SAFETY: These hooks belong to the isolated E2E transport, not a production session.
+      const harness = window as {
+        __sendToExtension?: (message: WebviewMessage) => void | Promise<void>;
+        releaseEditDeletion?: () => void;
+      };
+      const send = harness.__sendToExtension;
+      const gate = new Promise<void>((resolve) => {
+        harness.releaseEditDeletion = resolve;
+      });
+      harness.__sendToExtension = async (message) => {
+        if (message.type === 'api/request' && message.payload.method === 'DELETE') await gate;
+        await send?.(message);
+      };
+    });
+    await page.locator('[data-msg-id="prompt-0"] .user-message-card').click();
+    const inline = page.locator('.inline-edit-composer-slot');
+    const editor = inline.locator('.rich-composer');
+    await editor.fill('');
+    const emptyBounds = await inline.locator('.interactive-input-part').boundingBox();
+    const bannerBounds = await inline.locator('.composer-edit-banner').boundingBox();
+    expect(emptyBounds).not.toBeNull();
+    expect(bannerBounds).not.toBeNull();
+    await editor.fill('An edited prompt\nwith several lines\nthat collapse after sending.');
+    await editor.press('Enter');
+
+    const loading = inline.getByRole('status', { name: 'Updating conversation' });
+    await expect(loading).toBeVisible();
+    const title = loading.getByText('Updating conversation', { exact: true });
+    await expect(title).toBeVisible();
+    await expect(loading.locator('.chat-messages-loading-dot')).toHaveCount(3);
+    await expect(inline.locator('.composer-edit-banner')).toBeHidden();
+    await expect(editor).toBeHidden();
+    const bounds = await loading.boundingBox();
+    expect(bounds).not.toBeNull();
+    expect(bounds!.width).toBeCloseTo(emptyBounds!.width, 0);
+    // The inline input has 2px top padding outside the banner and input block.
+    expect(bounds!.height).toBeCloseTo(emptyBounds!.height - 2, 0);
+    expect(bounds!.height).toBeGreaterThan(bannerBounds!.height);
+    const titleBounds = await title.boundingBox();
+    expect(titleBounds).not.toBeNull();
+    expect(titleBounds!.x - bounds!.x).toBeCloseTo(13, 0);
+    expect(titleBounds!.y - bounds!.y).toBeCloseTo(9, 0);
+    const centered = await loading.evaluate((element) => {
+      const box = element.getBoundingClientRect();
+      const dots = [...element.querySelectorAll('.chat-messages-loading-dot')].map((dot) =>
+        dot.getBoundingClientRect()
+      );
+      return {
+        x: (dots[0]!.left + dots.at(-1)!.right) / 2 - (box.left + box.width / 2),
+        y: dots[0]!.top + dots[0]!.height / 2 - (box.top + box.height / 2),
+      };
+    });
+    expect(Math.abs(centered.x)).toBeLessThan(1);
+    expect(Math.abs(centered.y)).toBeLessThan(1);
+    await page.evaluate(() => {
+      // SAFETY: Release only this test's delayed history deletion.
+      (window as typeof window & { releaseEditDeletion?: () => void }).releaseEditDeletion?.();
+    });
+    await expect(page.locator('.composer-edit-loading')).toHaveCount(0);
+    await expect(page.locator('.inline-edit-composer-slot')).toHaveCount(0);
+    await expect(
+      page.locator('.user-message-card').filter({ hasText: 'An edited prompt' })
+    ).toBeVisible();
+  });
+}
 
 test('keeps inline edit controls clear of the preceding sticky prompt', async ({ page }) => {
   await page.setViewportSize({ width: 486, height: 900 });
