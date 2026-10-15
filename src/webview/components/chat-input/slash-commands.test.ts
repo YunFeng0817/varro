@@ -15,6 +15,32 @@ vi.mock('../../hooks/useOpenCode', () => ({
 describe('getSlashCommands', () => {
   beforeEach(() => resetDefaultAppState());
 
+  it.each([1, 2] as const)(
+    'reserves /btw and offers it only for an existing V2 conversation on API %s',
+    (apiVersion) => {
+      setState('serverStatus', { state: 'running', url: 'http://localhost:4096', apiVersion });
+      const onSideQuestion = vi.fn();
+      const commands = getSlashCommands({
+        hasCurrentSession: true,
+        canInit: false,
+        onConnectProvider: () => {},
+        onOpenSettings: () => {},
+        onExportSession: () => {},
+        onPauseSession: vi.fn(async () => {}),
+        onGenerateStats: () => {},
+        onSideQuestion,
+        customCommands: [{ name: 'btw', template: 'Do not run' }],
+      });
+      const aside = commands.filter((command) => command.name === 'btw');
+      expect(aside).toHaveLength(apiVersion === 2 ? 1 : 0);
+      if (apiVersion === 2) {
+        void aside[0]!.action('Why?');
+        expect(onSideQuestion).toHaveBeenCalledWith('Why?');
+        expect(aside[0]!.acceptsArguments).toBe(true);
+      }
+    }
+  );
+
   it('includes init but hides session actions in new chats', () => {
     const onGenerateStats = vi.fn();
     const commands = getSlashCommands({

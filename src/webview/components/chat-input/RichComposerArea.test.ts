@@ -15,6 +15,14 @@ let container: HTMLDivElement | null = null;
 let cleanup: (() => void) | undefined;
 
 beforeEach(() => {
+  vi.stubGlobal(
+    'ResizeObserver',
+    class implements ResizeObserver {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    }
+  );
   container = document.createElement('div');
   document.body.appendChild(container);
 });
@@ -25,6 +33,7 @@ afterEach(() => {
   container?.remove();
   container = null;
   document.querySelector('.chat-attachment-image-preview')?.remove();
+  vi.unstubAllGlobals();
 });
 
 async function flushAsyncWork(count = 3) {
@@ -56,6 +65,7 @@ function renderComposer(props: {
   value: string;
   cursorOffset: number;
   chips: RichComposerChip[];
+  centerCaret?: boolean;
   onInput?: (text: string, cursorOffset: number) => void;
   onKeyDown?: (e: KeyboardEvent) => void;
   onPaste?: (e: ClipboardEvent) => void;
@@ -69,6 +79,7 @@ function renderComposer(props: {
       RichComposerArea({
         editorRef: () => {},
         placeholder: 'Compose',
+        centerCaret: props.centerCaret,
         get value() {
           return props.value;
         },
@@ -930,6 +941,56 @@ describe('RichComposerArea', () => {
 
     expect(event.defaultPrevented).toBe(true);
     expect(onInput).toHaveBeenCalledWith('something\n', 'something\n'.length);
+  });
+
+  it('centers the active caret in one coalesced frame and cancels pending work on cleanup', () => {
+    const frame = vi.spyOn(window, 'requestAnimationFrame').mockImplementation(() => 42);
+    const cancelFrame = vi.spyOn(window, 'cancelAnimationFrame').mockImplementation(() => {});
+    const originalRangeRect = Range.prototype.getBoundingClientRect;
+    let caretTop = 170;
+    let editor: HTMLDivElement | undefined;
+    Object.defineProperty(Range.prototype, 'getBoundingClientRect', {
+      configurable: true,
+      value: () => new DOMRect(0, caretTop - (editor?.scrollTop ?? 0), 0, 20),
+    });
+    try {
+      renderComposer({
+        value: 'First\nSecond\nThird',
+        cursorOffset: 5,
+        chips: [],
+        centerCaret: true,
+      });
+      editor = container!.querySelector<HTMLDivElement>('.rich-composer')!;
+      editor.getBoundingClientRect = () => new DOMRect(0, 100, 200, 48);
+      editor.focus();
+      setCollapsedSelection(editor.firstChild!, 5);
+      editor.dispatchEvent(new KeyboardEvent('keyup', { key: 'ArrowUp', bubbles: true }));
+      editor.dispatchEvent(new KeyboardEvent('keyup', { key: 'ArrowUp', bubbles: true }));
+      expect(frame).toHaveBeenCalledTimes(1);
+      frame.mock.calls[0]![0](0);
+      expect(editor.scrollTop).toBe(56);
+      caretTop = 126;
+      editor.dispatchEvent(new KeyboardEvent('keyup', { key: 'ArrowUp', bubbles: true }));
+      frame.mock.calls[1]![0](0);
+      expect(editor.scrollTop).toBe(12);
+      editor.dispatchEvent(new KeyboardEvent('keyup', { key: 'ArrowDown', bubbles: true }));
+      cleanup?.();
+      cleanup = undefined;
+      expect(cancelFrame).toHaveBeenCalledWith(42);
+    } finally {
+      cleanup?.();
+      cleanup = undefined;
+      frame.mockRestore();
+      cancelFrame.mockRestore();
+      if (originalRangeRect) {
+        Object.defineProperty(Range.prototype, 'getBoundingClientRect', {
+          configurable: true,
+          value: originalRangeRect,
+        });
+      } else {
+        Reflect.deleteProperty(Range.prototype, 'getBoundingClientRect');
+      }
+    }
   });
 
   it('scrolls to reveal the caret after Shift+Enter', async () => {

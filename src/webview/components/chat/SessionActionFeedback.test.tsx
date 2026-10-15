@@ -17,6 +17,7 @@ describe('SessionActionFeedback compact copy', () => {
     ['PDFs must be valid and total 20 MiB or less', 'Valid PDFs, max 20 MiB'],
     ['Table attachment timed out. Try selecting it again.', 'Table timed out. Reselect'],
     ['Session renamed', 'Session renamed'],
+    ['Side questions support text only', 'Text-only side questions'],
     ['Unexpected server error: keep this detail', 'Unexpected server error: keep this detail'],
   ])('renders %s with the full detail preserved', (original, compact) => {
     cleanup = render(() => <SessionActionFeedback error={() => original} />, document.body);

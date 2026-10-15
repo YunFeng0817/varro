@@ -33,6 +33,7 @@ import {
 } from './Chat';
 import { client } from '../lib/client';
 import { openBackgroundProcessView } from '../lib/background-process-view';
+import { openSideQuestion, sideQuestionView } from '../lib/side-question';
 import { EMPTY_SESSION_PRUNE_GRACE_MS } from '../lib/empty-session';
 import {
   requestOpenAttentionSessions,
@@ -3984,6 +3985,27 @@ describe('header status badges', () => {
     );
     expect(container?.querySelector('[aria-label="Loading models"]')).toBeNull();
   });
+
+  it.each(['session', 'directory', 'server'] as const)(
+    'closes a side-question dialog when its %s changes',
+    async (change) => {
+      setState('sessions', [session('session-1', 500), session('session-2', 400)]);
+      setState('activeSessionId', 'session-1');
+      setState('serverStatus', { state: 'running', url: 'http://localhost:4096', apiVersion: 2 });
+      cleanup = render(() => Chat(), container!);
+      expect(openSideQuestion()).toBe(true);
+      await vi.waitFor(() =>
+        expect(document.querySelector('.side-question-dialog')).not.toBeNull()
+      );
+      if (change === 'session') setState('activeSessionId', 'session-2');
+      else if (change === 'directory')
+        setState('sessions', (entry) => entry.id === 'session-1', 'directory', '/moved');
+      else
+        setState('serverStatus', { state: 'running', url: 'http://localhost:5000', apiVersion: 2 });
+      await vi.waitFor(() => expect(document.querySelector('.side-question-dialog')).toBeNull());
+      expect(sideQuestionView()).toBeNull();
+    }
+  );
 
   it('opens locked provider re-authentication over chat without showing Models', async () => {
     vi.spyOn(client.config, 'providerCatalog').mockResolvedValue({

@@ -28,6 +28,7 @@ export function getSlashCommands(props: {
   onExportSession: () => void;
   onPauseSession: () => Promise<void>;
   onGenerateStats: (includeAllTime: boolean) => void;
+  onSideQuestion?: (question: string) => void;
   customCommands: Command[];
 }): SlashCommand[] {
   const reservedBuiltInNames = new Set([
@@ -62,6 +63,7 @@ export function getSlashCommands(props: {
     'stop',
     'pause',
     'ralph',
+    'btw',
   ]);
 
   const commands: SlashCommand[] = [
@@ -180,6 +182,13 @@ export function getSlashCommands(props: {
 
   if (props.hasCurrentSession) {
     if (state.serverStatus.state === 'running' && state.serverStatus.apiVersion === 2) {
+      commands.push({
+        name: 'btw',
+        aliases: [],
+        description: 'Ask without interrupting the task',
+        acceptsArguments: true,
+        action: (args) => props.onSideQuestion?.(args),
+      });
       commands.push({
         name: 'pause',
         aliases: [],

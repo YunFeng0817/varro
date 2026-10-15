@@ -39,6 +39,7 @@ import type { AutoApproveJudge } from './auto-approve-judge';
 import type { DecisionProviders } from './decision-providers';
 import type { HiddenSessionManager } from './hidden-session-manager';
 import { isAllowedApiRequest } from './util/webview-message';
+import { SIDE_QUESTION_TIMEOUT_MS } from '../shared/side-question';
 import type { ContextProvider } from './context-provider';
 import { getWorkspaceProblems } from './workspace-problems';
 import {
@@ -940,6 +941,27 @@ export class RestProxy {
           sessionWorkspaceDirectory ?? this.getCurrentWorkspacePath(),
           sessionWorkspaceDirectory ?? explicitWorkspaceDirectory ?? undefined
         );
+      }
+
+      if (method === 'POST' && requestPathname.endsWith('/side-question') && directSessionID) {
+        if (this.callbacks.server.apiVersion !== 2) {
+          throw new Error('Side questions require OpenCode V2');
+        }
+        if (this.callbacks.getStatus().state !== 'running') {
+          throw new Error('Connect to OpenCode before asking a side question');
+        }
+        const timeout = AbortSignal.timeout(SIDE_QUESTION_TIMEOUT_MS);
+        const signal = requestSignal ? AbortSignal.any([requestSignal, timeout]) : timeout;
+        const data = await this.requestServer('POST', forwardedPath, payload.body, {
+          signal,
+          maxResponseBytes: 512 * 1024,
+        });
+        signal.throwIfAborted();
+        if (this.callbacks.getRequestGeneration() !== requestGeneration) {
+          throw new Error('Connection changed while asking the side question');
+        }
+        this.callbacks.postApiResponse(requestGeneration, { id: payload.id, data });
+        return;
       }
 
       const contentMatch = requestPathname.match(

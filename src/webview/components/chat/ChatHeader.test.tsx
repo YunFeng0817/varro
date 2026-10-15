@@ -10,9 +10,11 @@ import {
   setShowSessionPicker,
   setState,
   showSessionPicker,
+  setIsLoading,
 } from '../../lib/state';
 import { ActiveChatHeader, SessionPickerHeader } from './ChatHeader';
 import { SessionActionFeedback } from './SessionActionFeedback';
+import { closeSideQuestion, sideQuestionView } from '../../lib/side-question';
 
 const deleteSessionMock = vi.hoisted(() => vi.fn());
 const renameSessionMock = vi.hoisted(() => vi.fn());
@@ -103,7 +105,9 @@ afterEach(() => {
   setManualWorkspaceSelection(false);
   setState('pendingWorkspaceSelectionPath', null);
   Reflect.deleteProperty(window, '__sendToExtension');
+  setState('serverStatus', { state: 'stopped' });
   vi.restoreAllMocks();
+  closeSideQuestion();
 });
 
 describe('SessionActionFeedback icon state', () => {
@@ -137,6 +141,30 @@ describe('SessionActionFeedback icon state', () => {
 });
 
 describe('ActiveChatHeader', () => {
+  it.each([false, true])('opens the V2 side-question form with busy=%s', (busy) => {
+    setState('serverStatus', { state: 'running', url: 'http://localhost:4096', apiVersion: 2 });
+    setState('sessionStatus', busy ? { 'session-1': { type: 'busy' } } : {});
+    setIsLoading(busy);
+    renderHeader();
+    container
+      .querySelector<HTMLElement>('.chat-header-session-title')!
+      .dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+    const action = [...document.body.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(
+      (button) => button.textContent?.includes('Ask a side question')
+    );
+    expect(action?.disabled).toBe(false);
+    action!.click();
+    expect(sideQuestionView()).toMatchObject({
+      sessionID: 'session-1',
+      directory: '/repo',
+      question: '',
+    });
+    expect(document.activeElement).toBe(container.querySelector('.chat-header-session-title'));
+    setState('serverStatus', { state: 'stopped' });
+    setIsLoading(false);
+    setState('sessionStatus', {});
+  });
+
   it('opens a single sibling workspace alert directly before status indicators', () => {
     const send = vi.fn<(message: WebviewMessage) => void>();
     // SAFETY: The fixture provides the bridge callback used by postMessage.

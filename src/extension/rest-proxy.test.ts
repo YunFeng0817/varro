@@ -258,6 +258,71 @@ async function requestSanitizedMessagePage(messages: unknown[]) {
   return response.data.items;
 }
 
+describe('side-question proxy boundary', () => {
+  it('authorizes a narrow V2 action without prompt admission or lifecycle writes', async () => {
+    const request = vi.fn().mockResolvedValue({ text: 'Because.' });
+    const { proxy, callbacks } = createProxy({
+      server: { ...createCallbacks().server, apiVersion: 2, request },
+    });
+    await proxy.handleRequest(
+      makePayload(1, 'POST', '/session/ses_side/side-question', { question: 'Why?' })
+    );
+    expect(request).toHaveBeenCalledWith(
+      'POST',
+      '/session/ses_side/side-question',
+      { question: 'Why?' },
+      expect.objectContaining({ signal: expect.any(AbortSignal), maxResponseBytes: 512 * 1024 })
+    );
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 1,
+      data: { text: 'Because.' },
+    });
+    expect(callbacks.sessionState.markSessionBusy).not.toHaveBeenCalled();
+    expect(callbacks.confirmPromptAdmission).not.toHaveBeenCalled();
+    expect(callbacks.cleanupExpiredRecycleBin).not.toHaveBeenCalled();
+    proxy.dispose();
+  });
+
+  it('rejects V1 without forwarding or creating a helper session', async () => {
+    const { proxy, callbacks } = createProxy();
+    await proxy.handleRequest(
+      makePayload(2, 'POST', '/session/ses_side/side-question', { question: 'Why?' })
+    );
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 2,
+      error: 'Side questions require OpenCode V2',
+    });
+    expect(callbacks.server.request).not.toHaveBeenCalled();
+    proxy.dispose();
+  });
+
+  it('rejects a foreign directory before generation', async () => {
+    const { proxy, callbacks } = createProxy({
+      server: { ...createCallbacks().server, apiVersion: 2 },
+      contextProvider: {
+        ...createCallbacks().contextProvider,
+        getOpenWorkspaceRoot: vi.fn(() => null),
+      },
+    });
+    await proxy.handleRequest(
+      makePayload(3, 'POST', '/session/ses_side/side-question?directory=%2Fforeign', {
+        question: 'Why?',
+      })
+    );
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(
+      1,
+      expect.objectContaining({ id: 3, error: expect.any(String) })
+    );
+    expect(callbacks.server.request).not.toHaveBeenCalledWith(
+      'POST',
+      expect.anything(),
+      expect.anything(),
+      expect.anything()
+    );
+    proxy.dispose();
+  });
+});
+
 describe('scopeOpenCodeRequest', () => {
   it('returns URL string when path is valid', () => {
     const result = scopeOpenCodeRequest('http://127.0.0.1:4096', '/session');

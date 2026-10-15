@@ -1732,6 +1732,7 @@ const SESSION_ACTIONS = new Set([
   'unrevert',
   'init',
   'command',
+  'side-question',
 ]);
 
 const noQuery = (url: URL) => !url.search;

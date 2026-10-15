@@ -224,6 +224,11 @@ describe('webview message validation', () => {
     expect(isAllowedApiRequest('POST', '/session/abc/init')).toBe(true);
     expect(isAllowedApiRequest('POST', '/session/abc/prompt_async')).toBe(true);
     expect(isAllowedApiRequest('POST', '/session/abc/resume-steering')).toBe(true);
+    expect(isAllowedApiRequest('POST', '/session/abc/side-question')).toBe(true);
+    expect(isAllowedApiRequest('POST', '/session/abc/side-question?directory=%2Frepo')).toBe(true);
+    expect(isAllowedApiRequest('GET', '/session/abc/side-question')).toBe(false);
+    expect(isAllowedApiRequest('POST', '/session/abc/side-question?model=other')).toBe(false);
+    expect(isAllowedApiRequest('POST', '/api/session/abc/generate')).toBe(false);
     expect(isAllowedApiRequest('POST', '/session/abc/resume-steering?directory=%2Frepo-a')).toBe(
       true
     );

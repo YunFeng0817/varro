@@ -251,6 +251,78 @@ The `vision` agent must be visible, have subagent or all mode, and have an expli
 
 Unsent composer text and explicit file or folder attachments are restored after webview or window reloads. Images, PDFs, terminal selections, and diagnostic attachments are persisted when they are queued, not as part of an ordinary unsent draft.
 
+### Side questions
+
+With an OpenCode V2 conversation open, type `/btw Why did that test fail?`
+or choose **Ask a side question…** from the conversation's title menu. `/btw`
+without a question opens an empty form.
+
+Before the first question is sent, the dialog shows the independently centered
+Varro logo with the same hover effects as new chat and one dim caption below it.
+The welcome disappears when you submit, but its height remains the dialog's minimum,
+subject to the available viewport height.
+
+During active work, the send-options menu also offers **Side question** above
+**Stop and Send**. This asks the current draft without needing `/btw`, queueing it,
+or interrupting the main task. Existing attachments stay in the main composer.
+
+The temporary dialog uses the chat's message bubbles and rich prompt composer,
+without repeated Question/Answer labels. Question bubbles show at most two lines,
+with longer text scrolling inside the bubble. Main-chat bubbles are unchanged.
+Enter sends; Shift+Enter adds a line, and
+the usual undo/redo shortcuts work. Follow-ups include
+the earlier side questions and answers as context without adding them to the main
+conversation. The thread is kept only while the dialog is open. Each response has
+a right-aligned Copy button in the divider row below it, revealed on hover or
+keyboard focus. Send/Stop is vertically centered beside the input rather
+than in a separate toolbar row.
+
+The side input stays at one-line height and keeps the caret's line vertically
+centered while typing or moving between lines. Neighboring lines can peek into
+the padding above and below rather than expanding the composer. These edges fade
+smoothly, and the scrollbar is hidden without disabling scrolling. Each response's divider
+shows elapsed request time, measured from sending the question to receiving the
+completed answer. The native endpoint does not return token usage, so token counts
+and tokens per second are unavailable for side answers.
+
+Side questions accept text only. Pasting an image shows a warning and does not
+attach it. If the clipboard also contains plain text, that text is still pasted.
+
+Text contexts, captured editor/terminal selections, diagnostics, pasted text, and
+file/line references use the main chat's attachment formatting and chips. Context
+is captured when the dialog opens and retained in its local history. File and line
+references do not automatically read files; contents are available only when captured
+text or the existing conversation provides them.
+
+Images, PDFs, inline subagent/skill directives, commands, and other-conversation
+directives disable side-question sending instead of silently dropping prompt content.
+The question and serialized context must fit the 8,000-character request limit;
+oversized context is rejected without clearing the main draft or attachments.
+
+While the first answer is pending, the dialog shows just the question and animated
+Thinking indicator, without an input or Stop button. Close with X to cancel.
+After the first answer, the follow-up composer stays available, with request-local
+Stop while a follow-up is pending. Native V2 transient generation returns a completed answer,
+not token deltas, so side answers do not stream. Stopping the request does not
+guarantee that the provider stopped generation or billing.
+
+Side questions use the conversation's current native model and context. They cannot
+run tools or edit files. Each question is a normal model request and may incur usage.
+Threads are bounded to 12 answers and 128,000 characters of side-conversation context;
+when full, start another side conversation instead of silently losing earlier context.
+
+The menu preserves your composer draft and attachments. The slash action consumes
+only its command text, leaving existing attachments in the composer. Closing the
+dialog cancels only its request where supported, never the main task. Errors stay
+in the dialog with a Retry action. Switching conversation, directory, or server
+closes the dialog and discards its answer.
+
+Side questions work while the main task is running or waiting for input. `/btw`
+shows only Send, never Queue, Steer, or Stop and Send. It uses a read-only snapshot
+of the current context without pausing the task or resolving its pending requests.
+Side questions require native V2 transient generation support. Unsupported servers report
+an error rather than sending a normal message or creating a helper conversation.
+
 ### Queued Messages
 
 Queued messages belong to the session where they were created and dispatch from top to bottom when that session is connected and idle, even while another chat is active. A pending permission, question, edit, failed dispatch, or steering request prevents automatic dispatch for that session until it is resolved.

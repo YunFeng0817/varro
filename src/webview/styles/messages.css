@@ -2021,6 +2021,10 @@ body:is(.vscode-high-contrast, .vscode-high-contrast-light) .assistant-activity-
   pointer-events: auto;
 }
 
+.chat-empty-logo-shell.is-contained {
+  position: absolute;
+}
+
 .chat-empty-logo-waves {
   position: absolute;
   inset: 0;

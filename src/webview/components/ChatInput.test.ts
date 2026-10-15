@@ -11,6 +11,7 @@ import {
   VARRO_VISION_AGENT_PROMPT,
 } from '../../shared/vision-agent';
 import type {
+  Agent,
   AssistantMessage,
   MessageEntry,
   Part,
@@ -72,6 +73,7 @@ import { registerHostExtension } from '../host/extensions';
 import { toCssUrl } from './UiIcon';
 import { getMaterialChipIcon } from './MaterialChipIcon';
 import { getVisibleThreadMessages } from './message-list/thread-visibility';
+import { closeSideQuestion, sideQuestionView } from '../lib/side-question';
 import { upsertMessageInfo } from '../lib/state-messages';
 import * as imageCompression from '../lib/image-compression';
 import * as imageLoading from '../lib/image-loading';
@@ -310,6 +312,7 @@ afterEach(() => {
   setState('providerRefreshPending', false);
   setState('workspaceCatalogReloadPending', false);
   resetProviderConnectionState();
+  closeSideQuestion();
   setState('activeSessionId', null);
   setState('messagesLoading', false);
   setState('messages', []);
@@ -9285,6 +9288,218 @@ describe('ChatInput', () => {
     expect(abortSessionMock).toHaveBeenCalledTimes(1);
     expect(sendMessageMock).not.toHaveBeenCalled();
     expect(inputText()).toBe('Do not send after a failed stop');
+  });
+
+  it.each([
+    ['@explore Why?', 'subagents'],
+    ['$[docs] Why?', 'skills'],
+    ['/test example', 'commands'],
+    ['session:ses_other Why?', 'other conversations'],
+  ])('disables side-question sends for incompatible inline content %s', async (prompt, reason) => {
+    setupMatchingActiveTurn();
+    setState('serverStatus', { state: 'running', url: 'http://localhost:4096', apiVersion: 2 });
+    setState('activeSessionId', 'session-1');
+    setState('sessions', [session('session-1', 1, { directory: '/repo' })]);
+    setState('allAgents', [fixture<Agent>({ name: 'explore' })]);
+    setIsLoading(true);
+    setInputText(`/btw ${prompt}`);
+    cleanup = render(() => ChatInput(), container!);
+    expect(
+      container?.querySelector<HTMLButtonElement>('[aria-label="Send (Enter)"]')?.disabled
+    ).toBe(true);
+    container
+      ?.querySelector('.rich-composer')
+      ?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    await flushAsyncWork();
+    expect(sideQuestionView()).toBeNull();
+    expect(inputText()).toBe(`/btw ${prompt}`);
+    setInputText(prompt);
+    await flushAsyncWork();
+    container?.querySelector<HTMLButtonElement>('[aria-label="More send options"]')!.click();
+    const action = [...container!.querySelectorAll<HTMLButtonElement>('.busy-menu button')].find(
+      (button) => button.textContent?.trim() === 'Side question'
+    );
+    expect(action?.disabled).toBe(true);
+    expect(action?.title).toContain(reason);
+    expect(sendMessageMock).not.toHaveBeenCalled();
+    expect(abortSessionMock).not.toHaveBeenCalled();
+    expect(state.queuedMessages).toEqual([]);
+  });
+
+  it('asks the plain draft from the busy menu without stopping, queueing, steering, or consuming attachments', async () => {
+    setupMatchingActiveTurn();
+    setState('serverStatus', { state: 'running', url: 'http://localhost:4096', apiVersion: 2 });
+    setState('activeSessionId', 'session-1');
+    setState('sessions', [session('session-1', 1, { directory: '/repo' })]);
+    setState('sessionStatus', 'session-1', { type: 'busy' });
+    setIsLoading(true);
+    setState('droppedFiles', [{ path: '/repo/keep.ts', relativePath: 'keep.ts', type: 'file' }]);
+    setInputText('Why did that fail?\nKeep it short.');
+    cleanup = render(() => ChatInput(), container!);
+    container?.querySelector<HTMLButtonElement>('[aria-label="More send options"]')!.click();
+    const labels = [...container!.querySelectorAll('.busy-menu-label')];
+    expect(labels.map((label) => label.textContent)).toEqual([
+      'Queue',
+      'Steer',
+      'Side question',
+      'Stop and Send',
+    ]);
+    labels[2]!.closest('button')!.click();
+    await flushAsyncWork();
+    expect(sideQuestionView()).toMatchObject({
+      sessionID: 'session-1',
+      question: 'Why did that fail?\nKeep it short.',
+    });
+    expect(inputText()).toBe('');
+    expect(container?.querySelector('.busy-menu')).toBeNull();
+    expect(state.droppedFiles).toHaveLength(1);
+    expect(state.sessionStatus['session-1']).toEqual({ type: 'busy' });
+    expect(state.queuedMessages).toEqual([]);
+    expect(sendMessageMock).not.toHaveBeenCalled();
+    expect(abortSessionMock).not.toHaveBeenCalled();
+    expect(runSlashCommandByNameMock).not.toHaveBeenCalled();
+  });
+
+  it('does not offer a busy-menu side question on OpenCode V1', async () => {
+    setupMatchingActiveTurn();
+    setState('serverStatus', { state: 'running', url: 'http://localhost:4096', apiVersion: 1 });
+    setState('activeSessionId', 'session-1');
+    setState('sessions', [session('session-1', 1, { directory: '/repo' })]);
+    setIsLoading(true);
+    setInputText('Ordinary follow-up');
+    cleanup = render(() => ChatInput(), container!);
+    container?.querySelector<HTMLButtonElement>('[aria-label="More send options"]')!.click();
+    await flushAsyncWork();
+    expect(
+      [...container!.querySelectorAll('.busy-menu-label')].map((label) => label.textContent)
+    ).toEqual(['Queue', 'Steer', 'Stop and Send']);
+    expect(inputText()).toBe('Ordinary follow-up');
+    expect(sideQuestionView()).toBeNull();
+  });
+
+  it('opens /btw without sending or consuming existing attachments', async () => {
+    setState('serverStatus', { state: 'running', url: 'http://localhost:4096', apiVersion: 2 });
+    setState('activeSessionId', 'session-1');
+    setState('sessions', [session('session-1', 1, { directory: '/repo' })]);
+    setState('droppedFiles', [{ path: '/repo/keep.ts', relativePath: 'keep.ts', type: 'file' }]);
+    setInputText('/btw Why did that fail?');
+    cleanup = render(() => ChatInput(), container!);
+    container
+      ?.querySelector('.rich-composer')
+      ?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    await flushAsyncWork();
+    expect(sideQuestionView()).toMatchObject({
+      sessionID: 'session-1',
+      question: 'Why did that fail?',
+    });
+    expect(inputText()).toBe('');
+    expect(state.droppedFiles).toHaveLength(1);
+    expect(state.queuedMessages).toEqual([]);
+    expect(sendMessageMock).not.toHaveBeenCalled();
+    expect(runSlashCommandByNameMock).not.toHaveBeenCalled();
+  });
+
+  it.each([1, 2] as const)(
+    'never sends an unavailable /btw as chat or a custom command on API %s',
+    async (apiVersion) => {
+      setState('serverStatus', { state: 'running', url: 'http://localhost:4096', apiVersion });
+      setState('activeSessionId', 'session-1');
+      setState('sessions', [
+        session('session-1', 1, {
+          transfer: { originDirectory: '/other', available: false },
+        }),
+      ]);
+      setState('commands', [{ name: 'btw', template: 'Must not execute' }]);
+      setInputText('/btw Why?');
+      cleanup = render(() => ChatInput(), container!);
+      container
+        ?.querySelector('.rich-composer')
+        ?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      await flushAsyncWork();
+      expect(sideQuestionView()).toBeNull();
+      expect(inputText()).toBe('/btw Why?');
+      expect(state.queuedMessages).toEqual([]);
+      expect(sendMessageMock).not.toHaveBeenCalled();
+      expect(runSlashCommandByNameMock).not.toHaveBeenCalled();
+    }
+  );
+
+  it.each(['send', 'enter', 'ctrl-enter', 'meta-enter'] as const)(
+    'asks /btw during active work using %s without queueing, steering, or stopping',
+    async (action) => {
+      setupMatchingActiveTurn();
+      setState('serverStatus', { state: 'running', url: 'http://localhost:4096', apiVersion: 2 });
+      setState('activeSessionId', 'session-1');
+      setState('sessions', [session('session-1', 1, { directory: '/repo' })]);
+      setState('sessionStatus', 'session-1', { type: 'busy' });
+      setIsLoading(true);
+      setState('droppedFiles', [{ path: '/repo/keep.ts', relativePath: 'keep.ts', type: 'file' }]);
+      setInputText('/btw How is it going?\nKeep it short.');
+      cleanup = render(() => ChatInput(), container!);
+      expect(container?.querySelector('[aria-label="More send options"]')).toBeNull();
+      expect(container?.querySelector('[aria-label="Add to queue (Enter)"]')).toBeNull();
+      expect(container?.querySelector('[aria-label="Stop"]')).toBeNull();
+      const send = container?.querySelector<HTMLButtonElement>('[aria-label="Send (Enter)"]');
+      expect(send?.disabled).toBe(false);
+      if (action === 'send') send!.click();
+      else
+        container?.querySelector('.rich-composer')?.dispatchEvent(
+          new KeyboardEvent('keydown', {
+            key: 'Enter',
+            bubbles: true,
+            ctrlKey: action === 'ctrl-enter',
+            metaKey: action === 'meta-enter',
+          })
+        );
+      await flushAsyncWork();
+      expect(sideQuestionView()).toMatchObject({
+        sessionID: 'session-1',
+        question: 'How is it going?\nKeep it short.',
+      });
+      expect(state.sessionStatus['session-1']).toEqual({ type: 'busy' });
+      expect(state.queuedMessages).toEqual([]);
+      expect(state.droppedFiles).toHaveLength(1);
+      expect(sendMessageMock).not.toHaveBeenCalled();
+      expect(abortSessionMock).not.toHaveBeenCalled();
+      expect(runSlashCommandByNameMock).not.toHaveBeenCalled();
+      expect(showSessionActionFeedbackMock).not.toHaveBeenCalled();
+    }
+  );
+
+  it('closes the busy-send menu when the draft becomes /btw and restores ordinary queue controls afterward', async () => {
+    setupMatchingActiveTurn();
+    setState('serverStatus', { state: 'running', url: 'http://localhost:4096', apiVersion: 2 });
+    setState('activeSessionId', 'session-1');
+    setState('sessions', [session('session-1', 1, { directory: '/repo' })]);
+    setIsLoading(true);
+    setInputText('Ordinary follow-up');
+    cleanup = render(() => ChatInput(), container!);
+    container?.querySelector<HTMLButtonElement>('[aria-label="More send options"]')!.click();
+    expect(container?.querySelector('.busy-menu')).not.toBeNull();
+    setInputText('/btw How is it going?');
+    await flushAsyncWork();
+    expect(container?.querySelector('.busy-menu')).toBeNull();
+    expect(container?.querySelector('[aria-label="More send options"]')).toBeNull();
+    expect(container?.querySelector('[aria-label="Send (Enter)"]')).not.toBeNull();
+    setInputText('Ordinary follow-up');
+    await flushAsyncWork();
+    expect(container?.querySelector('[aria-label="Add to queue (Enter)"]')).not.toBeNull();
+    expect(container?.querySelector('[aria-label="More send options"]')).not.toBeNull();
+  });
+
+  it('does not ask about a previously selected conversation from the new-chat composer', async () => {
+    setState('serverStatus', { state: 'running', url: 'http://localhost:4096', apiVersion: 2 });
+    setState('activeSessionId', 'session-1');
+    setState('sessions', [session('session-1', 1)]);
+    setInputText('/btw Why?');
+    cleanup = render(() => ChatInput({ newSession: true }), container!);
+    container
+      ?.querySelector('.rich-composer')
+      ?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    await flushAsyncWork();
+    expect(sideQuestionView()).toBeNull();
+    expect(inputText()).toBe('/btw Why?');
+    expect(sendMessageMock).not.toHaveBeenCalled();
   });
 
   it('runs a typed slash command with args on Enter', async () => {

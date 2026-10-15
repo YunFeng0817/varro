@@ -24,6 +24,14 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { asRecord, isBoolean, isNumber, isString, type UnknownRecord } from '../shared/type-utils';
 import { withStartupDeadline } from '../shared/startup';
 import { parseSkillAttachment } from '../shared/skill-reference';
+import { isSameWorkspacePath } from '../shared/workspace-path';
+import {
+  MAX_SIDE_QUESTION_LENGTH,
+  MAX_SIDE_QUESTION_ANSWER_LENGTH,
+  MAX_SIDE_QUESTION_TURNS,
+  MAX_SIDE_QUESTION_CONTEXT_LENGTH,
+} from '../shared/side-question';
+import type { SideQuestionTurn } from '../shared/side-question';
 import type {
   ProviderAuthMethod,
   ProviderAuthPromptCondition,
@@ -651,6 +659,79 @@ export class OpenCodeV2Adapter {
       const sessionID = decodeURIComponent(sessionRoute[1]!);
       const endpoint = `/api/session/${encodeURIComponent(sessionID)}`;
       const action = sessionRoute[2] ?? '';
+      if (action === 'side-question' && method === 'POST') {
+        if (
+          Object.keys(input).some((key) => key !== 'question' && key !== 'history') ||
+          !isString(input.question) ||
+          !input.question.trim() ||
+          input.question.length > MAX_SIDE_QUESTION_LENGTH
+        ) {
+          throw new Error('Invalid side question');
+        }
+        const history = input.history === undefined ? [] : input.history;
+        if (!Array.isArray(history) || history.length >= MAX_SIDE_QUESTION_TURNS) {
+          throw new Error('Invalid side-question history');
+        }
+        const turns: SideQuestionTurn[] = [];
+        let contextLength = input.question.length;
+        for (const value of history) {
+          const turn = asRecord(value);
+          if (
+            !turn ||
+            Object.keys(turn).length !== 2 ||
+            !isString(turn.question) ||
+            !turn.question.trim() ||
+            turn.question.length > MAX_SIDE_QUESTION_LENGTH ||
+            !isString(turn.answer) ||
+            !turn.answer.trim() ||
+            turn.answer.length > MAX_SIDE_QUESTION_ANSWER_LENGTH
+          ) {
+            throw new Error('Invalid side-question history');
+          }
+          contextLength += turn.question.length + turn.answer.length;
+          turns.push({ question: turn.question, answer: turn.answer });
+        }
+        if (contextLength > MAX_SIDE_QUESTION_CONTEXT_LENGTH) {
+          throw new Error('This side conversation is full. Close it and start another.');
+        }
+        const canonical = await data<unknown>('GET', endpoint);
+        const session = asRecord(canonical);
+        const sessionDirectory = asRecord(session?.location)?.directory;
+        if (
+          session?.id !== sessionID ||
+          !isString(sessionDirectory) ||
+          (directory && !isSameWorkspacePath(sessionDirectory, directory))
+        ) {
+          throw new Error(
+            'Conversation location changed. Reopen it before asking a side question.'
+          );
+        }
+        const result = await data<unknown>('POST', `${endpoint}/generate`, {
+          prompt: [
+            'The user is asking a quick side question about the conversation so far.',
+            'Answer directly and concisely in Markdown from what you already know.',
+            'Do not call any tools and do not take any actions.',
+            'File and line references do not imply file contents. Use only included text or existing conversation context, and do not claim to read files.',
+            ...(turns.length
+              ? [
+                  'Previous side questions and answers, for context only:',
+                  JSON.stringify(turns),
+                  'Answer the following follow-up:',
+                ]
+              : []),
+            '',
+            input.question.trim(),
+          ].join('\n'),
+        });
+        const text = asRecord(result)?.text;
+        if (!isString(text) || !text.trim()) {
+          throw new Error('OpenCode returned no answer. Side questions cannot run tools.');
+        }
+        if (text.length > MAX_SIDE_QUESTION_ANSWER_LENGTH) {
+          throw new Error('The side-question answer was too long. Try a narrower question.');
+        }
+        return { text: text.trim() };
+      }
       if (method === 'GET' && action === 'background-process') {
         const shells = await data<ShellInfo[]>('GET', query('/api/shell', true));
         const services = await this.backgroundServices.read(sessionID);
