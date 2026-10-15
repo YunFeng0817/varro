@@ -1,6 +1,43 @@
 import { expect, test } from '@playwright/test';
 
 for (const theme of ['dark', 'light', 'high-contrast', 'high-contrast-light']) {
+  test(`busy-send menu matches other menu highlights in ${theme}`, async ({ page }) => {
+    await page.goto(`/e2e/harness/index.html?scenario=busy-stop-send&theme=${theme}`);
+    const composer = page.locator('[role="textbox"][aria-multiline="true"]').first();
+    await page.getByLabel('Select agent', { exact: true }).click();
+    const referenceAction = page
+      .locator('.agent-popover .toolbar-popover-item:not(.selected)')
+      .first();
+    await referenceAction.hover();
+    await expect
+      .poll(() => referenceAction.evaluate((element) => element.getAnimations().length))
+      .toBe(0);
+    const highlight = await referenceAction.evaluate((element) => {
+      const style = getComputedStyle(element);
+      return { background: style.backgroundColor, foreground: style.color };
+    });
+    await composer.click();
+    await composer.fill('Choose a send action');
+    await page.getByLabel('More send options').click();
+
+    const menu = page.locator('.busy-menu');
+    const actions = menu.locator('button');
+    await expect(actions).toHaveCount(3);
+    for (const action of await actions.all()) {
+      await expect(action).toBeEnabled();
+      await action.hover();
+      await expect(action).toHaveCSS('background-color', highlight.background);
+      await expect(action).toHaveCSS('color', highlight.foreground);
+    }
+
+    await composer.hover();
+    await page.keyboard.press('Tab');
+    const focusedAction = menu.locator('button:focus-visible');
+    await expect(focusedAction).toHaveCount(1);
+    await expect(focusedAction).toHaveCSS('background-color', highlight.background);
+    await expect(focusedAction).toHaveCSS('color', highlight.foreground);
+  });
+
   test(`send button distinguishes enabled and disabled styles in ${theme}`, async ({ page }) => {
     await page.goto(`/e2e/harness/index.html?scenario=blank&theme=${theme}`);
     const send = page.getByLabel('Send (Enter)', { exact: true });

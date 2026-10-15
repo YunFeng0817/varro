@@ -39,9 +39,9 @@ describe('BusySendMenu', () => {
 
     expect(menuRef).toBeInstanceOf(HTMLDivElement);
     expect(menuRef?.className).toContain('busy-menu');
-    expect(container?.textContent).toContain('Add to Queue');
-    expect(container?.textContent).toContain('Steer with Message');
-    expect(container?.textContent).toContain('Stop and Send');
+    expect(
+      [...container!.querySelectorAll('.busy-menu-label')].map((label) => label.textContent)
+    ).toEqual(['Queue', 'Steer', 'Stop and Send']);
     expect(container?.textContent).toContain('Enter');
   });
 

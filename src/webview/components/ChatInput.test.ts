@@ -9020,7 +9020,7 @@ describe('ChatInput', () => {
         [...container!.querySelectorAll<HTMLButtonElement>('.busy-menu button')].find((button) =>
           button.textContent?.includes(label)
         );
-      expect(menuAction('Steer with Message')?.disabled).toBe(true);
+      expect(menuAction('Steer')?.disabled).toBe(true);
       expect(menuAction('Stop and Send')?.disabled).toBe(true);
       menuAction('Stop and Send')?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
       expect(abortSessionMock).not.toHaveBeenCalled();
@@ -9048,9 +9048,9 @@ describe('ChatInput', () => {
       );
       setState('selectedAgent', 'build');
       setInputText('Matching settings');
-      if (!menuAction('Steer with Message'))
+      if (!menuAction('Steer'))
         container?.querySelector<HTMLButtonElement>('[aria-label="More send options"]')?.click();
-      expect(menuAction('Steer with Message')?.disabled).toBe(false);
+      expect(menuAction('Steer')?.disabled).toBe(false);
       expect(
         container?.querySelector<HTMLButtonElement>('[aria-label="Send as Steer"]')?.disabled
       ).toBe(true);
