@@ -821,6 +821,29 @@ describe.skipIf(!binary)('released OpenCode adapter contract', () => {
     expect(updated?.permission).toEqual([{ permission: '*', pattern: '*', action: 'allow' }]);
   }, 30000);
 
+  it('rejects new v1 share links but keeps local link cleanup available', async (context) => {
+    const health = await transport.readHealthInfo();
+    if (transport.version !== 1 || compareVersions(health.version ?? '0', '1.19.1') < 0)
+      return context.skip();
+    const session = asRecord(
+      await transport.request('POST', '/session', { title: 'Share cleanup fixture' })
+    );
+    const id = String(session?.id);
+    try {
+      // The released HTTP handler masks the discontinued-sharing error as a generic 500.
+      await expect(transport.request('POST', `/session/${id}/share`)).rejects.toThrow(
+        '500 Internal Server Error'
+      );
+      const unchanged = asRecord(await transport.request('GET', `/session/${id}`));
+      expect(unchanged?.share).toBeUndefined();
+      const updated = asRecord(await transport.request('DELETE', `/session/${id}/share`));
+      expect(updated?.id).toBe(id);
+      expect(updated?.share).toBeUndefined();
+    } finally {
+      await transport.request('DELETE', `/session/${id}`);
+    }
+  }, 30000);
+
   it('answers the first Plan prompt without a separate reminder-only turn', async () => {
     const session = asRecord(
       await transport.request('POST', '/session', { title: 'Plan fixture' })

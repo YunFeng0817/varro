@@ -71,8 +71,8 @@ For WSL, open the project in a VS Code WSL window, then install and authenticate
 
 | Version | Minimum supported | Tested with this release | npm package |
 | --- | --- | --- | --- |
-| v2, recommended | 2.0.5 | 2.0.29 | `@opencode/cli` |
-| v1, still supported | 1.16.0 | 1.19.0 | `opencode-ai` |
+| v2, recommended | 2.0.5 | 2.0.30 | `@opencode/cli` |
+| v1, still supported | 1.16.0 | 1.19.2 | `opencode-ai` |
 
 To keep using v1, retain your installation or run `npm install -g opencode-ai`. Set `varro.server.command` to its executable path. Setting it to `opencode` selects v1 only if that command resolves to a v1 installation. Varro detects the API automatically.
 
@@ -111,7 +111,7 @@ On macOS or Linux, use `lsof -nP -iTCP:4096 -sTCP:LISTEN` to find the listener. 
 
 ### Version differences and history
 
-- V2 does not expose session sharing or an OpenCode LSP service. Sharing is disabled on v2. VS Code Problems remain available as explicit context.
+- OpenCode has discontinued session sharing. Varro no longer offers new share links; existing v1 links can be cleared with **Unshare session**. V2 does not expose an OpenCode LSP service. VS Code Problems remain available as explicit context.
 - V2 cannot patch arbitrary session metadata. Varro keeps session annotations in `opencode-v2/` under its per-user state directory, described below. These annotations are local to Varro and are not synchronized to other OpenCode clients.
 - Changing CLI versions does not synchronize history. After switching to v2, opening a v1 conversation that is still in the session list imports a copy of it and its child sessions when v2 cannot load the original. The copy has new IDs and a title ending in `(v1 copy)`. You can continue it without changing the original v1 history. Imports do not execute recorded tools or send a model request.
 
@@ -374,7 +374,7 @@ cleared by a failed read.
 - Search uses OpenCode's native root-session search across loaded and older history and returns up to 30 results. Matching fields depend on the installed OpenCode version. Run `Varro: Search Sessions` to open and focus search directly.
 - Filter or jump to `Running`, `Needs attention`, `Failed`, `Plan ready`, and `Completed` sessions from the header badges.
 - Open sub-agent sessions from the parent session row when they exist.
-- Top-level sessions can be renamed, pinned, or moved to the recycle bin. Drag a pinned session's handle, or focus it and press `ArrowUp` or `ArrowDown`, to reorder pinned sessions. Any session can open in the sidebar, an editor tab, or the OpenCode TUI, and its ID can be copied. Opening an editor session in the sidebar closes its matching editor tab. On v1, sharing asks OpenCode to create a share link and copies it to the clipboard; v2 sharing is unavailable.
+- Top-level sessions can be renamed, pinned, or moved to the recycle bin. Drag a pinned session's handle, or focus it and press `ArrowUp` or `ArrowDown`, to reorder pinned sessions. Any session can open in the sidebar, an editor tab, or the OpenCode TUI, and its ID can be copied. Opening an editor session in the sidebar closes its matching editor tab. OpenCode has discontinued sharing. Existing v1 share links retain an **Unshare session** action to clear the local link.
 - Deleted session roots move into a recycle bin section where you can restore them or delete them permanently for 24 hours before they expire.
 - Stop the active run with `Varro: Abort Session`.
 - Use `/export` to open the current session as JSON in the editor.
@@ -852,7 +852,7 @@ There are also deprecated debug-only settings used for development and recovery 
 ## Troubleshooting
 
 - OpenCode CLI missing: install v2 with `npm install -g @opencode/cli` on macOS, Linux, or WSL, or download the native Windows CLI from the [v2 install page](https://opencode.ai/v2/docs/). V1 remains available with `npm install -g opencode-ai`.
-- OpenCode CLI incompatible: Varro supports the v1 API from `1.16.0` and the v2 API from `2.0.5`. This release was tested with v1 `1.19.0` and v2 `2.0.29`. Varro selects the API automatically, including when `varro.server.command` points to a custom binary such as `opencode2`. Updates use the installed CLI's package family.
+- OpenCode CLI incompatible: Varro supports the v1 API from `1.16.0` and the v2 API from `2.0.5`. This release was tested with v1 `1.19.2` and v2 `2.0.30`. Varro selects the API automatically, including when `varro.server.command` points to a custom binary such as `opencode2`. Updates use the installed CLI's package family.
 - OpenCode v2 authentication: Varro captures managed-server credentials automatically and redacts them from output. Existing local services use their registered credentials. An externally managed server can also use `OPENCODE_SERVER_PASSWORD` and `OPENCODE_SERVER_USERNAME` from the extension host's environment.
 - OpenCode v2 session settings: Varro stores mutable session annotations locally because the released v2 API cannot update session metadata. Session sharing is unavailable through this API, so its menu action is disabled. Existing v1-format configuration remains supported.
 - CLI not on `PATH`: set `varro.server.command` to the executable path.

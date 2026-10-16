@@ -2224,7 +2224,7 @@ describe('SessionListView actions', () => {
     expect(menu?.textContent).toContain('Copy session ID');
     expect(menu?.textContent).toContain('Open in Editor');
     expect(menu?.textContent).toContain('Open in Terminal');
-    expect(menu?.textContent).toContain('Share session');
+    expect(menu?.textContent).not.toContain('Share session');
   });
 
   it('opens a session in a terminal from its row menu', () => {
@@ -2317,7 +2317,7 @@ describe('SessionListView actions', () => {
     }
   );
 
-  it('shares, copies, and unshares a session from its row menu', async () => {
+  it('clears an existing v1 share link and copies the session ID from its row menu', async () => {
     const activityUpdatedAt = Date.now() - 60_000;
     const shareUpdatedAt = Date.now();
     vi.spyOn(client.varro.session, 'diffSummary').mockResolvedValue({
@@ -2328,11 +2328,6 @@ describe('SessionListView actions', () => {
       durationMs: 0,
       activeStartedAt: null,
     });
-    const share = vi
-      .spyOn(client.session, 'share')
-      .mockResolvedValue(
-        session('session-1', shareUpdatedAt, { share: { url: 'https://share.test/1' } })
-      );
     const unshareResult = session('session-1', shareUpdatedAt + 1, {
       share: { url: 'https://share.test/1' },
     });
@@ -2344,7 +2339,9 @@ describe('SessionListView actions', () => {
       value: { writeText },
       configurable: true,
     });
-    setState('sessions', [session('session-1', activityUpdatedAt)]);
+    setState('sessions', [
+      session('session-1', activityUpdatedAt, { share: { url: 'https://share.test/1' } }),
+    ]);
 
     try {
       cleanup = render(
@@ -2358,30 +2355,12 @@ describe('SessionListView actions', () => {
       );
       const row = container.querySelector<HTMLElement>('.session-item')!;
 
-      openSessionActions(row);
-      Array.from(document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'))
-        .find((button) => button.textContent?.trim() === 'Share session')!
-        .click();
-
-      await vi.waitFor(() =>
-        expect(share).toHaveBeenCalledWith('session-1', { directory: '/repo' })
-      );
-      await vi.waitFor(() => expect(writeText).toHaveBeenCalledWith('https://share.test/1'));
-      expect(appState.sessions[0]?.time.updated).toBe(activityUpdatedAt);
       expect(row.querySelector('.session-item-shared-marker')?.getAttribute('title')).toBe(
         'Session is shared'
       );
       const sharedIcon = row.querySelector<HTMLElement>('.shared-session-icon');
       expect(sharedIcon?.classList).toContain('ui-icon');
       expect(sharedIcon?.style.getPropertyValue('--ui-icon-width')).toBe('12px');
-      await vi.waitFor(() => {
-        const feedback = document.querySelector<HTMLElement>('.session-action-feedback');
-        expect(feedback?.textContent?.trim()).toBe('Share link copied');
-        expect(feedback?.getAttribute('aria-live')).toBe('polite');
-        expect(feedback?.querySelector('.session-action-feedback-glyph')?.classList).toContain(
-          'ui-icon'
-        );
-      });
 
       openSessionActions(row);
       const sharedActions = Array.from(
@@ -2401,8 +2380,11 @@ describe('SessionListView actions', () => {
 
       pendingUnshare.resolve(unshareResult);
       await vi.waitFor(() => {
-        expect(document.querySelector('.session-action-feedback')?.textContent?.trim()).toBe(
-          'Session unshared'
+        const feedback = document.querySelector<HTMLElement>('.session-action-feedback');
+        expect(feedback?.textContent?.trim()).toBe('Session unshared');
+        expect(feedback?.getAttribute('aria-live')).toBe('polite');
+        expect(feedback?.querySelector('.session-action-feedback-glyph')?.classList).toContain(
+          'ui-icon'
         );
       });
       expect(appState.sessions[0]?.time.updated).toBe(activityUpdatedAt);
@@ -2412,8 +2394,11 @@ describe('SessionListView actions', () => {
         document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')
       );
       expect(unsharedActions.some((button) => button.textContent?.trim() === 'Share session')).toBe(
-        true
+        false
       );
+      expect(
+        unsharedActions.some((button) => button.textContent?.trim() === 'Unshare session')
+      ).toBe(false);
       unsharedActions.find((button) => button.textContent?.trim() === 'Copy session ID')!.click();
       await vi.waitFor(() => expect(writeText).toHaveBeenLastCalledWith('session-1'));
       await vi.waitFor(() => {

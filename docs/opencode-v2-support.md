@@ -25,7 +25,7 @@ update does not block later deletion. Cancelled updates check their signal befor
 reading, and before replacing the annotation file, so cancellation while queued or preparing a write
 does not commit that update.
 
-`npm run test:compatibility:adapters` installs published binaries into isolated directories and tests the production adapters. The current tested versions are v1 `1.19.0` and v2 `2.0.29`, alongside the v1 `1.16.0` and v2 `2.0.5` support floors. Release-specific results are recorded below. The checks cover managed startup, credential recovery in a second window, restart, multi-window recovery after process exit, bootstrap, workspace path encoding, v2 configuration precedence, session updates, deterministic streamed model responses, actual fixture-only tool execution, message pagination, tail editing, helper generation, fork/revert, deletion, and native v2 permissions/forms. The generated report is `artifacts/opencode-adapters/verified.json`.
+`npm run test:compatibility:adapters` installs published binaries into isolated directories and tests the production adapters. The current tested versions are v1 `1.19.2` and v2 `2.0.30`, alongside the v1 `1.16.0` and v2 `2.0.5` support floors. Release-specific results are recorded below. The checks cover managed startup, credential recovery in a second window, restart, multi-window recovery after process exit, bootstrap, workspace path encoding, v2 configuration precedence, session updates, deterministic streamed model responses, actual fixture-only tool execution, message pagination, tail editing, helper generation, fork/revert, deletion, and native v2 permissions/forms. The generated report is `artifacts/opencode-adapters/verified.json`.
 
 Fresh VS Code sandbox windows passed `v2-first-run` and the existing `healthy-first-run` scenario. These editor checks verify activation, ownership, health, and event-stream connection. `test:compatibility:ui` additionally exercises the actual composer, successful replies, pre-turn failures, HTTP 401 handling, recovery through a working provider, and reopening history. Full visual streaming performance remains a separate verification task.
 
@@ -39,7 +39,7 @@ VARRO_SANDBOX_V2_COMMAND=/absolute/path/to/opencode2 node scripts/vscode-sandbox
 
 The editor profile is disposable, and its OpenCode database is isolated under `artifacts/ai-test-data/`.
 
-The released v2 API has no session-sharing route or arbitrary single-message deletion. Varro disables sharing and implements inline-edit tail deletion through file-preserving staged revert and commit. V2 also has no LSP service. Metadata annotations are local to Varro; they are not synchronized to other OpenCode clients. Switching CLI families does not perform a data migration.
+The released v2 API has no session-sharing route or arbitrary single-message deletion. OpenCode has discontinued sharing across both families; Varro offers only local cleanup of existing v1 links. Varro implements inline-edit tail deletion through file-preserving staged revert and commit. V2 also has no LSP service. Metadata annotations are local to Varro; they are not synchronized to other OpenCode clients. Switching CLI families does not perform a data migration.
 
 ### Configuration discovery and provider connection lifecycle
 
@@ -83,6 +83,75 @@ resolve to `literal/directory`. V2 location queries retain their normal URL enco
 The released-server adapter tests cover exact workspace resolution for Japanese text, emoji,
 and literal percent escapes. Unit tests also cover header construction with embedded newlines
 and preservation of Windows separators and casing.
+
+### 2.0.30 and 1.19.2 compatibility review
+
+Reviewed the complete release diffs from v2.0.29 to v2.0.30, `042d0832` through
+`f16ef9ad`, and v1.19.0 to v1.19.2, `733b2c62` through `7901b7d3`.
+Consumed HTTP routes, SSE names and envelopes, session/message/inbox shapes,
+permissions/forms, and managed `serve` arguments remain compatible. The v2 client
+removes the unused `session.share` TUI command. The v1 SDK declarations are unchanged.
+
+OpenCode retired its sharing backend. V1 retains the share endpoints, but creation
+fails and unshare only clears the local link. The source error is "Session sharing
+has been discontinued"; the published HTTP handler returns a generic 500 instead.
+Varro removes new-share actions for both families while retaining **Unshare
+session** for existing v1 links. Header and session-list regressions cover cleanup,
+feedback, unchanged activity timestamps, and the absence of new-share actions. The
+published-server matrix checks v1's rejected creation and successful local cleanup.
+
+V2 now loads configured local and remote instructions, honors Claude skill-discovery
+disable flags, treats missing file substitutions as empty, and ignores empty provider
+and model names. MCP requests include tool input in permission metadata; the existing
+adapter preserves it. MCP capability negotiation, OAuth loopback handling, TinyFish
+initialization, compaction output budgeting, Responses null namespaces, model-catalog
+refreshes, and the built-in inference endpoint changes are server-owned behavior.
+Windows managed-service default ports change, but Varro reads service configuration
+and starts managed servers on explicit ports. V1 update discovery stays on npm's 1.x
+package family; Varro already selects updates by family. App, desktop, TUI, Console,
+schema publishing, and installer changes require no further Varro adaptation.
+
+Dependencies, lockfile, README, usage, and Docker examples now use v2 `2.0.30` and
+v1 `1.19.2`. Support floors remain v2 `2.0.5` and v1 `1.16.0`. Historical release
+observations and lower-bound fixtures remain unchanged.
+
+The Docker support-range run passed all 524 required checks across 14 v1 releases,
+including 43/43 on `1.19.2` and 37/37 on the `1.16.0` floor. Advisory checks passed
+76/78. The floor and the below-floor `1.15.13` comparison each retain the known MCP
+pagination caveat: discovery returned only the first page. This does not change the
+support floor. The generated summary is `scripts/opencode-compatibility/verified.json`;
+full evidence is `artifacts/opencode-compatibility.json` and
+`artifacts/opencode-1.19.2-compatibility.log`.
+
+All 495 focused unit tests and five shared compatibility-summary tests passed.
+The broader Vitest run also passed all 10,051 tests, with 48 skips. The enclosing
+`npm run test` command reached its 120-second controller deadline during the later
+Node script-test phase; `npm run test:scripts` then passed all 252 applicable script
+tests, with two skips.
+`npm run lint`, `npm run fmt`, `npm run fmt:check`, `npm run lint:check`,
+`npm run typecheck`, `npm run typecheck:suggestions`, and `npm run build` passed.
+Real-editor and visual streaming checks were not run for this bump.
+
+The isolated published-server adapter matrix passed all 145 applicable checks,
+with 39 family/platform skips and no leaked processes. The first run's only failure
+was the new sharing regression expecting the source error text rather than the
+published handler's generic HTTP 500. The corrected test also verifies no link was
+stored and local cleanup succeeds. Its focused published-server rerun and the full
+matrix rerun passed. No further product fix was needed.
+
+| Published server | Passed | Skipped |
+| --- | ---: | ---: |
+| v1.16.0 | 30 | 16 |
+| v1.19.2 | 31 | 15 |
+| v2.0.5 | 41 | 5 |
+| v2.0.30 | 43 | 3 |
+
+Evidence is `artifacts/opencode-adapters/verified.json`,
+`artifacts/opencode-2.0.30-adapters-rerun.log`, and
+`artifacts/opencode-1.19.2-sharing-rerun.log`. The initial assertion failure is
+retained in `artifacts/opencode-2.0.30-adapters.log`. Broader unit and script results
+are in `artifacts/opencode-versions-all-tests.log` and
+`artifacts/opencode-versions-script-tests.log`.
 
 ### 2.0.29 compatibility review
 

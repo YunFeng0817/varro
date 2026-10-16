@@ -45,7 +45,7 @@ A mobile companion PWA is coming. It is currently experimental and available by 
 
 Varro provides UI for sessions, chat, tools, queues, permissions, models, MCP connections, plans, and todos. Agents, commands, skills, compaction, and tool execution use OpenCode configuration. You can also continue sessions in the OpenCode TUI.
 
-The v2 API has no session sharing or OpenCode LSP service. VS Code Problems can still be attached as context, and Varro stores v2 session annotations locally. See [version differences and history import](https://github.com/koltyakov/varro/blob/main/docs/usage.md#version-differences-and-history).
+OpenCode has discontinued session sharing. Existing v1 share links can be cleared from the session menu. The v2 API has no OpenCode LSP service. VS Code Problems can still be attached as context, and Varro stores v2 session annotations locally. See [version differences and history import](https://github.com/koltyakov/varro/blob/main/docs/usage.md#version-differences-and-history).
 
 ## Sessions
 
@@ -133,7 +133,7 @@ Global configuration reloads when OpenCode is idle. Project changes may need `Va
 
 - [VS Code](https://code.visualstudio.com/) or [VSCodium](https://vscodium.com/) 1.107 or newer
 - [Node.js](https://nodejs.org/) 22.22.2+ on Node 22, or Node 24.15.0+
-- [OpenCode v2 CLI](https://opencode.ai/v2/docs/) 2.0.5+ recommended, or [v1 CLI](https://opencode.ai/docs/) 1.16.0+, on `PATH` or configured through `varro.server.command`. Tested with v2 2.0.29 and v1 1.19.0
+- [OpenCode v2 CLI](https://opencode.ai/v2/docs/) 2.0.5+ recommended, or [v1 CLI](https://opencode.ai/docs/) 1.16.0+, on `PATH` or configured through `varro.server.command`. Tested with v2 2.0.30 and v1 1.19.2
 - A trusted, non-virtual workspace. Remote workspaces run Varro and OpenCode on the remote extension host
 
 ## Documentation

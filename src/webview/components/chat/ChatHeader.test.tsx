@@ -316,7 +316,7 @@ describe('ActiveChatHeader', () => {
     expect(menu!.textContent).toContain('Copy session ID');
     expect(menu!.textContent).toContain('Open in Editor');
     expect(menu!.textContent).toContain('Open in Terminal');
-    expect(menu!.textContent).toContain('Share session');
+    expect(menu!.textContent).not.toContain('Share session');
     expect(menu!.textContent).not.toContain('Unshare session');
     expect(menu!.textContent).toContain('Move to Recycle Bin');
     expect(
@@ -330,7 +330,6 @@ describe('ActiveChatHeader', () => {
       'Rename',
       'Pin session',
       'Copy session ID',
-      'Share session',
       'Move to Recycle Bin',
     ]);
     expect(menu!.querySelectorAll('[role="separator"]')).toHaveLength(3);
@@ -352,7 +351,7 @@ describe('ActiveChatHeader', () => {
     expect(menu?.textContent).toContain('Copy session ID');
     expect(menu?.textContent).toContain('Open in Editor');
     expect(menu?.textContent).toContain('Open in Terminal');
-    expect(menu?.textContent).toContain('Share session');
+    expect(menu?.textContent).not.toContain('Share session');
   });
 
   it('opens the active session as an editor and returns the panel to the sessions list', () => {
@@ -513,45 +512,44 @@ describe('ActiveChatHeader', () => {
     });
   });
 
-  it('shows copied feedback after sharing from the header menu', async () => {
-    vi.spyOn(client.session, 'share').mockResolvedValue(
-      session({ share: { url: 'https://share.test/session-1' } })
-    );
-    const clipboardDescriptor = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
-    Object.defineProperty(navigator, 'clipboard', {
-      value: { writeText: vi.fn().mockResolvedValue(undefined) },
-      configurable: true,
+  it('shows feedback after clearing an existing v1 share link from the header menu', async () => {
+    setState('sessions', [session({ share: { url: 'https://share.test/session-1' } })]);
+    const unshare = vi.spyOn(client.session, 'unshare').mockResolvedValue(session());
+    renderHeader();
+    const sharedMarker = container.querySelector('[aria-label="Session is shared"]');
+    expect(sharedMarker?.getAttribute('title')).toBeNull();
+    const sharedIcon = sharedMarker?.querySelector<HTMLElement>('.shared-session-icon');
+    expect(sharedIcon?.classList).toContain('ui-icon');
+    expect(sharedIcon?.style.getPropertyValue('--ui-icon-width')).toBe('12px');
+    container
+      .querySelector<HTMLElement>('.chat-header-session-title')!
+      .dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+    Array.from(document.body.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'))
+      .find((button) => button.textContent?.trim() === 'Unshare session')!
+      .click();
+
+    await vi.waitFor(() => {
+      expect(unshare).toHaveBeenCalledWith('session-1', { directory: '/repo' });
+      const feedback = document.body.querySelector<HTMLElement>('.session-action-feedback');
+      expect(feedback?.textContent?.trim()).toBe('Session unshared');
+      expect(feedback?.querySelector('.session-action-feedback-glyph')?.classList).toContain(
+        'ui-icon'
+      );
+      expect(container.querySelector('[aria-label="Session is shared"]')).toBeNull();
     });
+  });
 
-    try {
-      renderHeader();
-      container
-        .querySelector<HTMLElement>('.chat-header-session-title')!
-        .dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
-      Array.from(document.body.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'))
-        .find((button) => button.textContent?.trim() === 'Share session')!
-        .click();
-
-      await vi.waitFor(() => {
-        const feedback = document.body.querySelector<HTMLElement>('.session-action-feedback');
-        expect(feedback?.textContent?.trim()).toBe('Share link copied');
-        expect(feedback?.querySelector('.session-action-feedback-glyph')?.classList).toContain(
-          'ui-icon'
-        );
-      });
-      const sharedMarker = container.querySelector('[aria-label="Session is shared"]');
-      expect(sharedMarker?.getAttribute('aria-label')).toBe('Session is shared');
-      expect(sharedMarker?.getAttribute('title')).toBeNull();
-      const sharedIcon = sharedMarker?.querySelector<HTMLElement>('.shared-session-icon');
-      expect(sharedIcon?.classList).toContain('ui-icon');
-      expect(sharedIcon?.style.getPropertyValue('--ui-icon-width')).toBe('12px');
-    } finally {
-      if (clipboardDescriptor) {
-        Object.defineProperty(navigator, 'clipboard', clipboardDescriptor);
-      } else {
-        Reflect.deleteProperty(navigator, 'clipboard');
-      }
-    }
+  it('hides share cleanup when the backend does not support it', () => {
+    setState('sessions', [
+      session({ sharingSupported: false, share: { url: 'https://share.test/old' } }),
+    ]);
+    renderHeader();
+    container
+      .querySelector<HTMLElement>('.chat-header-session-title')!
+      .dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+    const menu = document.body.querySelector<HTMLElement>('[aria-label="Session actions"]');
+    expect(menu?.textContent).not.toContain('Share session');
+    expect(menu?.textContent).not.toContain('Unshare session');
   });
 
   it('shows cumulative worked duration next to the title', async () => {
