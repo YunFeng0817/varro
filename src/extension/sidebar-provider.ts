@@ -679,6 +679,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         event.affectsConfiguration('varro.chat.fontSize') ||
         event.affectsConfiguration('varro.chat.showChangedFiles') ||
         event.affectsConfiguration('varro.chat.showTurnTimer') ||
+        event.affectsConfiguration('varro.chat.showEmptyStateHistogram') ||
         event.affectsConfiguration('varro.chat.remoteImages') ||
         event.affectsConfiguration('varro.chat.promptCompletionModel') ||
         event.affectsConfiguration('varro.debug.showQuotaWarning') ||

@@ -290,6 +290,54 @@ test('entry waves reach every visible logo tile without further cursor movement'
   }
 });
 
+test('the logo entry sweep reaches all tiles during continued slow mouse movement', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 515, height: 800 });
+  await page.goto('/e2e/harness/index.html?scenario=blank');
+  const logo = page.locator('.chat-empty-logo');
+  const canvas = page.locator('.chat-empty-logo-waves');
+  await expect(logo).toBeVisible();
+  const box = (await logo.boundingBox())!;
+  const coverage = await canvas.evaluateHandle((element: HTMLCanvasElement) => {
+    const context = element.getContext('2d')!;
+    const fill = context.fillRect.bind(context);
+    const seen = new Set<string>();
+    context.fillRect = (x, y, width, height) => {
+      seen.add(`${x + width / 2},${y + height / 2}`);
+      fill(x, y, width, height);
+    };
+    return {
+      seen,
+      expected: Math.ceil(element.width / 4) * Math.ceil(element.height / 4),
+      stop: () => {
+        context.fillRect = fill;
+      },
+    };
+  });
+  const now = new Date();
+  await page.clock.install({ time: now });
+  await page.clock.pauseAt(now);
+  try {
+    for (let frame = 0; frame < 75; frame++) {
+      await page.mouse.move(box.x + 2 + Math.min(frame % 40, 40 - (frame % 40)) * 0.35, box.y + 2);
+      await page.clock.runFor(16);
+    }
+    const result = await coverage.evaluate((sample) => ({
+      reached: sample.seen.size,
+      expected: sample.expected,
+    }));
+    expect(result.reached).toBe(result.expected);
+    expect(await logo.boundingBox()).toEqual(box);
+    await page.mouse.move(0, 0);
+    await page.clock.runFor(1200);
+    expect((await wavePixels(canvas)).coloredPixels).toBe(0);
+  } finally {
+    await coverage.evaluate((sample) => sample.stop());
+    await coverage.dispose();
+  }
+});
+
 test('faster cursor movement makes stronger waves without changing the logo geometry', async ({
   page,
 }) => {

@@ -18,6 +18,7 @@ export function readExtensionConfigState(
     expandThinking: config.get<boolean>('chat.expandThinking', false),
     showChangedFiles: config.get<boolean>('chat.showChangedFiles', false),
     showTurnTimer: config.get<boolean>('chat.showTurnTimer', true),
+    showEmptyStateHistogram: config.get<boolean>('chat.showEmptyStateHistogram', false),
     // Never let a repository opt the user into network requests through workspace settings.
     remoteImages: parseRemoteImageMode(config.inspect?.('chat.remoteImages')?.globalValue),
     promptCompletionModel: config.get<string>('chat.promptCompletionModel', ''),

@@ -879,6 +879,7 @@ export type InitialWebviewState = {
   expandThinking?: boolean;
   showChangedFiles?: boolean;
   showTurnTimer?: boolean;
+  showEmptyStateHistogram?: boolean;
   remoteImages?: RemoteImageMode;
   promptCompletionModel?: string;
   debugShowQuotaWarning?: boolean;

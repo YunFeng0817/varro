@@ -25,6 +25,7 @@ const {
   setExpandThinking,
   setShowChangedFiles,
   setShowTurnTimer,
+  setShowEmptyStateHistogram,
   setDesktopSessionPaneSide,
   setDefaultPermissionModePreference,
   setWorkspaceStatusSummary,
@@ -50,6 +51,7 @@ const {
   setExpandThinking: vi.fn(),
   setShowChangedFiles: vi.fn(),
   setShowTurnTimer: vi.fn(),
+  setShowEmptyStateHistogram: vi.fn(),
   setDesktopSessionPaneSide: vi.fn(),
   setDefaultPermissionModePreference: vi.fn(),
   setWorkspaceStatusSummary: vi.fn(),
@@ -87,6 +89,7 @@ vi.mock('../lib/state', async () => {
     setExpandThinking,
     setShowChangedFiles,
     setShowTurnTimer,
+    setShowEmptyStateHistogram,
     setDesktopSessionPaneSide,
     setDefaultPermissionModePreference,
     applyModelPreferencesSnapshot,
@@ -906,6 +909,7 @@ describe('mount bridge helpers', () => {
         expandThinking: true,
         showChangedFiles: true,
         showTurnTimer: true,
+        showEmptyStateHistogram: true,
         remoteImages: 'ask',
         debugShowQuotaWarning: true,
         enableProblemsContext: false,
@@ -931,6 +935,7 @@ describe('mount bridge helpers', () => {
     expect(setExpandThinking).toHaveBeenCalledWith(true);
     expect(setShowChangedFiles).toHaveBeenCalledWith(true);
     expect(setShowTurnTimer).toHaveBeenCalledWith(true);
+    expect(setShowEmptyStateHistogram).toHaveBeenCalledWith(true);
     expect(setState).toHaveBeenCalledWith('debugShowQuotaWarning', true);
     expect(setState).toHaveBeenCalledWith('enableProblemsContext', false);
     expect(document.documentElement.style.getPropertyValue('--varro-chat-font-size')).toBe('16px');
@@ -952,6 +957,19 @@ describe('mount bridge helpers', () => {
       },
     });
     expect(document.documentElement.style.getPropertyValue('--varro-chat-font-family')).toBe('');
+    expect(setShowEmptyStateHistogram).toHaveBeenCalledTimes(1);
+    operations.handleExtensionMessage({
+      type: 'config/update',
+      payload: {
+        showEmptyStateHistogram: false,
+        desktopSessionPaneSide: 'right',
+        defaultPermissionMode: 'full',
+        chatFontSize: 13,
+        chatEditorFontSize: 12,
+        chatFontFamily: 'default',
+      },
+    });
+    expect(setShowEmptyStateHistogram).toHaveBeenLastCalledWith(false);
     document.documentElement.style.removeProperty('--varro-chat-font-size');
     document.documentElement.style.removeProperty('--varro-chat-editor-font-size');
   });

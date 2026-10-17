@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { editingMessage, resetMessageEditState, startEditingMessage } from './message-edit-state';
-import { startNewChatDraft } from './new-chat-draft';
+import { newChatDraftKey, startNewChatDraft } from './new-chat-draft';
 import {
   getPersistedSelectedModel,
   getSelectedAgentForSession,
@@ -48,6 +48,17 @@ describe('startNewChatDraft', () => {
   afterEach(() => {
     resetMessageEditState();
     delete window.__sendToExtension;
+  });
+
+  it('publishes a fresh draft key even when already in an empty new chat', () => {
+    const before = newChatDraftKey();
+    startNewChatDraft();
+    const first = newChatDraftKey();
+    expect(first).toBeGreaterThan(before);
+    expect(state.activeSessionId).toBeNull();
+    startNewChatDraft();
+    expect(newChatDraftKey()).toBeGreaterThan(first);
+    expect(state.activeSessionId).toBeNull();
   });
 
   it('preserves the complete composer draft', () => {

@@ -363,6 +363,8 @@ export function parseExtensionMessage<T>(value: T): ExtensionMessage | null {
       if (isBoolean(payload.expandThinking)) config.expandThinking = payload.expandThinking;
       if (isBoolean(payload.showChangedFiles)) config.showChangedFiles = payload.showChangedFiles;
       if (isBoolean(payload.showTurnTimer)) config.showTurnTimer = payload.showTurnTimer;
+      if (isBoolean(payload.showEmptyStateHistogram))
+        config.showEmptyStateHistogram = payload.showEmptyStateHistogram;
       if (
         payload.remoteImages === 'off' ||
         payload.remoteImages === 'ask' ||

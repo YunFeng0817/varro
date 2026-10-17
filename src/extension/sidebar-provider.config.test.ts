@@ -573,6 +573,24 @@ describe('SidebarProvider local config routing', () => {
     }
   );
 
+  it.each([false, true])('broadcasts the histogram opt-in value %s', async (enabled) => {
+    const { provider } = await createSidebarProviderInstance();
+    const { posted } = attachTestView(provider);
+    const listener = vscodeMock.workspace.onDidChangeConfiguration.mock.calls.at(-1)?.[0];
+
+    await vscodeMock.workspace
+      .getConfiguration('varro')
+      .update('chat.showEmptyStateHistogram', enabled);
+    listener?.({
+      affectsConfiguration: (key: string) => key === 'varro.chat.showEmptyStateHistogram',
+    });
+
+    expect(posted).toContainEqual({
+      type: 'config/update',
+      payload: expect.objectContaining({ showEmptyStateHistogram: enabled }),
+    });
+  });
+
   it('broadcasts turn-timer configuration changes', async () => {
     const { provider } = await createSidebarProviderInstance();
     const { posted } = attachTestView(provider);

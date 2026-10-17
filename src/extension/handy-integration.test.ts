@@ -412,13 +412,13 @@ describe('HandyIntegration', () => {
   });
 
   it('keeps portable dictation working when its log is missing', async () => {
-    const executable = '/portable/handy';
+    const executable = join('/portable', 'handy');
     mocks.get.mockImplementation((key: string) =>
       key === 'dictation.handyPath' ? executable : ''
     );
     mocks.stat.mockImplementation(async (path: string) => ({
-      isFile: () => path === executable || path === '/portable/portable',
-      isDirectory: () => path === '/portable/Data',
+      isFile: () => path === executable || path === join('/portable', 'portable'),
+      isDirectory: () => path === join('/portable', 'Data'),
     }));
     mocks.read.mockImplementation(async () => {
       mocks.recording.state = 'unknown';
@@ -426,7 +426,7 @@ describe('HandyIntegration', () => {
     });
     const integration = new HandyIntegration();
     expect(await integration.request('start')).toMatchObject({ state: 'recording' });
-    expect(mocks.logPath.get?.()).toBe('/portable/Data/logs/handy.log');
+    expect(mocks.logPath.get?.()).toBe(join('/portable', 'Data/logs/handy.log'));
     expect(await integration.request('stop')).toMatchObject({ state: 'idle' });
     integration.dispose();
   });

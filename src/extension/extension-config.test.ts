@@ -43,6 +43,7 @@ describe('readExtensionConfigState', () => {
     expect(readExtensionConfigState()).toMatchObject({
       expandThinking: false,
       showTurnTimer: true,
+      showEmptyStateHistogram: false,
       debugShowQuotaWarning: false,
       debugResetWarningDays: 5,
       enableProblemsContext: true,
@@ -62,6 +63,12 @@ describe('readExtensionConfigState', () => {
     mocks.values.set('varro.chat.showTurnTimer', false);
 
     expect(readExtensionConfigState().showTurnTimer).toBe(false);
+  });
+
+  it('reads the empty-state histogram opt-in', () => {
+    mocks.values.set('varro.chat.showEmptyStateHistogram', true);
+
+    expect(readExtensionConfigState().showEmptyStateHistogram).toBe(true);
   });
 
   it('defaults to ask and reads automatic loading only from application settings', () => {

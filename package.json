@@ -554,6 +554,11 @@
           "default": false,
           "description": "Show the changed-files panel above the chat input."
         },
+        "varro.chat.showEmptyStateHistogram": {
+          "type": "boolean",
+          "default": false,
+          "description": "Show the interactive tiled histogram at the top of empty chats. Animates while hovered."
+        },
         "varro.chat.enableProblemsContext": {
           "type": "boolean",
           "default": true,

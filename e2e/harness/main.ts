@@ -5483,6 +5483,8 @@ function buildInitialState(state: ScenarioState): InitialWebviewState {
     droppedFiles: [],
     emptyStateLogoUri: '/assets/icon.png',
     showFileDiffs: state.showFileDiffs,
+    showEmptyStateHistogram:
+      new URLSearchParams(window.location.search).get('showEmptyStateHistogram') === 'true',
     defaultPermissionMode: 'default',
     chatEditorFontSize: 12,
     chatFontSize: 13,
