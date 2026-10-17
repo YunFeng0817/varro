@@ -258,6 +258,45 @@ async function requestSanitizedMessagePage(messages: unknown[]) {
   return response.data.items;
 }
 
+describe('native-form proxy boundary', () => {
+  it('does not forward a native reply to a V1 server', async () => {
+    const { proxy, callbacks } = createProxy();
+    await proxy.handleRequest(
+      makePayload(1, 'POST', '/question/frm_one/reply', {
+        kind: 'native-form',
+        sessionID: 'ses_child',
+        answer: { enabled: false },
+      })
+    );
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 1,
+      error: 'Native forms require OpenCode V2',
+    });
+    expect(callbacks.server.request).not.toHaveBeenCalled();
+    proxy.dispose();
+  });
+  it('checks the owning session before forwarding a native reply', async () => {
+    const request = vi.fn(async () => true);
+    const { proxy, callbacks } = createProxy({
+      server: { ...createCallbacks().server, apiVersion: 2, request },
+    });
+    const body = {
+      kind: 'native-form',
+      sessionID: 'ses_child',
+      answer: { enabled: false, count: 0 },
+    };
+    await proxy.handleRequest(makePayload(2, 'POST', '/question/frm_one/reply', body));
+    expect(callbacks.sessionState.isSessionInWorkspace).toHaveBeenCalledWith('ses_child', '/repo');
+    expect(request).toHaveBeenCalledWith(
+      'POST',
+      '/question/frm_one/reply',
+      body,
+      expect.anything()
+    );
+    proxy.dispose();
+  });
+});
+
 describe('side-question proxy boundary', () => {
   it('authorizes a narrow V2 action without prompt admission or lifecycle writes', async () => {
     const request = vi.fn().mockResolvedValue({ text: 'Because.' });

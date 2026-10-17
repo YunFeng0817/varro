@@ -1718,7 +1718,7 @@ describe('data loaders', () => {
       sessionID: 'session-1',
       questions: [],
     };
-    let questions = [answered];
+    let questions: QuestionRequest[] = [answered];
     const setQuestions = vi.fn((next: QuestionRequest[]) => {
       questions = next;
     });
@@ -1746,7 +1746,7 @@ describe('data loaders', () => {
       sessionID: 'session-1',
       questions: [],
     };
-    let questions = [answered];
+    let questions: QuestionRequest[] = [answered];
     const setQuestions = vi.fn((next: QuestionRequest[]) => {
       questions = next;
     });

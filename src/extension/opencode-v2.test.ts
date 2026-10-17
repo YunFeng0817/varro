@@ -2,12 +2,13 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mkdtemp, mkdir, readFile, rm } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
-import type { ModelInfo, SessionMessageAssistant, SessionInfo } from '@opencode/client';
+import type { FormInfo, ModelInfo, SessionMessageAssistant, SessionInfo } from '@opencode/client';
 import { OpenCodeStartupOutput, openCodeApiVersion } from './opencode-connection';
 import {
   projectV2Message,
   projectV2Model,
   projectV2Permission,
+  projectV2Form,
   v2Action,
   v2Rules,
 } from './opencode-v2-projection';
@@ -25,6 +26,135 @@ import { formatSkillAttachment } from '../shared/skill-reference';
 
 vi.mock('./logger', () => ({ logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }));
 afterEach(() => vi.unstubAllGlobals());
+
+describe('native session forms', () => {
+  const form: FormInfo = {
+    id: 'frm_fixture',
+    sessionID: 'ses_child',
+    title: 'Native form',
+    metadata: { source: 'fixture', tool: { messageID: 'msg_tool', id: 'call_tool' } },
+    fields: [
+      { key: 'proxy', type: 'boolean', required: true, default: false },
+      {
+        key: 'url',
+        type: 'string',
+        required: true,
+        format: 'uri',
+        when: [{ key: 'proxy', op: 'eq', value: true }],
+      },
+      { key: 'count', type: 'integer', minimum: 0, maximum: 10 },
+      {
+        key: 'region',
+        type: 'string',
+        options: [
+          { value: 'a', label: 'Same' },
+          { value: 'b', label: 'Same' },
+        ],
+      },
+      { key: 'external', type: 'external', url: 'https://example.test/setup' },
+    ],
+  };
+
+  it('projects snapshots and ask events identically without losing native metadata', async () => {
+    const adapter = new OpenCodeV2Adapter(async () => ({ data: [form] }));
+    expect(await adapter.request('GET', '/question', undefined)).toEqual([projectV2Form(form)]);
+    expect(projectV2Event({ type: 'form.created', data: { form } })).toMatchObject([
+      { type: 'question.asked', properties: projectV2Form(form) },
+    ]);
+    expect(projectV2Form(form)).toMatchObject({
+      kind: 'native-form',
+      form,
+      tool: { messageID: 'msg_tool', callID: 'call_tool' },
+    });
+  });
+  it('routes typed keyed values to the owning child session without reconstructing absent fields', async () => {
+    const wire = vi.fn(async () => ({ data: [form] }));
+    const adapter = new OpenCodeV2Adapter(wire);
+    const answer = { proxy: false, count: 0, region: 'b', external: true };
+    await adapter.request('POST', '/question/frm_fixture/reply', {
+      kind: 'native-form',
+      sessionID: form.sessionID,
+      answer,
+    });
+    expect(wire).toHaveBeenLastCalledWith(
+      'POST',
+      '/api/session/ses_child/form/frm_fixture/reply',
+      { answer },
+      expect.anything()
+    );
+  });
+  it.each([
+    { answers: [['No']] },
+    { kind: 'native-form', sessionID: 'ses_other', answer: {} },
+    { kind: 'native-form', sessionID: 'ses_child', answer: { count: NaN } },
+    { kind: 'native-form', sessionID: 'ses_child', answer: { count: null } },
+  ])('rejects unsafe or obsolete reply envelopes: %j', async (input) => {
+    const wire = vi.fn(async (_method: string) => ({ data: [form] }));
+    const adapter = new OpenCodeV2Adapter(wire);
+    await expect(adapter.request('POST', '/question/frm_fixture/reply', input)).rejects.toThrow(
+      'keyed, typed answers'
+    );
+    expect(wire.mock.calls.every((call) => call[0] === 'GET')).toBe(true);
+  });
+  it('keeps the native request cached and retryable after a validation failure', async () => {
+    let fail = true;
+    const wire = vi.fn(async (method: string) => {
+      if (method === 'GET') return { data: [form] };
+      if (fail) throw new Error('400 Missing required form field: proxy');
+      return {};
+    });
+    const adapter = new OpenCodeV2Adapter(wire);
+    const input = {
+      kind: 'native-form',
+      sessionID: form.sessionID,
+      answer: { proxy: false, external: true },
+    };
+    await expect(adapter.request('POST', '/question/frm_fixture/reply', input)).rejects.toThrow(
+      'Missing required'
+    );
+    fail = false;
+    await expect(adapter.request('POST', '/question/frm_fixture/reply', input)).resolves.toBe(true);
+    expect(wire.mock.calls.filter((call) => call[0] === 'GET')).toHaveLength(1);
+  });
+  it('does not send overlapping native replies or cancellation from multiple views', async () => {
+    let acknowledge!: () => void;
+    const wire = vi.fn(async (method: string) => {
+      if (method === 'GET') return { data: [form] };
+      await new Promise<void>((done) => {
+        acknowledge = done;
+      });
+      return {};
+    });
+    const adapter = new OpenCodeV2Adapter(wire);
+    await adapter.request('GET', '/question', undefined);
+    const reply = {
+      kind: 'native-form',
+      sessionID: form.sessionID,
+      answer: { proxy: false, external: true },
+    };
+    const pending = adapter.request('POST', '/question/frm_fixture/reply', reply);
+    await expect(adapter.request('POST', '/question/frm_fixture/reply', reply)).rejects.toThrow(
+      'already in progress'
+    );
+    await expect(
+      adapter.request('POST', '/question/frm_fixture/reject', undefined)
+    ).rejects.toThrow('already in progress');
+    expect(wire.mock.calls.filter((call) => call[0] !== 'GET')).toHaveLength(1);
+    acknowledge();
+    await pending;
+  });
+
+  it('does not forward answer values in resolution events', () => {
+    const events = projectV2Event({
+      type: 'form.replied',
+      data: { id: form.id, sessionID: form.sessionID, answer: { secret: 'sensitive' } },
+    });
+    expect(events).toMatchObject([
+      { type: 'question.replied', properties: { requestID: form.id, sessionID: form.sessionID } },
+    ]);
+    expect(JSON.stringify(events)).not.toContain('sensitive');
+  });
+});
 
 describe('v2 Windows location paths', () => {
   it.each([

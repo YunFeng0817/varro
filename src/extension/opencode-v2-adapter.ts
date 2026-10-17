@@ -24,6 +24,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { asRecord, isBoolean, isNumber, isString, type UnknownRecord } from '../shared/type-utils';
 import { withStartupDeadline } from '../shared/startup';
 import { parseSkillAttachment } from '../shared/skill-reference';
+import { isNativeFormAnswer, parseNativeForm } from '../shared/native-form';
 import { isSameWorkspacePath } from '../shared/workspace-path';
 import {
   MAX_SIDE_QUESTION_LENGTH,
@@ -233,6 +234,7 @@ export class OpenCodeV2Adapter {
   private readonly manualServiceChoices = new Set<string>();
   private readonly permissions = new Map<string, string>();
   private readonly forms = new Map<string, FormInfo>();
+  private readonly formResponses = new Set<string>();
   private readonly messageParents = new Map<string, string>();
   private readonly contexts = new Map<string, V2MessageContext>();
   private readonly inputTypes = new Map<string, string>();
@@ -623,34 +625,33 @@ export class OpenCodeV2Adapter {
         if (!this.forms.has(id)) await this.request('GET', '/question', undefined, options);
         const form = this.forms.get(id);
         if (!form) throw new Error('OpenCode question is no longer pending');
+        if (this.formResponses.has(id))
+          throw new Error('A response to this native form is already in progress');
         const target = `/api/session/${encodeURIComponent(form.sessionID)}/form/${encodeURIComponent(id)}`;
-        if (approval[3] === 'reject') await raw('DELETE', target);
-        else {
-          if (!Array.isArray(input.answers)) throw new Error('Invalid question answers');
-          const answers = input.answers;
-          const answer = Object.fromEntries(
-            form.fields.map((field, index) => {
-              const selected = Array.isArray(answers[index]) ? (answers[index] as string[]) : [];
-              const values = selected.map((label) =>
-                'options' in field
-                  ? (field.options?.find((option) => option.label === label)?.value ?? label)
-                  : label
+        this.formResponses.add(id);
+        try {
+          if (approval[3] === 'reject') await raw('DELETE', target);
+          else {
+            if (
+              input.kind !== 'native-form' ||
+              input.sessionID !== form.sessionID ||
+              !isNativeFormAnswer(input.answer) ||
+              Object.keys(input).some((key) => !['kind', 'sessionID', 'answer'].includes(key))
+            ) {
+              throw new Error('Native forms require keyed, typed answers. Reload the Varro view.');
+            }
+            const native = parseNativeForm(form);
+            if (!native || native.fields.some((field) => field.type === 'unsupported')) {
+              throw new Error(
+                'This native form contains unsupported fields. Answer in another OpenCode client or skip it.'
               );
-              return [
-                field.key,
-                field.type === 'multiselect'
-                  ? values
-                  : field.type === 'boolean'
-                    ? values[0] === 'Yes'
-                    : field.type === 'number' || field.type === 'integer'
-                      ? Number(values[0])
-                      : (values[0] ?? ''),
-              ];
-            })
-          );
-          await raw('POST', `${target}/reply`, { answer });
+            }
+            await raw('POST', `${target}/reply`, { answer: input.answer });
+          }
+          this.forms.delete(id);
+        } finally {
+          this.formResponses.delete(id);
         }
-        this.forms.delete(id);
       }
       return true;
     }

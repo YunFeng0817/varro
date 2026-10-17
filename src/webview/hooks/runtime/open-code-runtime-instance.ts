@@ -1,7 +1,6 @@
 import { batch, createSignal, onCleanup, onMount } from 'solid-js';
-import { syncWindowChatTheme } from '../../lib/window-chat-theme';
-import { reconcile } from 'solid-js/store';
 import type {
+  QuestionAnswer,
   AutoApproveJudgeReference,
   ExtensionMessage,
   PermissionMode,
@@ -9,6 +8,8 @@ import type {
   SessionWorkspaceTarget,
   WebviewThemeKind,
 } from '../../../shared/protocol';
+import { syncWindowChatTheme } from '../../lib/window-chat-theme';
+import { reconcile } from 'solid-js/store';
 import {
   AUTO_APPROVE_JUDGE_TIMEOUT_MS,
   createSessionWorkspaceMetadata,
@@ -228,7 +229,7 @@ export interface OpenCodeRuntime {
   alwaysAllowPermissionForSession(sessionId: string, permissionId: string): Promise<void>;
   respondQuestion(
     requestID: string,
-    answers: Array<Array<string>>,
+    answers: QuestionAnswer,
     options?: { rethrow?: boolean }
   ): Promise<void>;
   updatePermissionModeForSession(mode: PermissionMode, sessionId?: string | null): Promise<void>;
@@ -3364,7 +3365,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
 
   async function respondQuestion(
     requestID: string,
-    answers: Array<Array<string>>,
+    answers: QuestionAnswer,
     options?: { rethrow?: boolean }
   ) {
     await sessionApprovalOperations.respondQuestion(requestID, answers, options);

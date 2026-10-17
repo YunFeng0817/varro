@@ -152,7 +152,7 @@ export function projectV2Event(value: unknown, context: V2MessageContext = {}): 
   }
   if (event.type === 'form.replied' || event.type === 'form.cancelled')
     return emit(event.type === 'form.replied' ? 'question.replied' : 'question.rejected', {
-      ...properties,
+      sessionID: data.sessionID,
       requestID: data.id,
     });
   if (event.type === 'session.inbox.enqueued')

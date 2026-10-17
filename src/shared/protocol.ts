@@ -8,6 +8,14 @@ import type { RemoteImageMode } from './remote-images';
 import type { RalphConfig, RalphRun, RalphSelectedModel } from './ralph';
 import { asRecord, isNumber, isString } from './type-utils';
 import type { UnknownRecord } from './type-utils';
+export type {
+  NativeForm,
+  NativeFormField,
+  NativeFormValue,
+  NativeFormAnswer,
+  NativeFormReply,
+  QuestionAnswer,
+} from './native-form';
 
 export interface WorkspaceFolderContext {
   name: string;

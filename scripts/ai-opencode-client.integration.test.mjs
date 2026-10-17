@@ -10,8 +10,9 @@ import { setTimeout as delay } from 'node:timers/promises';
 import test from 'node:test';
 import { AiOpenCodeClient } from './ai-opencode-client.mjs';
 import { requireIsolatedTestServer } from './ai-test-isolation.mjs';
-import { CdpController, sessionSnapshotMatches } from './ai-fuzzy-live.mjs';
+import { CdpController } from './ai-fuzzy-live.mjs';
 import { cleanupOwnedHost } from './ai-streaming.mjs';
+import { reloadVscodeWindow } from './vscode-launch-process.mjs';
 
 const binary = process.env.VARRO_OPENCODE_TEST_BINARY;
 test(
@@ -186,23 +187,34 @@ test(
             surface: 'sidebar',
             viewId: 'sidebar',
           });
+          const sessionIsOpen = (snapshot) =>
+            snapshot.title === title &&
+            snapshot.turnMessageIds.some((id) =>
+              messages.some((message) => message.info.id === id)
+            );
           const openDeadline = Date.now() + 10000;
-          while (
-            Date.now() < openDeadline &&
-            !sessionSnapshotMatches(await cdp.snapshot(), session.id, title)
-          ) {
+          while (Date.now() < openDeadline && !sessionIsOpen(await cdp.snapshot())) {
             await cdp.click('[aria-label="Back to sessions"]');
-            await cdp.clickSession(session.id);
+            await cdp.click(`.session-item[data-session-id="${session.id}"] .session-item-main`);
             await delay(250);
           }
           const opened = await cdp.snapshot();
           await writeFile(path.join(root, 'editor-open.json'), JSON.stringify(opened, null, 2));
-          assert.ok(sessionSnapshotMatches(opened, session.id, title), JSON.stringify(opened));
-          assert.ok(
-            await cdp.sendComposerPrompt(
-              'VFZ-UI-FOLLOWUP. Reply with the fixture response. Do not use tools.'
-            )
-          );
+          assert.ok(sessionIsOpen(opened), JSON.stringify(opened));
+          assert.ok(await cdp.click('[aria-label="Message composer"]'));
+          await cdp.call('Input.insertText', {
+            text: 'VFZ-UI-FOLLOWUP. Reply with the fixture response. Do not use tools.',
+          });
+          const sendDeadline = Date.now() + 5000;
+          while (
+            !(await cdp.evaluate(`(() => {
+              const button = document.querySelector('.chat-send-button');
+              return button && !button.disabled && !button.classList.contains('disabled');
+            })()`)) &&
+            Date.now() < sendDeadline
+          )
+            await delay(100);
+          assert.ok(await cdp.click('.chat-send-button:not(.disabled)'));
           const uiDeadline = Date.now() + 15000;
           let canonical;
           while (Date.now() < uiDeadline) {
@@ -233,6 +245,94 @@ test(
             path.join(root, 'editor.json'),
             JSON.stringify({ launch, snapshot: await cdp.snapshot(), canonical }, null, 2)
           );
+          if (major === 2) {
+            const { data: form } = await client.wire('POST', `/api/session/${session.id}/form`, {
+              title: 'Reload checkpoint regression',
+              fields: [
+                { key: 'answer', type: 'string', title: 'Saved answer', required: true },
+                { key: 'count', type: 'integer', title: 'Saved zero', default: 0 },
+                { key: 'confirm', type: 'boolean', title: 'Saved false', default: false },
+                {
+                  key: 'choices',
+                  type: 'multiselect',
+                  title: 'Selections',
+                  options: [],
+                  custom: true,
+                },
+              ],
+            });
+            const readDraft = () =>
+              cdp.evaluate(`(() => {
+              const form = document.querySelector('form[aria-label="Reload checkpoint regression"]');
+              if (!form) return null;
+              return Object.fromEntries([...form.querySelectorAll('input, textarea, [role="combobox"]')]
+                .filter(control => ['Saved answer', 'Saved zero', 'Saved false', 'Selections: custom option'].includes(control.getAttribute('aria-label')))
+                .map(control => [control.getAttribute('aria-label'), control.value]));
+            })()`);
+            const formDeadline = Date.now() + 10000;
+            while (!(await readDraft()) && Date.now() < formDeadline) await delay(100);
+            assert.ok(await cdp.click('[aria-label="Saved answer"]'));
+            await cdp.call('Input.insertText', { text: 'keep-this-answer' });
+            assert.ok(await cdp.click('[aria-label="Selections: custom option"]'));
+            await cdp.call('Input.insertText', { text: 'unfinished selection' });
+            const expected = {
+              'Saved answer': 'keep-this-answer',
+              'Saved zero': '0',
+              'Saved false': 'false',
+              'Selections: custom option': 'unfinished selection',
+            };
+            const before = await readDraft();
+            assert.deepEqual(before, expected);
+            const viewId = cdp.targetContext.viewId;
+            cdp.close();
+            await reloadVscodeWindow(launch.remoteDebuggingPort);
+            cdp = await CdpController.connect(launch.remoteDebuggingPort, { viewId });
+            const restoreDeadline = Date.now() + 10000;
+            while (!(await readDraft()) && Date.now() < restoreDeadline) await delay(100);
+            const after = await readDraft();
+            const pending = await client.wire('GET', `/api/session/${session.id}/form/${form.id}`);
+            await writeFile(
+              path.join(root, 'editor-form-reload.json'),
+              JSON.stringify(
+                {
+                  sessionID: session.id,
+                  formID: form.id,
+                  viewId,
+                  before,
+                  after,
+                  state: pending.data.state,
+                },
+                null,
+                2
+              )
+            );
+            assert.equal(pending.data.state.status, 'pending', 'Reload must not submit the draft');
+            assert.deepEqual(
+              after,
+              expected,
+              'Pending values and custom text must survive editor reload'
+            );
+            assert.ok(await cdp.click('form.native-form button[type="submit"]'));
+            let resolved;
+            const replyDeadline = Date.now() + 10000;
+            while (Date.now() < replyDeadline) {
+              resolved = await client.wire('GET', `/api/session/${session.id}/form/${form.id}`);
+              if (resolved.data.state.status === 'answered') break;
+              await delay(100);
+            }
+            assert.deepEqual(resolved.data.state, {
+              status: 'answered',
+              answer: {
+                answer: 'keep-this-answer',
+                count: 0,
+                confirm: false,
+                choices: ['unfinished selection'],
+              },
+            });
+            t.diagnostic(
+              `OpenCode ${version}: real-editor pending form reload and typed reply passed`
+            );
+          }
           t.diagnostic(
             `OpenCode ${version}: authenticated real VS Code launcher and native composer follow-up passed`
           );

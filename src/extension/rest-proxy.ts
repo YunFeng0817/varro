@@ -803,10 +803,20 @@ export class RestProxy {
         payload.body
       );
       // Scoped approvals carry their owning session in the body, not the route.
+      const nativeFormReply =
+        attentionReplyRequestID &&
+        new URL(payload.path, 'http://localhost').pathname.startsWith('/question/')
+          ? asRecord(payload.body)
+          : null;
+      const nativeFormSessionID =
+        nativeFormReply?.kind === 'native-form' && typeof nativeFormReply.sessionID === 'string'
+          ? nativeFormReply.sessionID
+          : undefined;
       const directSessionID =
         parseDirectSessionID(payload.path) ??
         sessionPermissionAllowRequest?.sessionId ??
-        projectPermissionAllowRequest?.sessionId;
+        projectPermissionAllowRequest?.sessionId ??
+        nativeFormSessionID;
       const transfer = directSessionID
         ? this.callbacks
             .getTransferredSessions?.(this.getOpenWorkspaceRoots())
@@ -860,6 +870,14 @@ export class RestProxy {
         payload.body
       );
       const requestPathname = new URL(payload.path, 'http://localhost').pathname;
+      if (
+        method === 'POST' &&
+        /^\/question\/[^/]+\/reply$/.test(requestPathname) &&
+        asRecord(payload.body)?.kind === 'native-form' &&
+        this.callbacks.server.apiVersion !== 2
+      ) {
+        throw new Error('Native forms require OpenCode V2');
+      }
       if (method === 'POST' && requestPathname === VARRO_API_ENDPOINTS.remoteImage) {
         const mode = readExtensionConfigState().remoteImages;
         if (mode === 'off') {

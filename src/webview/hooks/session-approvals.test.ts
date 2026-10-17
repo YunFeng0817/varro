@@ -241,6 +241,40 @@ describe('session-approvals helpers', () => {
     expect(cancelQuestionResponse).not.toHaveBeenCalled();
   });
 
+  it('keeps a native form in transition until its typed reply is acknowledged', async () => {
+    let acknowledge!: () => void;
+    const replyQuestion = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          acknowledge = resolve;
+        })
+    );
+    const beginQuestionResponse = vi.fn(() => 7);
+    const removeResolvedQuestion = vi.fn(() => true);
+    const answer = {
+      kind: 'native-form',
+      sessionID: 'ses_child',
+      answer: { enabled: false, count: 0 },
+    } as const;
+    const pending = respondQuestionWithDependencies(
+      {
+        replyQuestion,
+        beginQuestionResponse,
+        removeResolvedQuestion,
+        cancelQuestionResponse: vi.fn(() => true),
+        setError: vi.fn(),
+      },
+      'frm_one',
+      answer
+    );
+    expect(beginQuestionResponse).toHaveBeenCalledWith('frm_one');
+    expect(replyQuestion).toHaveBeenCalledWith('frm_one', answer);
+    expect(removeResolvedQuestion).not.toHaveBeenCalled();
+    acknowledge();
+    await pending;
+    expect(removeResolvedQuestion).toHaveBeenCalledWith('frm_one', 7);
+  });
+
   it('surfaces question reply and rejection failures without removing the request', async () => {
     const beginQuestionResponse = vi.fn(() => 1);
     const cancelQuestionResponse = vi.fn(() => true);

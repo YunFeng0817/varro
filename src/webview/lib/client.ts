@@ -1,4 +1,29 @@
 import { apiCall, onMessage, postMessage } from './bridge';
+import type {
+  QuestionAnswer,
+  AutoApproveJudgeRequest,
+  AutoApproveJudgeResponse,
+  ChatModelSelection,
+  DecisionProviderRequest,
+  DecisionProviderStatus,
+  DroppedFile,
+  LspStatus,
+  McpStatus,
+  ModelPricing,
+  PermissionMode,
+  ProviderLimitStatus,
+  RecycleBinEntry,
+  ServerEvent,
+  ServerEventName,
+  SessionDiffSummary,
+  SessionHistoryScope,
+  SessionTitleFallbackResponse,
+  WorkspaceStatusEventSummary,
+  WorkspaceFilePick,
+  WorkspaceProblemsSnapshot,
+  OpenCodePermissionConfig,
+  OpenCodeServerMemoryPermissions,
+} from '../../shared/protocol';
 import {
   parseBackgroundProcess,
   parseBackgroundProcessOutput,
@@ -25,30 +50,6 @@ import type {
   Permission,
   Todo,
 } from '../types';
-import type {
-  AutoApproveJudgeRequest,
-  AutoApproveJudgeResponse,
-  ChatModelSelection,
-  DecisionProviderRequest,
-  DecisionProviderStatus,
-  DroppedFile,
-  LspStatus,
-  McpStatus,
-  ModelPricing,
-  PermissionMode,
-  ProviderLimitStatus,
-  RecycleBinEntry,
-  ServerEvent,
-  ServerEventName,
-  SessionDiffSummary,
-  SessionHistoryScope,
-  SessionTitleFallbackResponse,
-  WorkspaceStatusEventSummary,
-  WorkspaceFilePick,
-  WorkspaceProblemsSnapshot,
-  OpenCodePermissionConfig,
-  OpenCodeServerMemoryPermissions,
-} from '../../shared/protocol';
 import {
   buildVarroSessionEndpoint,
   isSessionHistoryScope,
@@ -951,8 +952,12 @@ export const client = {
         requireArray<QuestionRequest>(response, '/question')
       );
     },
-    async reply(requestID: string, answers: Array<Array<string>>): Promise<boolean> {
-      return apiCall('POST', `/question/${encodeURIComponent(requestID)}/reply`, { answers });
+    async reply(requestID: string, answers: QuestionAnswer): Promise<boolean> {
+      return apiCall(
+        'POST',
+        `/question/${encodeURIComponent(requestID)}/reply`,
+        Array.isArray(answers) ? { answers } : answers
+      );
     },
     async reject(requestID: string): Promise<boolean> {
       return apiCall('POST', `/question/${encodeURIComponent(requestID)}/reject`);

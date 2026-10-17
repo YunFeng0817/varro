@@ -16,6 +16,7 @@ import type {
 } from '../shared/opencode-types';
 import { normalizeSessionTitle } from '../shared/session-title';
 import { asRecord } from '../shared/type-utils';
+import { parseNativeForm } from '../shared/native-form';
 import { isSameWorkspacePath, normalizeWorkspaceIdentity } from '../shared/workspace-path';
 import { logger } from './logger';
 
@@ -2056,6 +2057,8 @@ export class SessionStateManager {
 }
 
 export function describeQuestionRequest(props: Record<string, unknown>): string {
+  if (props.kind === 'native-form')
+    return getString(asRecord(props.form)?.title) || 'User input required';
   const questions = Array.isArray(props.questions) ? props.questions : [];
   const firstQuestion = asRecord(questions[0]);
   return (
@@ -2314,6 +2317,13 @@ function serializeQuestionRequestProps(props: Record<string, unknown>): Record<s
     id: getString(props.id) || '',
     sessionID: getString(props.sessionID) || '',
   };
+  if (props.kind === 'native-form') {
+    const form = parseNativeForm(props.form);
+    if (form) {
+      result.kind = 'native-form';
+      result.form = form;
+    }
+  }
 
   const questions = Array.isArray(props.questions)
     ? props.questions

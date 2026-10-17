@@ -92,6 +92,9 @@ const SCENARIO_NAMES = [
   'server-error-update-blocked-sessions',
   'server-error-update-blocked-setting',
   'question-prompt',
+  'native-form-prompt',
+  'native-question-prompt',
+  'native-question-inputs',
   'archive-overflow',
   'context-compact',
   'review-slash',
@@ -2656,6 +2659,134 @@ function createScenarioState(name: ScenarioName): ScenarioState {
     state.providers = [];
     state.providerDefaults = {};
     state.nextSequence = 234;
+    return state;
+  }
+
+  if (name === 'native-form-prompt') {
+    const session = makeSession('session-native-form', 'Native form flow', BASE_TIME - 500);
+    state.sessions = [session];
+    state.sessionStatuses[session.id] = { type: 'idle' };
+    state.messagesBySessionId[session.id] = [];
+    state.persistedActiveSessionId = session.id;
+    state.questions = [
+      {
+        id: 'frm_native',
+        sessionID: session.id,
+        kind: 'native-form',
+        questions: [],
+        form: {
+          id: 'frm_native',
+          sessionID: session.id,
+          title: 'Connection settings',
+          fields: [
+            { key: 'proxy', type: 'boolean', title: 'Use proxy?', default: false, required: true },
+            {
+              key: 'url',
+              type: 'string',
+              title: 'Proxy URL',
+              required: true,
+              format: 'uri',
+              when: [{ key: 'proxy', op: 'eq', value: true }],
+            },
+            { key: 'count', type: 'integer', title: 'Retry count', minimum: 0 },
+            {
+              key: 'region',
+              type: 'string',
+              title: 'Region',
+              required: true,
+              options: [
+                { label: 'Same region', value: 'east' },
+                { label: 'Same region', value: 'west' },
+              ],
+            },
+            {
+              key: 'setup',
+              type: 'external',
+              title: 'External setup',
+              url: 'https://example.com/setup',
+            },
+          ],
+        },
+      },
+    ];
+    return state;
+  }
+
+  if (name === 'native-question-prompt' || name === 'native-question-inputs') {
+    const session = makeSession('session-native-question', 'Native question flow', BASE_TIME - 500);
+    state.sessions = [session];
+    state.sessionStatuses[session.id] = { type: 'idle' };
+    state.messagesBySessionId[session.id] = [];
+    state.persistedActiveSessionId = session.id;
+    state.questions = [
+      {
+        id: 'frm_native_question',
+        sessionID: session.id,
+        kind: 'native-form',
+        questions: [],
+        form: {
+          id: 'frm_native_question',
+          sessionID: session.id,
+          title: 'Questions',
+          metadata: { kind: 'question' },
+          fields:
+            name === 'native-question-inputs'
+              ? [
+                  {
+                    key: 'notes',
+                    type: 'string',
+                    title: 'Notes',
+                    description: 'What else should we know?',
+                    options: [],
+                    custom: true,
+                  },
+                  {
+                    key: 'capabilities',
+                    type: 'multiselect',
+                    title: 'Capabilities',
+                    description: 'Select any that apply, or add your own',
+                    custom: true,
+                    options: [
+                      {
+                        value: 'search',
+                        label: 'Search',
+                        description: 'Search across the workspace',
+                      },
+                      {
+                        value: 'edit',
+                        label: 'Edit',
+                        description: 'Update files in the workspace',
+                      },
+                    ],
+                  },
+                ]
+              : [
+                  {
+                    key: 'q0',
+                    type: 'string',
+                    title: 'Restore actual limits',
+                    description:
+                      'Should I use your separate Codex login for actual quota and reset-credit polling, while leaving token sharing enabled for chat?',
+                    custom: true,
+                    options: [
+                      {
+                        value: 'separate-login',
+                        label: 'Use separate Codex login',
+                        description:
+                          'Keep current chat authentication. Restore numeric limits and reset credits using a renewed Codex login for the intended account.',
+                      },
+                      {
+                        value: 'switch-chat',
+                        label: 'Switch chat to Codex',
+                        description:
+                          'Use Codex authentication for both chat and usage. This changes the active chat connection and may change model availability.',
+                      },
+                    ],
+                  },
+                ],
+        },
+      },
+    ];
     return state;
   }
 

@@ -173,6 +173,24 @@ describe('normalizeInitialPermissions', () => {
 });
 
 describe('normalizeInitialQuestions', () => {
+  it('preserves keyed native metadata and tool ownership during hydration', () => {
+    const request = {
+      id: 'frm_one',
+      sessionID: 'ses_child',
+      kind: 'native-form',
+      questions: [],
+      tool: { messageID: 'msg_tool', callID: 'call_one' },
+      form: {
+        id: 'frm_one',
+        sessionID: 'ses_child',
+        title: 'Input',
+        metadata: { source: 'fixture' },
+        fields: [{ key: 'count', type: 'integer', minimum: 0, default: 0 }],
+      },
+    };
+    expect(normalizeInitialQuestions([request])).toEqual([request]);
+    expect(normalizeInitialQuestions([{ ...request, sessionID: 'ses_wrong' }])).toEqual([]);
+  });
   it('keeps the tool linkage so the prompt can attach to its tool card', () => {
     const normalized = normalizeInitialQuestions([
       {

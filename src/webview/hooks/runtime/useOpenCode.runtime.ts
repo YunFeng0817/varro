@@ -1,5 +1,6 @@
 import { createOpenCodeRuntime, type OpenCodeRuntime } from './open-code-runtime-instance';
 import type {
+  QuestionAnswer,
   PermissionMode,
   QueuedContextSnapshot,
   SessionWorkspaceTarget,
@@ -213,7 +214,7 @@ export async function alwaysAllowPermissionForSession(sessionId: string, permiss
 
 export async function respondQuestion(
   requestID: string,
-  answers: Array<Array<string>>,
+  answers: QuestionAnswer,
   options?: { rethrow?: boolean }
 ) {
   await getCurrentOpenCodeRuntime().respondQuestion(requestID, answers, options);

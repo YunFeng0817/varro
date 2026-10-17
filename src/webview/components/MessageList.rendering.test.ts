@@ -910,44 +910,60 @@ describe('MessageList loading states', () => {
     expect(thinkingRow?.getAttribute('aria-hidden')).toBe('true');
   });
 
-  it('waits to place a linked question until its message loads', async () => {
-    const question: QuestionRequest = {
-      id: 'question-1',
-      sessionID: 'session-1',
-      tool: { messageID: 'message-1', callID: 'call-1' },
-      questions: [{ question: 'Choose one', header: 'Question', options: [] }],
-    };
-    setSessions([session('session-1', { time: { created: 1, updated: 2 } })]);
-    setState('activeSessionId', 'session-1');
-    setState('questions', [question]);
-    setState('messagesLoading', true);
-    replaceMessages([]);
+  it.each(['legacy', 'native-form'] as const)(
+    'waits to place a linked %s question until its message loads',
+    async (kind) => {
+      const legacy: QuestionRequest = {
+        id: 'question-1',
+        sessionID: 'session-1',
+        tool: { messageID: 'message-1', callID: 'call-1' },
+        questions: [{ question: 'Choose one', header: 'Question', options: [] }],
+      };
+      const question: QuestionRequest =
+        kind === 'legacy'
+          ? legacy
+          : {
+              ...legacy,
+              kind: 'native-form',
+              form: {
+                id: legacy.id,
+                sessionID: legacy.sessionID,
+                title: 'Question',
+                fields: [{ key: 'answer', type: 'boolean' }],
+              },
+            };
+      setSessions([session('session-1', { time: { created: 1, updated: 2 } })]);
+      setState('activeSessionId', 'session-1');
+      setState('questions', [question]);
+      setState('messagesLoading', true);
+      replaceMessages([]);
 
-    cleanup = render(() => MessageList(), container!);
-    await Promise.resolve();
+      cleanup = render(() => MessageList(), container!);
+      await Promise.resolve();
 
-    expect(container?.querySelector('.chat-messages-loading')).not.toBeNull();
-    expect(container?.querySelector('.question-prompt-card')).toBeNull();
+      expect(container?.querySelector('.chat-messages-loading')).not.toBeNull();
+      expect(container?.querySelector('.question-prompt-card')).toBeNull();
 
-    replaceMessages([
-      {
-        info: assistantMessage('message-1'),
-        parts: [{ ...toolPart('tool-1'), tool: 'question' }],
-      },
-    ]);
-    await Promise.resolve();
+      replaceMessages([
+        {
+          info: assistantMessage('message-1'),
+          parts: [{ ...toolPart('tool-1'), tool: 'question' }],
+        },
+      ]);
+      await Promise.resolve();
 
-    expect(container?.querySelector('[data-msg-id="message-1"]')).not.toBeNull();
-    expect(container?.querySelector('.question-prompt-card')).toBeNull();
-    expect(state.questions.map((request) => request.id)).toEqual([question.id]);
+      expect(container?.querySelector('[data-msg-id="message-1"]')).not.toBeNull();
+      expect(container?.querySelector('.question-prompt-card')).toBeNull();
+      expect(state.questions.map((request) => request.id)).toEqual([question.id]);
 
-    setState('messagesLoading', false);
-    await Promise.resolve();
+      setState('messagesLoading', false);
+      await Promise.resolve();
 
-    const messageRow = container?.querySelector('[data-msg-id="message-1"]');
-    expect(messageRow?.querySelectorAll('.question-prompt-card')).toHaveLength(1);
-    expect(container?.querySelectorAll('.question-prompt-card')).toHaveLength(1);
-  });
+      const messageRow = container?.querySelector('[data-msg-id="message-1"]');
+      expect(messageRow?.querySelectorAll('.question-prompt-card')).toHaveLength(1);
+      expect(container?.querySelectorAll('.question-prompt-card')).toHaveLength(1);
+    }
+  );
 
   it('waits to render an unlinked survey until the chat loads', async () => {
     const frames = installQueuedAnimationFrameMocks();

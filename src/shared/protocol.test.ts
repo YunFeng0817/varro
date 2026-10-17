@@ -109,6 +109,34 @@ describe('protocol parsers', () => {
     });
   });
 
+  it('retains native form fields through the server event envelope', () => {
+    const event = {
+      type: 'question.asked',
+      properties: {
+        id: 'frm_one',
+        sessionID: 'ses_child',
+        kind: 'native-form',
+        questions: [],
+        form: {
+          id: 'frm_one',
+          sessionID: 'ses_child',
+          title: 'Native input',
+          fields: [
+            { key: 'enabled', type: 'boolean', default: false },
+            {
+              key: 'count',
+              type: 'integer',
+              minimum: 0,
+              required: true,
+              when: [{ key: 'enabled', op: 'eq', value: true }],
+            },
+          ],
+        },
+      },
+    };
+    expect(parseServerEvent(event)).toEqual(event);
+  });
+
   it('drops oversized server event IDs before they enter dedupe caches', () => {
     expect(
       parseServerEvent({

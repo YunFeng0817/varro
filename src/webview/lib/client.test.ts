@@ -43,6 +43,20 @@ async function loadClient() {
 
 type ClientApi = Awaited<ReturnType<typeof loadClient>>['client'];
 
+it('sends native form replies without a positional answers wrapper', async () => {
+  const { client } = await loadClient();
+  const reply = {
+    kind: 'native-form',
+    sessionID: 'ses_child',
+    answer: { enabled: false, count: 0, selected: ['b'] },
+  } as const;
+  await client.question.reply('frm_one', {
+    ...reply,
+    answer: { ...reply.answer, selected: ['b'] },
+  });
+  expect(bridgeMocks.apiCall).toHaveBeenCalledWith('POST', '/question/frm_one/reply', reply);
+});
+
 function createDeferred<T>() {
   let resolve!: (value: T) => void;
   let reject!: (error: Error) => void;

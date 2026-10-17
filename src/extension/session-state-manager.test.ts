@@ -25,6 +25,7 @@ vi.mock('./logger', () => ({ logger: loggerMock }));
 vi.mock('vscode', () => vscodeMock);
 
 import { AUTO_APPROVE_JUDGE_TIMEOUT_MS } from '../shared/protocol';
+import type { QuestionRequest } from '../shared/opencode-types';
 import { SessionStateManager } from './session-state-manager';
 
 type WorkspaceStateMock = {
@@ -1519,6 +1520,61 @@ describe('SessionStateManager notifications', () => {
     expect(((firstBlocking?.patterns as string[] | undefined) ?? []).length).toBeLessThanOrEqual(
       20
     );
+  });
+
+  it('persists and restores native question fields without truncating their semantics', async () => {
+    const persisted = new Map<string, unknown>();
+    const workspaceState = {
+      get: vi.fn((key: string) => persisted.get(key)),
+      set: vi.fn(async (key: string, value: unknown) => {
+        persisted.set(key, value);
+      }),
+      remove: vi.fn(async (key: string) => {
+        persisted.delete(key);
+      }),
+    };
+    const manager = new SessionStateManager(
+      workspaceState as never,
+      { onStatusChange: vi.fn() },
+      { shouldShow: () => false }
+    );
+    const props: QuestionRequest = {
+      id: 'frm_pending',
+      sessionID: 'ses_child',
+      kind: 'native-form',
+      questions: [],
+      form: {
+        id: 'frm_pending',
+        sessionID: 'ses_child',
+        title: 'Native input',
+        metadata: { source: 'fixture' },
+        fields: [
+          { key: 'enabled', type: 'boolean', default: false, required: true },
+          {
+            key: 'url',
+            type: 'string',
+            format: 'uri',
+            required: true,
+            when: [{ key: 'enabled', op: 'eq', value: true }],
+          },
+        ],
+      },
+    };
+    manager.handleServerEvent({ type: 'question.asked', properties: props });
+    await manager.persist();
+    expect(persisted.get('varro.blockingRequests')).toMatchObject([{ id: props.id, props }]);
+    const recovered = new SessionStateManager(
+      workspaceState as never,
+      { onStatusChange: vi.fn() },
+      { shouldShow: () => false }
+    );
+    await recovered.consumeRecoverySnapshot();
+    const post = vi.fn();
+    recovered.replayBlockingRequests(post, new Set());
+    expect(post).toHaveBeenCalledWith({
+      type: 'server/event',
+      payload: { type: 'question.asked', properties: expect.objectContaining(props) },
+    });
   });
 
   it('round-trips legacy and v2 permission context with the matching event type', async () => {

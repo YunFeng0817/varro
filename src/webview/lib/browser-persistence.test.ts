@@ -75,6 +75,9 @@ describe('BrowserPersistence', () => {
     );
     const storage = new BrowserPersistence();
 
+    storage.set('varro.nativeFormDrafts.v1', { version: 1, entries: [] });
+    expect(vscodeState['varro.nativeFormDrafts.v1']).toEqual({ version: 1, entries: [] });
+    expect(window.localStorage.getItem('varro.nativeFormDrafts.v1')).toBeNull();
     expect(storage.get('varro.lastOpenedView')).toBeUndefined();
     storage.set('varro.lastOpenedView', { type: 'new-session' });
 
