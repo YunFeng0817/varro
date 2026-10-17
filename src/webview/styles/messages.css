@@ -3038,6 +3038,7 @@ body:is(.vscode-high-contrast, .vscode-high-contrast-light) .remote-markdown-ima
 }
 
 .interactive-session .chat-input-container {
+  --composer-dictation-color: var(--vscode-charts-orange, #d18616);
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
@@ -3226,6 +3227,21 @@ body.vscode-dark[data-vscode-theme-id='Dark 2026'] .interactive-session .chat-in
 body.vscode-dark .interactive-session .chat-input-container.focused {
   --chat-input-focus-ring-color: color-mix(in srgb, var(--color-vscode-accent) 35%, transparent);
   border-color: var(--color-vscode-accent);
+}
+
+.interactive-session .chat-input-container[data-dictation-requested='true'],
+body.vscode-dark .interactive-session .chat-input-container[data-dictation-requested='true'] {
+  --chat-input-focus-ring-color: color-mix(
+    in srgb,
+    var(--composer-dictation-color) 35%,
+    transparent
+  );
+  border-color: var(--composer-dictation-color);
+  background: linear-gradient(
+    to bottom,
+    color-mix(in srgb, var(--composer-dictation-color) 8%, var(--color-vscode-input-bg)),
+    color-mix(in srgb, var(--composer-dictation-color) 3%, var(--color-vscode-input-bg))
+  );
 }
 
 .interactive-session .interactive-input-part {

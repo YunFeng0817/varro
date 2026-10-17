@@ -2,7 +2,7 @@
 /* oxlint-disable anti-slop/require-safety-comment-for-type-assertion -- SAFETY: Assertions access composer hooks and protocol-shaped fixtures installed by the controlled E2E harness. */
 import { expect, test } from '@playwright/test';
 import type { Page } from '@playwright/test';
-import { getScrollMetrics, waitForAnimationFrames } from './helpers';
+import { getScrollMetrics, waitForAnimationFrames, waitForHarnessStartup } from './helpers';
 
 async function delayPromptRequest(page: Page, delayMs: number) {
   await page.evaluate((delay) => {
@@ -153,6 +153,7 @@ test('keeps the caret after text typed before a pasted URL that wraps', async ({
 }, testInfo) => {
   await page.setViewportSize({ width: 360, height: 600 });
   await page.goto('/e2e/harness/index.html?scenario=blank');
+  await waitForHarnessStartup(page);
   const composer = page.locator('.rich-composer').first();
   const href = 'https://github.com/koltyakov/varro/discussions/42';
   await composer.click();
@@ -171,10 +172,18 @@ test('keeps the caret after text typed before a pasted URL that wraps', async ({
   await page.keyboard.type('When I pasted ');
   await expect(composer).toHaveText(`When I pasted ${href}`);
   await expect(url).toHaveText(href);
-  await composer.evaluate((editor) => editor.style.setProperty('caret-animation', 'manual'));
-  const hidden = await composer.screenshot({ caret: 'hide' });
+  await composer.evaluate((editor) => {
+    editor.style.setProperty('caret-animation', 'manual');
+    editor.style.setProperty('caret-color', 'rgb(255, 0, 255)');
+  });
+  const hidden = await composer.screenshot({
+    caret: 'hide',
+    scale: 'css',
+    path: testInfo.outputPath('caret-hidden.png'),
+  });
   const visible = await composer.screenshot({
     caret: 'initial',
+    scale: 'css',
     path: testInfo.outputPath('caret-before-url.png'),
   });
   const position = await composer.evaluate((editor) => {
@@ -193,7 +202,11 @@ test('keeps the caret after text typed before a pasted URL that wraps', async ({
       caret: { top: caret.top, left: caret.left, height: caret.height },
       typed: { top: typed.top, right: typed.right },
       urlTop: editor.querySelector('.link-leading-label')!.getBoundingClientRect().top,
-      editor: { top: editorRect.top, left: editorRect.left },
+      // Playwright rounds element screenshot clips outward to whole pixels.
+      imageOrigin: {
+        top: Math.floor(editorRect.top + 1e-3),
+        left: Math.floor(editorRect.left + 1e-3),
+      },
     };
   });
   expect(position.prefix).toBe('When I pasted ');
@@ -224,7 +237,13 @@ test('keeps the caret after text typed before a pasted URL that wraps', async ({
         throw new Error('Composer dimensions changed');
       const changed: Array<{ x: number; y: number }> = [];
       for (let index = 0; index < image.data.length; index += 4) {
+        // Isolate the deliberately magenta caret from unrelated text antialiasing
+        // or background changes between the two screenshots.
+        const isCaret =
+          image.data[index]! > image.data[index + 1]! + 32 &&
+          image.data[index + 2]! > image.data[index + 1]! + 32;
         if (
+          isCaret &&
           [0, 1, 2, 3].some(
             (channel) => image.data[index + channel] !== baseline.data[index + channel]
           )
@@ -235,11 +254,15 @@ test('keeps the caret after text typed before a pasted URL that wraps', async ({
     },
     [hidden.toString('base64'), visible.toString('base64')]
   );
+  await testInfo.attach('caret-geometry', {
+    body: JSON.stringify({ position, pixels }),
+    contentType: 'application/json',
+  });
   expect(pixels.length).toBeGreaterThan(0);
   for (const pixel of pixels) {
-    expect(Math.abs(pixel.x + position.editor.left - position.caret.left)).toBeLessThan(2);
-    expect(pixel.y + position.editor.top).toBeGreaterThanOrEqual(position.caret.top - 1);
-    expect(pixel.y + position.editor.top).toBeLessThan(
+    expect(Math.abs(pixel.x + position.imageOrigin.left - position.caret.left)).toBeLessThan(2);
+    expect(pixel.y + position.imageOrigin.top).toBeGreaterThanOrEqual(position.caret.top - 1);
+    expect(pixel.y + position.imageOrigin.top).toBeLessThan(
       position.caret.top + position.caret.height + 1
     );
   }

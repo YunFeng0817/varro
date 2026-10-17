@@ -6636,6 +6636,7 @@ function installBridge(state: ScenarioState) {
             requestId: webviewMessage.payload.requestId,
             available: false,
             running: false,
+            state: 'idle',
           },
         });
         return;

@@ -129,6 +129,7 @@ function createActionFixture() {
   };
 
   const deps = {
+    handyIntegration: new HandyIntegration(),
     contextProvider: contextProvider as unknown as SidebarProviderActionDeps['contextProvider'],
     extensionId: 'koltyakov.varro',
     webviewSession,
@@ -292,14 +293,14 @@ describe('createSidebarProviderActions', () => {
   it('posts correlated Handy status and command results to the requesting view', async () => {
     const request = vi
       .spyOn(HandyIntegration.prototype, 'request')
-      .mockResolvedValue({ available: true, running: true });
+      .mockResolvedValue({ available: true, running: true, state: 'recording' });
     try {
       const { actions, deps } = createActionFixture();
-      await actions.requestHandy({ requestId: 'handy-1', action: 'toggle' });
-      expect(request).toHaveBeenCalledWith('toggle');
+      await actions.requestHandy({ requestId: 'handy-1', action: 'start' });
+      expect(request).toHaveBeenCalledWith('start', expect.any(Function));
       expect(deps.post).toHaveBeenCalledWith({
         type: 'handy/result',
-        payload: { requestId: 'handy-1', available: true, running: true },
+        payload: { requestId: 'handy-1', available: true, running: true, state: 'recording' },
       });
     } finally {
       request.mockRestore();

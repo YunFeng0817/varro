@@ -5,7 +5,7 @@ describe('parseExtensionMessage', () => {
   it('validates Handy results', () => {
     const message = {
       type: 'handy/result',
-      payload: { requestId: '1', available: true, running: true },
+      payload: { requestId: '1', available: true, running: true, state: 'idle' },
     };
     expect(parseExtensionMessage(message)).toEqual(message);
     expect(
@@ -14,6 +14,12 @@ describe('parseExtensionMessage', () => {
     for (const payload of [
       {},
       { ...message.payload, running: 'true' },
+      { ...message.payload, state: undefined },
+      { ...message.payload, state: 'guessed' },
+      { ...message.payload, revision: -1 },
+      { ...message.payload, revision: '1' },
+      { ...message.payload, revision: Infinity },
+      { ...message.payload, revision: 1.5 },
       { ...message.payload, error: 1 },
       { ...message.payload, requestId: '' },
     ]) {

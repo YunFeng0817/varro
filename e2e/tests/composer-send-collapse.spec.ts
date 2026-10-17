@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { waitForHarnessStartup } from './helpers';
 
 for (const scenario of ['large-transcript', 'blank', 'busy-stop-send']) {
   const action =
@@ -14,38 +15,10 @@ for (const scenario of ['large-transcript', 'blank', 'busy-stop-send']) {
       await page.goto(`/e2e/harness/index.html?scenario=${scenario}`);
       // Startup restores the session and its draft after the editor first appears.
       // Finish that ownership handoff before attaching files or typing the test draft.
-      await expect
-        .poll(() =>
-          page.evaluate(() => {
-            // SAFETY: The isolated harness exposes a read-only view of its loaded application state.
-            const harness = (
-              window as Window & {
-                __varroE2E?: {
-                  getStartupState?: () => { initialized: boolean; loading: boolean };
-                };
-              }
-            ).__varroE2E;
-            return harness?.getStartupState?.() ?? { initialized: false, loading: true };
-          })
-        )
-        .toEqual({ initialized: true, loading: false });
+      await waitForHarnessStartup(page);
       const composer = page.locator('[role="textbox"][aria-multiline="true"]').first();
       const frame = page.locator('.chat-input-container').first();
       await expect(composer).toBeVisible();
-      await page.evaluate(() => {
-        window.postMessage(
-          {
-            type: 'files/dropped',
-            payload: Array.from({ length: 6 }, (_, index) => ({
-              path: `/workspace/varro/src/attachment-${index}.ts`,
-              relativePath: `src/attachment-${index}.ts`,
-              type: 'file',
-            })),
-          },
-          '*'
-        );
-      });
-      await expect(frame.locator('.chat-attachment-chip')).toHaveCount(6);
       await composer.fill(
         Array.from(
           { length: 10 },
@@ -56,8 +29,25 @@ for (const scenario of ['large-transcript', 'blank', 'busy-stop-send']) {
         name: scenario === 'busy-stop-send' ? 'Add to queue (Enter)' : 'Send (Enter)',
         exact: true,
       });
-      // A visible editor can still be waiting for connection or history readiness.
-      // Let setup finish while timers run before Enter takes its non-retrying send path.
+      // The real send gate includes workspace/catalog readiness. Finish that
+      // handoff before adding the fixture files, not just before pressing Enter.
+      await expect(sendButton).toBeEnabled();
+      await page.evaluate(() => {
+        window.dispatchEvent(
+          new MessageEvent('message', {
+            data: {
+              type: 'files/dropped',
+              payload: Array.from({ length: 6 }, (_, index) => ({
+                path: `/workspace/varro/src/attachment-${index}.ts`,
+                relativePath: `src/attachment-${index}.ts`,
+                type: 'file',
+              })),
+            },
+          })
+        );
+      });
+      await expect(frame.locator('.chat-attachment-chip')).toHaveCount(6);
+      expect(errors).toEqual([]);
       await expect(sendButton).toBeEnabled();
 
       // Assert easing at a fixed frame cadence rather than the CI runner's available CPU time.

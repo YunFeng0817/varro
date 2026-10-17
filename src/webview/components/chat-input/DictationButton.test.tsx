@@ -1,7 +1,11 @@
 /* oxlint-disable anti-slop/no-module-mocking -- Exercise dictation UI without a real extension host or microphone. */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render } from 'solid-js/web';
-import type { ExtensionMessage, WebviewMessage } from '../../../shared/protocol';
+import type {
+  ExtensionMessage,
+  HandyRecordingState,
+  WebviewMessage,
+} from '../../../shared/protocol';
 import { microphoneIcon, microphoneSpeakingSolidIcon } from '../../lib/ui-icons';
 import { toCssUrl } from '../UiIcon';
 
@@ -31,6 +35,7 @@ import { DictationButton } from './DictationButton';
 let container: HTMLDivElement;
 let dispose: (() => void) | undefined;
 const focus = vi.fn();
+const activationChange = vi.fn<(requested: boolean) => void>();
 beforeEach(() => {
   vi.useFakeTimers();
   vi.clearAllMocks();
@@ -45,13 +50,23 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-function reply(available = true, running = true, error?: string) {
+function reply(available = true, running = true, error?: string, state?: HandyRecordingState) {
   const message = mocks.post.mock.calls.at(-1)?.[0];
   if (message?.type !== 'handy/request') throw new Error('Missing Handy request');
   const payload: Extract<ExtensionMessage, { type: 'handy/result' }>['payload'] = {
     requestId: message.payload.requestId,
     available,
     running,
+    state:
+      state ??
+      (error
+        ? 'unknown'
+        : message.payload.action === 'start'
+          ? 'recording'
+          : message.payload.action === 'status' &&
+              container.querySelector('button')?.getAttribute('aria-pressed') === 'true'
+            ? 'recording'
+            : 'idle'),
   };
   if (error) payload.error = error;
   mocks.context.handler?.({ type: 'handy/result', payload });
@@ -62,7 +77,16 @@ function button() {
   return result;
 }
 function mount(remote = false) {
-  dispose = render(() => <DictationButton focusComposer={focus} remote={remote} />, container);
+  dispose = render(
+    () => (
+      <DictationButton
+        focusComposer={focus}
+        remote={remote}
+        onActivationChange={activationChange}
+      />
+    ),
+    container
+  );
 }
 
 describe('DictationButton', () => {
@@ -90,19 +114,40 @@ describe('DictationButton', () => {
     reply();
     button().click();
     expect(focus).toHaveBeenCalledTimes(1);
-    expect(mocks.post.mock.calls.at(-1)?.[0]).toMatchObject({ payload: { action: 'toggle' } });
+    expect(mocks.post.mock.calls.at(-1)?.[0]).toMatchObject({ payload: { action: 'start' } });
     expect(button().disabled).toBe(true);
     expect(button().getAttribute('aria-pressed')).toBe('false');
+    expect(activationChange).not.toHaveBeenCalled();
     button().click();
     expect(mocks.post).toHaveBeenCalledTimes(2);
     reply();
     expect(button().getAttribute('aria-pressed')).toBe('true');
+    expect(activationChange).toHaveBeenLastCalledWith(true);
     expect(
       button().querySelector<HTMLElement>('.ui-icon')?.style.getPropertyValue('--ui-icon-mask')
     ).toBe(toCssUrl(microphoneSpeakingSolidIcon));
     button().click();
+    expect(activationChange).toHaveBeenCalledTimes(1);
     reply();
     expect(button().getAttribute('aria-pressed')).toBe('false');
+    expect(activationChange).toHaveBeenLastCalledWith(false);
+  });
+
+  it('explains the normal two-click dictation flow in short tooltips', () => {
+    mount();
+    reply();
+    button().dispatchEvent(new MouseEvent('mouseenter'));
+    vi.advanceTimersByTime(1_000);
+    expect(document.querySelector('[role="tooltip"]')?.textContent).toBe(
+      'Click to dictate. Click again when done.'
+    );
+    button().click();
+    reply();
+    button().dispatchEvent(new MouseEvent('mouseenter'));
+    vi.advanceTimersByTime(1_000);
+    expect(document.querySelector('[role="tooltip"]')?.textContent).toBe(
+      'Click to finish dictation'
+    );
   });
 
   it('preserves mouse focus and supports cancellation with right-click', () => {
@@ -117,6 +162,38 @@ describe('DictationButton', () => {
     expect(mocks.post.mock.calls.at(-1)?.[0]).toMatchObject({ payload: { action: 'cancel' } });
     reply();
     expect(button().getAttribute('aria-pressed')).toBe('false');
+    expect(activationChange.mock.calls.map(([requested]) => requested)).toEqual([true, false]);
+  });
+
+  it.each([
+    { available: false, running: true, error: undefined },
+    { available: true, running: false, error: undefined },
+    { available: true, running: true, error: 'Handy is unavailable' },
+  ])('clears input feedback when Handy status becomes $available/$running/$error', (status) => {
+    mount();
+    reply();
+    button().click();
+    reply();
+    expect(activationChange).toHaveBeenLastCalledWith(true);
+    window.dispatchEvent(new Event('focus'));
+    reply(status.available, status.running, status.error);
+    expect(activationChange).toHaveBeenLastCalledWith(false);
+  });
+
+  it('clears input feedback on a command timeout and on disposal', () => {
+    mount();
+    reply();
+    button().click();
+    reply();
+    button().click();
+    vi.advanceTimersByTime(8_000);
+    expect(activationChange).toHaveBeenLastCalledWith(false);
+    button().click();
+    reply();
+    expect(activationChange).toHaveBeenLastCalledWith(true);
+    dispose?.();
+    dispose = undefined;
+    expect(activationChange).toHaveBeenLastCalledWith(false);
   });
 
   it('ignores unrelated responses and reports failures without replaying commands', () => {
@@ -125,7 +202,7 @@ describe('DictationButton', () => {
     button().click();
     mocks.context.handler?.({
       type: 'handy/result',
-      payload: { requestId: 'other', available: true, running: true },
+      payload: { requestId: 'other', available: true, running: true, state: 'idle' },
     });
     expect(button().disabled).toBe(true);
     reply(true, true, 'CLI failed');
@@ -156,5 +233,107 @@ describe('DictationButton', () => {
     window.dispatchEvent(new Event('focus'));
     expect(mocks.post).toHaveBeenCalledTimes(calls);
     expect(mocks.unsubscribe).toHaveBeenCalledTimes(1);
+  });
+
+  it('preserves one mic click during a focus-triggered status probe', () => {
+    mount();
+    reply();
+    window.dispatchEvent(new Event('focus'));
+    button().click();
+    button().click();
+    expect(button().getAttribute('aria-busy')).toBe('true');
+    expect(mocks.post).toHaveBeenCalledTimes(2);
+    expect(focus).toHaveBeenCalled();
+    reply();
+    expect(mocks.post).toHaveBeenCalledTimes(3);
+    expect(mocks.post.mock.calls.at(-1)?.[0]).toMatchObject({ payload: { action: 'start' } });
+    reply();
+    expect(button().getAttribute('aria-pressed')).toBe('true');
+    expect(button().getAttribute('aria-busy')).toBe('false');
+    expect(mocks.feedback).not.toHaveBeenCalled();
+  });
+
+  it('never disables the next recording because Handy omitted its final idle event', () => {
+    mount();
+    reply();
+    button().click();
+    reply();
+    button().click();
+    reply(true, true, undefined, 'processing');
+    expect(button().disabled).toBe(false);
+    expect(button().getAttribute('aria-pressed')).toBe('false');
+    button().dispatchEvent(new MouseEvent('mouseenter'));
+    vi.advanceTimersByTime(1_000);
+    expect(document.querySelector('[role="tooltip"]')?.textContent).toBe(
+      'Click to dictate. Click again when done.'
+    );
+    button().click();
+    expect(mocks.post.mock.calls.at(-1)?.[0]).toMatchObject({ payload: { action: 'start' } });
+    reply();
+    expect(button().getAttribute('aria-pressed')).toBe('true');
+  });
+
+  it('preserves finish intent if the focus probe discovers cancellation outside Varro', () => {
+    mount();
+    reply();
+    button().click();
+    reply();
+    window.dispatchEvent(new Event('focus'));
+    button().click();
+    reply(true, true, undefined, 'idle');
+    expect(mocks.post.mock.calls.at(-1)?.[0]).toMatchObject({ payload: { action: 'stop' } });
+    reply(true, true, undefined, 'idle');
+    expect(button().getAttribute('aria-pressed')).toBe('false');
+  });
+
+  it('does not lose a queued click when the read-only probe times out', () => {
+    mount();
+    reply();
+    window.dispatchEvent(new Event('focus'));
+    button().click();
+    vi.advanceTimersByTime(8_000);
+    expect(mocks.post.mock.calls.at(-1)?.[0]).toMatchObject({ payload: { action: 'start' } });
+    reply();
+    expect(button().getAttribute('aria-pressed')).toBe('true');
+    expect(mocks.feedback).not.toHaveBeenCalled();
+  });
+
+  it('accepts external idle updates and rejects stale status replies without extra polling', () => {
+    mount();
+    reply();
+    button().click();
+    const start = mocks.post.mock.calls.at(-1)?.[0];
+    if (start?.type !== 'handy/request') throw new Error('Missing start command');
+    reply();
+    window.dispatchEvent(new Event('focus'));
+    const status = mocks.post.mock.calls.at(-1)?.[0];
+    if (status?.type !== 'handy/request') throw new Error('Missing status request');
+    mocks.context.handler?.({
+      type: 'handy/result',
+      payload: {
+        requestId: start.payload.requestId,
+        available: true,
+        running: true,
+        state: 'idle',
+        revision: 3,
+      },
+    });
+    expect(button().getAttribute('aria-pressed')).toBe('false');
+    mocks.context.handler?.({
+      type: 'handy/result',
+      payload: {
+        requestId: status.payload.requestId,
+        available: true,
+        running: true,
+        state: 'recording',
+        revision: 2,
+      },
+    });
+    expect(button().getAttribute('aria-pressed')).toBe('false');
+    const count = mocks.post.mock.calls.length;
+    vi.advanceTimersByTime(29_000);
+    expect(mocks.post).toHaveBeenCalledTimes(count);
+    button().click();
+    expect(mocks.post.mock.calls.at(-1)?.[0]).toMatchObject({ payload: { action: 'start' } });
   });
 });

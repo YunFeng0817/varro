@@ -1104,6 +1104,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   });
 
   const [isFocused, setIsFocused] = createSignal(false);
+  const [dictationRequested, setDictationRequested] = createSignal(false);
   const [promptComposing, setPromptComposing] = createSignal(false);
   const [composerSelectionCollapsed, setComposerSelectionCollapsed] = createSignal(true);
   const [historyIndex, setHistoryIndex] = createSignal<number | null>(null);
@@ -6416,6 +6417,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
             inputFrameRef = el;
           }}
           class={`chat-input-container ${isFocused() ? 'focused' : ''} ${showModelPicker() || showMcpPicker() || showLspPicker() ? 'showing-model-picker' : ''} ${showAgentPicker() || showVariantPicker() || showMcpPicker() || showLspPicker() || showBusyMenu() || (isFocused() && showCompletionMenu()) ? 'showing-context-popup' : ''}`}
+          data-dictation-requested={dictationRequested() ? 'true' : undefined}
           style={{
             'min-height': sendComposerMinHeight() ? `${sendComposerMinHeight()}px` : undefined,
           }}
@@ -6517,6 +6519,13 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
             }}
           </Show>
 
+          <Show when={dictationRequested()}>
+            <div class="composer-dictation-status" role="status" aria-live="polite">
+              <span class="sr-only">Dictation on. Click mic when done.</span>
+              <span aria-hidden="true">Rec</span>
+            </div>
+          </Show>
+
           <RichComposerArea
             editorRef={(el) => {
               richEditorRef = el;
@@ -6524,13 +6533,15 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
             placeholder={
               sendAnimationActive()
                 ? ''
-                : composerEditingMessage()
-                  ? 'Edit your message'
-                  : composerHasActiveQuestion() || composerHasActivePermission()
-                    ? 'Respond to the prompt above to continue...'
-                    : workspaceSendPending() || isComposerDisplayBusy()
-                      ? 'Queue a follow-up or steer'
-                      : 'Describe what to build'
+                : dictationRequested()
+                  ? 'Your words will appear here'
+                  : composerEditingMessage()
+                    ? 'Edit your message'
+                    : composerHasActiveQuestion() || composerHasActivePermission()
+                      ? 'Respond to the prompt above to continue...'
+                      : workspaceSendPending() || isComposerDisplayBusy()
+                        ? 'Queue a follow-up or steer'
+                        : 'Describe what to build'
             }
             value={inputText()}
             promptSuggestion={promptCompletion.suggestion()}
@@ -6722,6 +6733,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
             }}
             remoteExtensionHost={isRemoteExtensionHost()}
             onDictationAvailabilityChange={() => toolbarFitter.schedule({ contentChanged: true })}
+            onDictationActivationChange={setDictationRequested}
             toolbarRef={(el) => {
               toolbarRef = el;
             }}

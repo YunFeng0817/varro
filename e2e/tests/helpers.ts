@@ -5,6 +5,22 @@ import { expect } from '@playwright/test';
 // Keep the normal assertion timeout and tolerances; only sample settlement more often.
 export const STREAMING_SCROLL_POLL_OPTIONS = { intervals: [16, 32, 50] };
 
+export async function waitForHarnessStartup(page: Page): Promise<void> {
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        // SAFETY: The isolated harness exposes its read-only startup state.
+        const harness = (
+          window as typeof window & {
+            __varroE2E?: { getStartupState?: () => { initialized: boolean; loading: boolean } };
+          }
+        ).__varroE2E;
+        return harness?.getStartupState?.() ?? { initialized: false, loading: true };
+      })
+    )
+    .toEqual({ initialized: true, loading: false });
+}
+
 export async function selectConversationTurn(page: Page, turnNumber: number) {
   const rail = page.getByRole('navigation', { name: 'Conversation turns' });
   await expect(rail).toBeVisible();

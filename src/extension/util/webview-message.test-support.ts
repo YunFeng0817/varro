@@ -34,7 +34,7 @@ const RALPH_CONFIG: RalphConfig = {
  * both stay exhaustive from a single definition.
  */
 export const VALID_WEBVIEW_MESSAGES = {
-  'handy/request': { type: 'handy/request', payload: { requestId: 'handy-1', action: 'toggle' } },
+  'handy/request': { type: 'handy/request', payload: { requestId: 'handy-1', action: 'start' } },
   ready: { type: 'ready' },
   'context/request': { type: 'context/request' },
   'providers/refresh': { type: 'providers/refresh' },

@@ -2,13 +2,32 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ExecFileOptions } from 'node:child_process';
 import { delimiter, join } from 'node:path';
+import { homedir } from 'node:os';
+import type { HandyRecordingState } from '../shared/protocol';
+import packageJson from '../../package.json';
 
 interface HandyTestEnvironment {
   remoteName: string | undefined;
 }
 
+interface RecordingFixture {
+  state: HandyRecordingState;
+  revision: number;
+  observation: number;
+}
+
+interface LogPathFixture {
+  get?: () => string | undefined;
+}
+
 const mocks = vi.hoisted(() => {
   const env: HandyTestEnvironment = { remoteName: undefined };
+  const recording: RecordingFixture = {
+    state: 'unknown',
+    revision: 0,
+    observation: 0,
+  };
+  const logPath: LogPathFixture = {};
   return {
     runFile:
       vi.fn<
@@ -21,6 +40,12 @@ const mocks = vi.hoisted(() => {
     stat: vi.fn(),
     access: vi.fn(),
     get: vi.fn(),
+    read: vi.fn<() => Promise<HandyRecordingState>>(),
+    watch: vi.fn<(listener: (state: HandyRecordingState) => void) => boolean>(),
+    stopWatching: vi.fn(),
+    dispose: vi.fn(),
+    recording,
+    logPath,
     env,
   };
 });
@@ -31,6 +56,34 @@ vi.mock('node:fs/promises', () => ({ stat: mocks.stat, access: mocks.access }));
 vi.mock('vscode', () => ({
   env: mocks.env,
   workspace: { getConfiguration: () => ({ get: mocks.get }) },
+}));
+vi.mock('./handy-recording-state', () => ({
+  HandyRecordingStateReader: class {
+    constructor(getPath: () => string | undefined) {
+      mocks.logPath.get = getPath;
+    }
+    get state() {
+      return mocks.recording.state;
+    }
+    get revision() {
+      return mocks.recording.revision;
+    }
+    get observation() {
+      return mocks.recording.observation;
+    }
+    read = mocks.read;
+    watch = mocks.watch;
+    stopWatching = mocks.stopWatching;
+    dispose = mocks.dispose;
+    assume(state: HandyRecordingState) {
+      mocks.recording.state = state;
+      mocks.recording.revision++;
+    }
+    reset(state: HandyRecordingState) {
+      this.assume(state);
+      mocks.stopWatching();
+    }
+  },
 }));
 
 import { HandyIntegration } from './handy-integration';
@@ -43,9 +96,26 @@ beforeEach(() => {
   Object.defineProperty(process, 'getuid', { value: () => 501, configurable: true });
   mocks.env.remoteName = undefined;
   mocks.get.mockReturnValue('');
-  mocks.stat.mockResolvedValue({ isFile: () => true });
+  mocks.stat.mockResolvedValue({ isFile: () => true, isDirectory: () => false });
   mocks.access.mockResolvedValue(undefined);
-  mocks.runFile.mockResolvedValue({ stdout: '123\n', stderr: '' });
+  mocks.recording.state = 'unknown';
+  mocks.recording.revision = 0;
+  mocks.recording.observation = 0;
+  mocks.read.mockImplementation(async () => mocks.recording.state);
+  mocks.watch.mockReturnValue(true);
+  mocks.runFile.mockImplementation(async (_file, args) => {
+    if (args[0] === '--toggle-transcription' || args[0] === '--cancel') {
+      mocks.recording.state =
+        args[0] === '--cancel'
+          ? 'idle'
+          : mocks.recording.state === 'recording'
+            ? 'processing'
+            : 'recording';
+      mocks.recording.observation++;
+      mocks.recording.revision++;
+    }
+    return { stdout: '123\n', stderr: '' };
+  });
 });
 afterEach(() => {
   Object.defineProperty(process, 'platform', { value: originalPlatform, configurable: true });
@@ -57,7 +127,7 @@ afterEach(() => {
 describe('HandyIntegration', () => {
   it('never discovers or activates on a remote host', async () => {
     mocks.env.remoteName = 'ssh-remote';
-    expect(await new HandyIntegration().request('toggle')).toEqual({
+    expect(await new HandyIntegration().request('start')).toMatchObject({
       available: false,
       running: false,
     });
@@ -66,11 +136,14 @@ describe('HandyIntegration', () => {
   });
 
   it('discovers a macOS bundle and inspects processes without launching Handy', async () => {
-    expect(await new HandyIntegration().request('status')).toEqual({
+    expect(await new HandyIntegration().request('status')).toMatchObject({
       available: true,
       running: true,
     });
     expect(mocks.stat).toHaveBeenCalledWith('/Applications/Handy.app/Contents/MacOS/Handy');
+    expect(mocks.stat).toHaveBeenCalledTimes(1);
+    expect(mocks.read).not.toHaveBeenCalled();
+    expect(mocks.watch).not.toHaveBeenCalled();
     expect(mocks.runFile).toHaveBeenCalledExactlyOnceWith(
       '/usr/bin/pgrep',
       ['-u', String(process.getuid!()), '-x', 'Handy|handy'],
@@ -80,14 +153,14 @@ describe('HandyIntegration', () => {
 
   it('does not run commands when Handy is missing or stopped', async () => {
     mocks.stat.mockRejectedValue(new Error('missing'));
-    expect(await new HandyIntegration().request('toggle')).toEqual({
+    expect(await new HandyIntegration().request('start')).toMatchObject({
       available: false,
       running: false,
     });
     expect(mocks.runFile).not.toHaveBeenCalled();
     mocks.stat.mockResolvedValue({ isFile: () => true });
     mocks.runFile.mockRejectedValue(Object.assign(new Error('no match'), { code: 1 }));
-    expect(await new HandyIntegration().request('toggle')).toEqual({
+    expect(await new HandyIntegration().request('start')).toMatchObject({
       available: true,
       running: false,
       error: expect.stringContaining('Start Handy'),
@@ -96,10 +169,12 @@ describe('HandyIntegration', () => {
   });
 
   it.each([
-    ['toggle', '--toggle-transcription'],
+    ['start', '--toggle-transcription'],
+    ['stop', '--toggle-transcription'],
     ['cancel', '--cancel'],
   ] as const)('invokes %s with fixed arguments and a bound', async (action, flag) => {
-    expect(await new HandyIntegration().request(action)).toEqual({
+    if (action !== 'start') mocks.recording.state = 'recording';
+    expect(await new HandyIntegration().request(action)).toMatchObject({
       available: true,
       running: true,
     });
@@ -112,15 +187,15 @@ describe('HandyIntegration', () => {
 
   it('uses a configured executable without interpreting shell syntax', async () => {
     const path = '/custom/Handy with spaces;safe';
-    mocks.get.mockReturnValue(path);
-    await new HandyIntegration().request('toggle');
+    mocks.get.mockImplementation((key: string) => (key === 'dictation.handyPath' ? path : ''));
+    await new HandyIntegration().request('start');
     expect(mocks.runFile).toHaveBeenLastCalledWith(
       path,
       ['--toggle-transcription'],
       expect.any(Object)
     );
     mocks.get.mockReturnValue('relative/handy');
-    expect(await new HandyIntegration().request('status')).toEqual({
+    expect(await new HandyIntegration().request('status')).toMatchObject({
       available: false,
       running: false,
       error: expect.stringContaining('absolute'),
@@ -134,7 +209,7 @@ describe('HandyIntegration', () => {
       if (path === join('/custom/bin', 'handy')) return { isFile: () => true };
       throw new Error('missing');
     });
-    await new HandyIntegration().request('toggle');
+    await new HandyIntegration().request('start');
     expect(mocks.stat).not.toHaveBeenCalledWith('handy');
     expect(mocks.runFile).toHaveBeenLastCalledWith(
       join('/custom/bin', 'handy'),
@@ -150,7 +225,7 @@ describe('HandyIntegration', () => {
       stdout: '"handy.exe","123","Console","1","12 K"\r\n',
       stderr: '',
     });
-    expect(await new HandyIntegration().request('status')).toEqual({
+    expect(await new HandyIntegration().request('status')).toMatchObject({
       available: true,
       running: true,
     });
@@ -163,13 +238,13 @@ describe('HandyIntegration', () => {
 
   it('reports inspection and command failures without retrying a toggle', async () => {
     mocks.runFile.mockRejectedValue(new Error('inspection denied'));
-    expect((await new HandyIntegration().request('toggle')).error).toContain('inspection denied');
+    expect((await new HandyIntegration().request('start')).error).toContain('inspection denied');
     expect(mocks.runFile).toHaveBeenCalledTimes(1);
     mocks.runFile
       .mockReset()
       .mockResolvedValueOnce({ stdout: '123', stderr: '' })
       .mockRejectedValueOnce(new Error('timed out'));
-    expect((await new HandyIntegration().request('toggle')).error).toContain('timed out');
+    expect((await new HandyIntegration().request('start')).error).toContain('timed out');
     expect(mocks.runFile).toHaveBeenCalledTimes(2);
   });
 
@@ -181,7 +256,7 @@ describe('HandyIntegration', () => {
         controller.abort(new Error('discovery expired'));
         return { isFile: () => true };
       });
-      expect((await new HandyIntegration().request('toggle')).error).toContain('discovery expired');
+      expect((await new HandyIntegration().request('start')).error).toContain('discovery expired');
       expect(mocks.runFile).not.toHaveBeenCalled();
     } finally {
       timeout.mockRestore();
@@ -190,12 +265,177 @@ describe('HandyIntegration', () => {
 
   it('shares concurrent status discovery but rejects overlapping mutations', async () => {
     const integration = new HandyIntegration();
-    const first = integration.request('toggle');
-    const second = integration.request('toggle');
+    const first = integration.request('start');
+    const second = integration.request('start');
     const status = integration.request('status');
-    expect(await first).toEqual({ available: true, running: true });
+    expect(await first).toMatchObject({ available: true, running: true, state: 'recording' });
     expect((await second).error).toContain('pending');
-    expect(await status).toEqual({ available: true, running: true });
+    expect(await status).toMatchObject({ available: true, running: true, state: 'recording' });
     expect(mocks.runFile).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not restart recording when a stale finish click follows cancellation in Handy', async () => {
+    const integration = new HandyIntegration();
+    await integration.request('start');
+    mocks.recording.state = 'idle';
+    mocks.runFile.mockClear();
+    expect(await integration.request('stop')).toMatchObject({ state: 'idle' });
+    expect(mocks.runFile).toHaveBeenCalledTimes(1);
+    expect(mocks.runFile.mock.calls[0]?.[0]).toBe('/usr/bin/pgrep');
+    expect((await integration.request('start')).state).toBe('recording');
+  });
+
+  it('adopts recording already started in Handy without sending another toggle', async () => {
+    mocks.recording.state = 'recording';
+    expect((await new HandyIntegration().request('start')).state).toBe('recording');
+    expect(mocks.runFile).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not let a stale processing observation block an explicit new start', async () => {
+    mocks.recording.state = 'processing';
+    expect(await new HandyIntegration().request('start')).toMatchObject({ state: 'recording' });
+    expect(mocks.runFile).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps start and finish working without lifecycle logs or acknowledgements', async () => {
+    mocks.runFile.mockResolvedValue({ stdout: '123\n', stderr: '' });
+    mocks.read.mockImplementation(async () => {
+      mocks.recording.state = 'unknown';
+      return 'unknown';
+    });
+    const integration = new HandyIntegration();
+    expect(await integration.request('start')).toMatchObject({ state: 'recording', running: true });
+    expect(await integration.request('stop')).toMatchObject({ state: 'idle', running: true });
+    expect(
+      mocks.runFile.mock.calls.filter(([, args]) => args[0] === '--toggle-transcription')
+    ).toHaveLength(2);
+  });
+
+  it('watches only an explicitly activated dictation and keeps fallback state on watcher failure', async () => {
+    const integration = new HandyIntegration();
+    const notify = vi.fn();
+    await integration.request('status', notify);
+    expect(mocks.watch).not.toHaveBeenCalled();
+    await integration.request('start', notify);
+    expect(mocks.watch).toHaveBeenCalledTimes(1);
+    const update = mocks.watch.mock.calls[0]?.[0];
+    if (!update) throw new Error('Missing state observer');
+    mocks.recording.state = 'unknown';
+    update('unknown');
+    expect(notify).toHaveBeenLastCalledWith(expect.objectContaining({ state: 'recording' }));
+    mocks.recording.state = 'idle';
+    update('idle');
+    expect(notify).toHaveBeenLastCalledWith(expect.objectContaining({ state: 'idle' }));
+    mocks.recording.state = 'unknown';
+    expect((await integration.request('status')).state).toBe('idle');
+    integration.dispose();
+    expect(mocks.dispose).toHaveBeenCalledTimes(1);
+  });
+
+  it('waits for an in-flight focus probe instead of dropping the start command', async () => {
+    let release: ((result: { stdout: string; stderr: string }) => void) | undefined;
+    mocks.runFile.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          release = resolve;
+        })
+    );
+    const integration = new HandyIntegration();
+    const probe = integration.request('status');
+    const start = integration.request('start');
+    await vi.waitFor(() => expect(release).toBeTypeOf('function'));
+    release?.({ stdout: '123\n', stderr: '' });
+    await probe;
+    expect(await start).toMatchObject({ state: 'recording' });
+    expect(
+      mocks.runFile.mock.calls.filter(([, args]) => args[0] === '--toggle-transcription')
+    ).toHaveLength(1);
+  });
+
+  it.each([
+    ['darwin', () => join(homedir(), 'Library/Logs/com.pais.handy/handy.log')],
+    ['win32', () => join('/local-app-data', 'com.pais.handy/logs/handy.log')],
+    ['linux', () => join('/xdg-data', 'com.pais.handy/logs/handy.log')],
+  ] as const)('uses the standard %s lifecycle log path', (platform, expected) => {
+    Object.defineProperty(process, 'platform', { value: platform, configurable: true });
+    vi.stubEnv('LOCALAPPDATA', '/local-app-data');
+    vi.stubEnv('XDG_DATA_HOME', '/xdg-data');
+    const integration = new HandyIntegration();
+    expect(mocks.logPath.get?.()).toBe(expected());
+    integration.dispose();
+  });
+
+  it.each(['darwin', 'win32', 'linux'] as const)(
+    'derives %s portable logs from the configured executable',
+    async (platform) => {
+      Object.defineProperty(process, 'platform', { value: platform, configurable: true });
+      const executable = join('/portable', platform === 'win32' ? 'handy.exe' : 'handy');
+      mocks.get.mockImplementation((key: string) =>
+        key === 'dictation.handyPath' ? executable : ''
+      );
+      mocks.stat.mockImplementation(async (path: string) => {
+        if (path === executable || path === join('/portable', 'portable'))
+          return { isFile: () => true, isDirectory: () => false };
+        if (path === join('/portable', 'Data'))
+          return { isFile: () => false, isDirectory: () => true };
+        throw new Error('missing');
+      });
+      if (platform === 'win32')
+        mocks.runFile.mockResolvedValue({
+          stdout: '"handy.exe","123","Console","1","12 K"\r\n',
+          stderr: '',
+        });
+      const integration = new HandyIntegration();
+      expect(await integration.request('start')).toMatchObject({
+        state: 'recording',
+        running: true,
+      });
+      expect(mocks.logPath.get?.()).toBe(join('/portable', 'Data/logs/handy.log'));
+      expect(mocks.get.mock.calls.every(([key]) => key === 'dictation.handyPath')).toBe(true);
+      integration.dispose();
+    }
+  );
+
+  it('uses standard logs for non-portable custom executables even when portable checks fail', async () => {
+    const executable = '/custom/handy';
+    mocks.get.mockImplementation((key: string) =>
+      key === 'dictation.handyPath' ? executable : ''
+    );
+    mocks.stat.mockImplementation(async (path: string) => {
+      if (path === executable) return { isFile: () => true, isDirectory: () => false };
+      throw new Error('portable directory unavailable');
+    });
+    const integration = new HandyIntegration();
+    expect(await integration.request('start')).toMatchObject({ state: 'recording' });
+    expect(mocks.logPath.get?.()).toBe(join(homedir(), 'Library/Logs/com.pais.handy/handy.log'));
+    integration.dispose();
+  });
+
+  it('keeps portable dictation working when its log is missing', async () => {
+    const executable = '/portable/handy';
+    mocks.get.mockImplementation((key: string) =>
+      key === 'dictation.handyPath' ? executable : ''
+    );
+    mocks.stat.mockImplementation(async (path: string) => ({
+      isFile: () => path === executable || path === '/portable/portable',
+      isDirectory: () => path === '/portable/Data',
+    }));
+    mocks.read.mockImplementation(async () => {
+      mocks.recording.state = 'unknown';
+      return 'unknown';
+    });
+    const integration = new HandyIntegration();
+    expect(await integration.request('start')).toMatchObject({ state: 'recording' });
+    expect(mocks.logPath.get?.()).toBe('/portable/Data/logs/handy.log');
+    expect(await integration.request('stop')).toMatchObject({ state: 'idle' });
+    integration.dispose();
+  });
+
+  it('exposes only the executable path setting for dictation', () => {
+    expect(
+      Object.keys(packageJson.contributes.configuration.properties).filter((key) =>
+        key.startsWith('varro.dictation.')
+      )
+    ).toEqual(['varro.dictation.handyPath']);
   });
 });

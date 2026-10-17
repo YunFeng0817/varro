@@ -481,7 +481,7 @@ type DispatchExpectation = {
  */
 const DISPATCH_EXPECTATIONS = {
   'handy/request': [
-    { callback: 'requestHandy', args: [{ requestId: 'handy-1', action: 'toggle' }] },
+    { callback: 'requestHandy', args: [{ requestId: 'handy-1', action: 'start' }] },
   ],
   ready: [{ callback: 'ready', args: [undefined] }],
   'context/request': [{ callback: 'requestContext', args: [] }],

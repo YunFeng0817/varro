@@ -198,7 +198,7 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
       if (
         !requestId ||
         requestId.length > 128 ||
-        (action !== 'status' && action !== 'toggle' && action !== 'cancel')
+        (action !== 'status' && action !== 'start' && action !== 'stop' && action !== 'cancel')
       )
         return null;
       return { type, payload: { requestId, action } };

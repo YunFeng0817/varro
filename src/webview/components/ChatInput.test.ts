@@ -89,7 +89,12 @@ describe('composer dictation integration', () => {
           new MessageEvent('message', {
             data: {
               type: 'handy/result',
-              payload: { requestId: message.payload.requestId, available: true, running: true },
+              payload: {
+                requestId: message.payload.requestId,
+                available: true,
+                running: true,
+                state: message.payload.action === 'start' ? 'recording' : 'idle',
+              },
             },
           })
         )
@@ -97,6 +102,8 @@ describe('composer dictation integration', () => {
     };
     fixture<{ __sendToExtension?: (message: WebviewMessage) => void }>(window).__sendToExtension =
       defaultBridgeSend;
+    setInputText('Existing draft');
+    addContextFile({ path: '/repo/composer.css', relativePath: 'composer.css', type: 'file' });
     cleanup = render(() => ChatInput(), container!);
     await Promise.resolve();
     const mic = container?.querySelector<HTMLButtonElement>('.toolbar-dictation-button');
@@ -104,9 +111,48 @@ describe('composer dictation integration', () => {
     expect(mic).toBeInstanceOf(HTMLButtonElement);
     expect(mic?.closest('.toolbar-right')?.querySelectorAll('button')[0]).toBe(mic);
     expect(mic?.closest('.toolbar-right')?.querySelectorAll('button')[1]).toBe(attach);
+    const editor = container!.querySelector<HTMLDivElement>('.rich-composer')!;
+    const attachment = [...container!.querySelectorAll('.chat-attachment-chip')].find((chip) =>
+      chip.textContent?.includes('composer.css')
+    );
+    expect(attachment).toBeDefined();
+    editor.focus();
+    const textNode = editor.firstChild!;
+    const range = document.createRange();
+    range.setStart(textNode, 8);
+    range.collapse(true);
+    window.getSelection()?.removeAllRanges();
+    window.getSelection()?.addRange(range);
     mic?.click();
-    expect(document.activeElement).toBe(container?.querySelector('.rich-composer'));
-    expect(sent.at(-1)).toMatchObject({ type: 'handy/request', payload: { action: 'toggle' } });
+    expect(document.activeElement).toBe(editor);
+    expect(sent.at(-1)).toMatchObject({ type: 'handy/request', payload: { action: 'start' } });
+    await Promise.resolve();
+    expect(
+      container?.querySelector('.chat-input-container[data-dictation-requested="true"]')
+    ).not.toBeNull();
+    expect(container?.querySelector('.composer-dictation-status > .sr-only')?.textContent).toBe(
+      'Dictation on. Click mic when done.'
+    );
+    expect(
+      container?.querySelector('.composer-dictation-status > [aria-hidden="true"]')?.textContent
+    ).toBe('Rec');
+    expect(
+      [...container!.querySelectorAll('.chat-attachment-chip')].find((chip) =>
+        chip.textContent?.includes('composer.css')
+      )
+    ).toBe(attachment);
+    expect(editor.getAttribute('aria-placeholder')).toBe('Your words will appear here');
+    expect(editor.firstChild).toBe(textNode);
+    expect(window.getSelection()?.anchorNode).toBe(textNode);
+    expect(window.getSelection()?.anchorOffset).toBe(8);
+    expect(inputText()).toBe('Existing draft');
+    mic?.click();
+    await Promise.resolve();
+    expect(
+      container?.querySelector('.chat-input-container[data-dictation-requested="true"]')
+    ).toBeNull();
+    expect(container?.querySelector('.composer-dictation-status')).toBeNull();
+    expect(inputText()).toBe('Existing draft');
   });
 });
 
