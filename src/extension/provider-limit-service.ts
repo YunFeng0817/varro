@@ -592,6 +592,7 @@ function serializeProviderAuthStore(authStore: Record<string, ProviderAuthRecord
               fingerprintSecret(auth.refresh || ''),
               auth.expires || 0,
               fingerprintSecret(auth.accountId || ''),
+              auth.methodID || '',
             ]
           : [providerID, auth.type, fingerprintSecret(auth.key)]
       )

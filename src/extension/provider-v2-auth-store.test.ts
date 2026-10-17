@@ -78,5 +78,44 @@ describe(
       await expect(readOpenCodeV2AuthStore(path)).rejects.toThrow();
       await expect(readFile(path)).rejects.toMatchObject({ code: 'ENOENT' });
     });
+
+    it('preserves the active token-sharing method after reauthentication', async () => {
+      const db = new DatabaseSync(path);
+      db.exec(
+        'CREATE TABLE credential (id TEXT, integration_id TEXT, value TEXT, active INTEGER, time_created INTEGER)'
+      );
+      const insert = db.prepare('INSERT INTO credential VALUES (?, ?, ?, ?, ?)');
+      insert.run(
+        'old',
+        'openai',
+        JSON.stringify({
+          type: 'oauth',
+          methodID: 'chatgpt-browser',
+          access: 'old-codex',
+          metadata: { accountID: 'old-account' },
+        }),
+        0,
+        1
+      );
+      insert.run(
+        'active',
+        'openai',
+        JSON.stringify({
+          type: 'oauth',
+          methodID: 'chatgpt-token-sharing',
+          access: 'new-sharing',
+          metadata: { clientID: 'client', scopes: ['chatgpt.tokens.use.direct'] },
+        }),
+        1,
+        2
+      );
+      db.close();
+      const before = await readFile(path);
+
+      await expect(readOpenCodeV2AuthStore(path)).resolves.toEqual({
+        openai: { type: 'oauth', methodID: 'chatgpt-token-sharing', access: 'new-sharing' },
+      });
+      expect(await readFile(path)).toEqual(before);
+    });
   }
 );

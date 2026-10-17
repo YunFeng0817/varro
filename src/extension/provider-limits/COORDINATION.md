@@ -12,6 +12,11 @@ Supported identities:
   exact access token and account ID used in both account headers. Resolution retains
   auth-store OAuth, then Codex auth.json, then CODEX_TOKEN precedence. API-key OpenAI
   probes remain local. JWT claims are not used as an account-sharing shortcut.
+  ChatGPT token-sharing OAuth is not Codex OAuth. Its grants cannot read these
+  endpoints. Preserve the credential's method ID and skip polling and coordination
+  for token sharing. Numeric limits and reset credits require the Codex browser
+  login. Never substitute an inactive Codex credential or a local Codex account
+  for the selected token-sharing connection.
 - Anthropic OAuth: fixed usage endpoint and exact resolved access token, from the
   OpenCode auth store or Claude credentials file. Statusline and local proxy results
   are read outside coordination, never published under an OAuth credential identity.

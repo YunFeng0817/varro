@@ -84,6 +84,113 @@ describe('createCodexAdapter', () => {
     expect(requestSignal?.aborted).toBe(true);
   });
 
+  it('does not send token-sharing credentials to Codex or fall back to another account', async () => {
+    const coordinate = vi.fn();
+    vi.mocked(readFile).mockResolvedValue(
+      JSON.stringify({ tokens: { access_token: 'unrelated-codex-token' } })
+    );
+    vi.stubEnv('CODEX_TOKEN', 'unrelated-env-token');
+    const status = await adapter.fetch({
+      provider: oauthProvider,
+      authStore: {
+        openai: { type: 'oauth', methodID: 'chatgpt-token-sharing', access: 'sharing-token' },
+      },
+      modelID: 'gpt-6.1-sol',
+      checkedAt: 1000,
+      coordinate,
+    });
+
+    expect(status).toMatchObject({
+      providerID: 'openai',
+      modelID: 'gpt-6.1-sol',
+      status: 'unsupported',
+      note: expect.stringContaining('Reconnect OpenAI using Codex browser (legacy)'),
+    });
+    expect(fetch).not.toHaveBeenCalled();
+    expect(readFile).not.toHaveBeenCalled();
+    expect(coordinate).not.toHaveBeenCalled();
+  });
+
+  it('restores weekly limits and available reset credits after a Codex browser login', async () => {
+    const context = {
+      provider: oauthProvider,
+      modelID: 'gpt-6.1-sol',
+      checkedAt: Date.parse('2026-10-17T02:00:00Z'),
+    };
+    await expect(
+      adapter.fetch({
+        ...context,
+        authStore: {
+          openai: { type: 'oauth', methodID: 'chatgpt-token-sharing', access: 'sharing-token' },
+        },
+      })
+    ).resolves.toMatchObject({ status: 'unsupported' });
+    expect(fetch).not.toHaveBeenCalled();
+
+    const expirations = [
+      '2026-10-22T21:01:18.508223Z',
+      '2026-10-29T19:13:11.068771Z',
+      '2026-11-06T23:38:30.038477Z',
+    ];
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(
+        jsonResponse({
+          plan_type: 'pro',
+          rate_limit: {
+            primary_window: {
+              used_percent: 9,
+              limit_window_seconds: 604800,
+              reset_at: 1792649618,
+            },
+            secondary_window: null,
+          },
+          rate_limit_reset_credits: { available_count: 3 },
+        })
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          available_count: 3,
+          credits: expirations.map((expires_at) => ({
+            status: 'available',
+            title: 'Full reset',
+            expires_at,
+          })),
+        })
+      );
+
+    await expect(
+      adapter.fetch({
+        ...context,
+        authStore: {
+          openai: {
+            type: 'oauth',
+            methodID: 'chatgpt-browser',
+            access: 'codex-token',
+            accountId: 'codex-account',
+          },
+        },
+      })
+    ).resolves.toMatchObject({
+      status: 'available',
+      windows: [{ id: 'seven_day', remaining: 91, limit: 100, percent: 9, resetAt: 1792649618000 }],
+      usageLimitResets: {
+        availableCount: 3,
+        credits: expirations.map((expiration) => ({
+          title: 'Full reset',
+          expiresAt: Date.parse(expiration),
+        })),
+      },
+    });
+    expect(fetch).toHaveBeenCalledTimes(2);
+    for (const [, options] of vi.mocked(fetch).mock.calls) {
+      expect(options?.headers).toMatchObject({
+        Authorization: 'Bearer codex-token',
+        'ChatGPT-Account-Id': 'codex-account',
+      });
+    }
+    expect(readFile).not.toHaveBeenCalled();
+  });
+
   it('does not start a fetch after cancellation during credential discovery', async () => {
     const controller = new AbortController();
     let resolveCredentials: ((value: string) => void) | undefined;

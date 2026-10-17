@@ -11,7 +11,14 @@ import { asRecord, getString } from '../../shared/type-utils';
 import { VARRO_USER_AGENT } from '../provider-limits/adapter-utils';
 
 export type ProviderAuthRecord =
-  | { type: 'oauth'; access: string; refresh?: string; expires?: number; accountId?: string }
+  | {
+      type: 'oauth';
+      access: string;
+      refresh?: string;
+      expires?: number;
+      accountId?: string;
+      methodID?: string;
+    }
   | { type: 'api' | 'wellknown'; key: string };
 
 type ProviderModel = {
@@ -244,6 +251,8 @@ export function parseProviderAuthStore(raw: string): Record<string, ProviderAuth
         oauth.expires = auth.expires;
       }
       if (accountId && oauth.type === 'oauth') oauth.accountId = accountId;
+      const methodID = getString(auth.methodID);
+      if (methodID) oauth.methodID = methodID;
       authStore[providerID] = oauth;
       continue;
     }
