@@ -25,7 +25,7 @@ update does not block later deletion. Cancelled updates check their signal befor
 reading, and before replacing the annotation file, so cancellation while queued or preparing a write
 does not commit that update.
 
-`npm run test:compatibility:adapters` installs published binaries into isolated directories and tests the production adapters. The current tested versions are v1 `1.19.2` and v2 `2.0.30`, alongside the v1 `1.16.0` and v2 `2.0.5` support floors. Release-specific results are recorded below. The checks cover managed startup, credential recovery in a second window, restart, multi-window recovery after process exit, bootstrap, workspace path encoding, v2 configuration precedence, session updates, deterministic streamed model responses, actual fixture-only tool execution, message pagination, tail editing, helper generation, fork/revert, deletion, and native v2 permissions/forms. The generated report is `artifacts/opencode-adapters/verified.json`.
+`npm run test:compatibility:adapters` installs published binaries into isolated directories and tests the production adapters. The current tested versions are v1 `1.19.3` and v2 `2.0.32`, alongside the v1 `1.16.0` and v2 `2.0.5` support floors. Release-specific results are recorded below. The checks cover managed startup, credential recovery in a second window, restart, multi-window recovery after process exit, bootstrap, workspace path encoding, v2 configuration precedence, session updates, deterministic streamed model responses, actual fixture-only tool execution, message pagination, tail editing, helper generation, fork/revert, deletion, and native v2 permissions/forms. The generated report is `artifacts/opencode-adapters/verified.json`.
 
 Fresh VS Code sandbox windows passed `v2-first-run` and the existing `healthy-first-run` scenario. These editor checks verify activation, ownership, health, and event-stream connection. `test:compatibility:ui` additionally exercises the actual composer, successful replies, pre-turn failures, HTTP 401 handling, recovery through a working provider, and reopening history. Full visual streaming performance remains a separate verification task.
 
@@ -83,6 +83,73 @@ resolve to `literal/directory`. V2 location queries retain their normal URL enco
 The released-server adapter tests cover exact workspace resolution for Japanese text, emoji,
 and literal percent escapes. Unit tests also cover header construction with embedded newlines
 and preservation of Windows separators and casing.
+
+### 2.0.32 and 1.19.3 compatibility review
+
+Reviewed the release diffs from v2.0.30 to v2.0.32, `f16ef9ad` through
+`843a6c51`, and v1.19.2 to v1.19.3, `7901b7d3` through `e3c4eb24`.
+Consumed HTTP routes, SSE names and envelopes, session/message/inbox shapes,
+permissions/forms, and managed `serve`/upgrade arguments remain compatible.
+No adapter changes are required for these releases.
+
+V2 adds an experimental voice-session endpoint and optional model temperature,
+reasoning-control, and release-date configuration fields. V1 adds configured
+`reasoning_options`. Both families build reasoning variants on the server;
+Varro already preserves the returned variants and model capabilities.
+The new voice API is not used by Varro's existing dictation integration.
+
+V2 also fixes provider-package reasoning mappings, configured model limits,
+Bedrock routing/cache behavior, Gemini incomplete-response retries, unreadable
+file substitutions, environment-value escaping, numeric MCP timeouts, cold
+web-search provider activation, sanitized compaction exports, and concurrent
+Windows snapshot writes. Managed services restore saved environment variables.
+These are server-owned behaviors and need no local adaptation. App, desktop,
+TUI, theme, Console, CI, and release-distribution changes are optional parity
+or upstream tooling work.
+
+Dependencies, lockfile, README, usage, and Docker examples now use v2 `2.0.32`
+and v1 `1.19.3`. Support floors remain v2 `2.0.5` and v1 `1.16.0`.
+Historical release observations and lower-bound fixtures remain unchanged.
+The optional VS Code sandbox reads its expected version from the selected binary.
+
+The Docker support-range run passed all 519 required checks across 14 v1 releases,
+including 43/43 on `1.19.3` and 37/37 on the `1.16.0` floor. Advisory checks passed
+76/78. The floor and below-floor `1.15.13` comparison retain the known MCP pagination
+caveat: discovery returned only the first page. The support floor is unchanged.
+The regenerated summary is `scripts/opencode-compatibility/verified.json`; full
+evidence is `artifacts/opencode-compatibility.json` and
+`artifacts/opencode-1.19.3-compatibility.log`.
+
+Verification resumed after the separate native-form implementation finished.
+The published-server fixture now sends keyed, typed native answers using the
+original option value. It also verifies that a rejected legacy positional reply
+leaves the form pending before a valid reply is acknowledged. No product-code
+change was needed for the version bump.
+
+All 10,093 unit tests and 252 script tests passed, with 48 and two skips respectively.
+All five native-validator fixtures passed separately. `npm run lint`, `npm run fmt`,
+`npm run fmt:check`, `npm run lint:check`, `npm run typecheck`,
+`npm run typecheck:suggestions`, and `npm run build` passed on the completed
+workspace. The five shared compatibility-summary tests passed after the Docker
+run finished. Evidence is `artifacts/opencode-versions-completed-tests.log` and
+`artifacts/opencode-versions-completed-build.log`. Real-editor and visual streaming
+checks were not run for this bump.
+
+The final published-server adapter matrix passed all 145 applicable checks,
+with 39 family/platform skips and no leaked processes:
+
+| Published server | Passed | Skipped |
+| --- | ---: | ---: |
+| v1.16.0 | 30 | 16 |
+| v1.19.3 | 31 | 15 |
+| v2.0.5 | 41 | 5 |
+| v2.0.32 | 43 | 3 |
+
+Evidence is `artifacts/opencode-adapters/verified.json` and
+`artifacts/opencode-2.0.32-adapters-final.log`. The initial current-workspace run
+overlapped the native-form work and failed its obsolete positional-answer fixture.
+The isolated committed-source baseline and the final completed-workspace rerun
+both passed; the fixture update above preserves the new mixed-version safety check.
 
 ### 2.0.30 and 1.19.2 compatibility review
 

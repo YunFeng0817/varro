@@ -1721,9 +1721,33 @@ describe.skipIf(!binary)('released OpenCode adapter contract', () => {
     );
     expect(form?.id).toBeTruthy();
     const pending = (await transport.request('GET', '/question')) as UnknownRecord[];
-    expect(pending.some((request) => request.id === form?.id)).toBe(true);
+    expect(pending.find((request) => request.id === form?.id)).toMatchObject({
+      kind: 'native-form',
+      sessionID,
+      form: {
+        fields: [
+          {
+            key: 'choice',
+            type: 'string',
+            options: [{ value: 'accepted', label: 'Accept' }],
+          },
+        ],
+      },
+    });
+    await expect(
+      transport.request('POST', `/question/${form?.id}/reply`, { answers: [['Accept']] })
+    ).rejects.toThrow('Native forms require keyed, typed answers');
     expect(
-      await transport.request('POST', `/question/${form?.id}/reply`, { answers: [['Accept']] })
+      ((await transport.request('GET', '/question')) as UnknownRecord[]).some(
+        (request) => request.id === form?.id
+      )
+    ).toBe(true);
+    expect(
+      await transport.request('POST', `/question/${form?.id}/reply`, {
+        kind: 'native-form',
+        sessionID,
+        answer: { choice: 'accepted' },
+      })
     ).toBe(true);
     expect(await transport.request('GET', '/question')).toEqual([]);
     const cancelled = asRecord(
