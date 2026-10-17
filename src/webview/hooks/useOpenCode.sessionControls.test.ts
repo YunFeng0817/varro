@@ -27,6 +27,37 @@ Object.assign(bridgeMocks, { onMessage: bridgeOnMessage });
 Object.assign(clientMocks, { serverEventsOn });
 
 describe('useOpenCode session control flows', () => {
+  it('stops a captured child without using tree abort or modifying parent and sibling status', async () => {
+    const { stateModule, hookModule } = await loadModules();
+    const root = session('root');
+    const child = { ...session('child-a'), parentID: 'root' };
+    const sibling = { ...session('child-b'), parentID: 'root' };
+    clientMocks.sessionStatus.mockResolvedValue({
+      root: { type: 'busy' },
+      'child-b': { type: 'busy' },
+    });
+    clientMocks.sessionGet.mockImplementation(async (id: string) =>
+      [root, child, sibling].find((entry) => entry.id === id)
+    );
+    clientMocks.sessionMessages.mockResolvedValue([]);
+    clientMocks.interruptChild.mockResolvedValue({ interrupted: true });
+    clientMocks.permissionList.mockResolvedValue([]);
+    clientMocks.questionList.mockResolvedValue([]);
+    stateModule.setState('sessions', [root, child, sibling]);
+    stateModule.setState('activeSessionId', 'root');
+    stateModule.setState('sessionStatus', {
+      root: { type: 'busy' },
+      'child-a': { type: 'busy' },
+      'child-b': { type: 'busy' },
+    });
+    await hookModule.manageChildTask('child-a', 'stop');
+    expect(clientMocks.interruptChild).toHaveBeenCalledWith('child-a', child.directory);
+    expect(clientMocks.sessionAbort).not.toHaveBeenCalled();
+    expect(stateModule.state.sessionStatus.root).toEqual({ type: 'busy' });
+    expect(stateModule.state.sessionStatus['child-b']).toEqual({ type: 'busy' });
+    expect(clientMocks.permissionList).toHaveBeenCalled();
+    expect(clientMocks.questionList).toHaveBeenCalled();
+  });
   it('handles a rejected abort requested by the command bridge', async () => {
     let bridgeHandler: Parameters<BridgeOnMessage>[0] | undefined;
     bridgeOnMessage.mockImplementation((handler) => {

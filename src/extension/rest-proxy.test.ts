@@ -362,6 +362,92 @@ describe('side-question proxy boundary', () => {
   });
 });
 
+describe('child task proxy boundary', () => {
+  it('does not dispatch after connection generation changes during native authorization', async () => {
+    let generation = 1;
+    const request = vi.fn(async () => {
+      generation = 2;
+      return { parentID: 'ses_parent', directory: '/repo', stopChild: true };
+    });
+    const { proxy, callbacks } = createProxy({
+      server: { ...createCallbacks().server, apiVersion: 2, request },
+      getRequestGeneration: () => generation,
+    });
+    await proxy.handleRequest(makePayload(6, 'POST', '/session/ses_child/interrupt-child'));
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(
+      1,
+      expect.objectContaining({ id: 6, error: expect.stringContaining('Connection changed') })
+    );
+    proxy.dispose();
+  });
+  it.each(['interrupt-child', 'background-parent'])(
+    'revalidates native scope before %s',
+    async (action) => {
+      const request = vi.fn(async (_method: string, path: string) =>
+        path.includes('/child-task-controls')
+          ? {
+              parentID: 'ses_parent',
+              directory: '/repo',
+              stopChild: true,
+              backgroundEligible: true,
+            }
+          : { interrupted: true }
+      );
+      const { proxy, callbacks } = createProxy({
+        server: { ...createCallbacks().server, apiVersion: 2, request },
+      });
+      await proxy.handleRequest(makePayload(1, 'POST', `/session/ses_child/${action}`));
+      expect(request.mock.calls.map(([method]) => method)).toEqual(['GET', 'POST']);
+      expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+        id: 1,
+        data: { interrupted: true },
+      });
+      expect(callbacks.confirmPromptAdmission).not.toHaveBeenCalled();
+      proxy.dispose();
+    }
+  );
+  it('rejects canonical directory drift even with stale cached workspace membership', async () => {
+    const request = vi.fn().mockResolvedValue({ parentID: 'ses_parent', directory: '/foreign' });
+    const base = createCallbacks();
+    const { proxy, callbacks } = createProxy({
+      server: { ...base.server, apiVersion: 2, request },
+      contextProvider: {
+        ...base.contextProvider,
+        getOpenWorkspaceRoot: vi.fn((directory) => (directory === '/repo' ? directory : null)),
+      },
+    });
+    await proxy.handleRequest(makePayload(2, 'POST', '/session/ses_child/interrupt-child'));
+    expect(request.mock.calls.every(([method]) => method === 'GET')).toBe(true);
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(
+      1,
+      expect.objectContaining({ id: 2, error: expect.any(String) })
+    );
+    proxy.dispose();
+  });
+  it('rejects a supplied tree before dispatch', async () => {
+    const { proxy, callbacks } = createProxy({
+      server: { ...createCallbacks().server, apiVersion: 2 },
+    });
+    await proxy.handleRequest(
+      makePayload(3, 'POST', '/session/ses_child/interrupt-child', { tree: ['ses_parent'] })
+    );
+    expect(callbacks.server.request).not.toHaveBeenCalled();
+    proxy.dispose();
+  });
+  it('hides unsupported V1 actions and refuses mutation', async () => {
+    const { proxy, callbacks } = createProxy();
+    await proxy.handleRequest(makePayload(4, 'GET', '/session/ses_child/child-task-controls'));
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 4,
+      data: { parentID: null, stopChild: false, backgroundEligible: false },
+    });
+    await proxy.handleRequest(makePayload(5, 'POST', '/session/ses_child/interrupt-child'));
+    expect(callbacks.server.request).not.toHaveBeenCalled();
+    proxy.dispose();
+  });
+});
+
 describe('scopeOpenCodeRequest', () => {
   it('returns URL string when path is valid', () => {
     const result = scopeOpenCodeRequest('http://127.0.0.1:4096', '/session');
@@ -7252,6 +7338,34 @@ describe('RestProxy handleRequest', () => {
     expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
       id: 30,
       data: { ok: true },
+    });
+  });
+
+  it('leaves V2 restart recovery to the server even when its active snapshot is empty', async () => {
+    const serverRequest = vi.fn((method: string, path: string) => {
+      if (method === 'GET' && path === '/session/status') return Promise.resolve({});
+      if (method === 'GET' && (path === '/permission' || path === '/question'))
+        return Promise.resolve([]);
+      return Promise.resolve({ ok: true });
+    });
+    const { proxy, callbacks } = createProxy({
+      server: { ...createCallbacks().server, apiVersion: 2, request: serverRequest },
+    });
+
+    await proxy.handleRequest({
+      ...makePayload(309, 'POST', '/session/session-1/prompt_async', {
+        messageID: 'msg_recovery',
+        parts: [{ type: 'text', text: 'Do not replay this interrupted turn' }],
+      }),
+      interruptedRecovery: true,
+    });
+
+    expect(serverRequest.mock.calls.filter(([method]) => method !== 'GET')).toEqual([]);
+    expect(callbacks.sessionState.markSessionBusy).not.toHaveBeenCalled();
+    expect(callbacks.confirmPromptAdmission).not.toHaveBeenCalled();
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 309,
+      data: { skipped: true },
     });
   });
 

@@ -1724,6 +1724,8 @@ interface ApiRoute {
 
 const SESSION_ACTIONS = new Set([
   'abort',
+  'interrupt-child',
+  'background-parent',
   'resume-steering',
   'fork',
   'prompt_async',
@@ -1989,6 +1991,10 @@ const API_ROUTES: ApiRoute[] = [
     ({ method, url }) => method === 'DELETE' && optionalDirectoryQuery(url)
   ),
   route('/session/:id/todo', ({ method, url }) => method === 'GET' && optionalDirectoryQuery(url)),
+  route(
+    '/session/:id/child-task-controls',
+    ({ method, url }) => method === 'GET' && optionalDirectoryQuery(url)
+  ),
   route(
     '/session/:id/background-process',
     ({ method, url }) => method === 'GET' && optionalDirectoryQuery(url)

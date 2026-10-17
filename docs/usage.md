@@ -409,7 +409,7 @@ On large layouts, Varro can keep a persistent session pane beside the chat. Use 
 
 If the sidebar is hidden, Varro can show VS Code notifications when a plan is ready, a top-level session fails, or the agent is blocked on a permission or question. It also exposes a status bar item that summarizes waiting or completed top-level sessions, including ordinary completed sessions that do not produce a notification, and alerts in sibling workspaces. Clicking that item opens pending-attention sessions first, otherwise it focuses Varro.
 
-If VS Code reloads while a session was running, Varro reconnects to those sessions and can continue interrupted work automatically when the session is still resumable.
+If VS Code reloads while a session was running, Varro reconnects and restores canonical history and pending inputs. OpenCode V2 owns automatic execution recovery; Varro does not send a second restart-continuation prompt. Older V2 versions or standalone services may require an explicit follow-up. V1 retains Varro's existing elected-owner continuation. Recovery can repeat external effects, and active shells are not preserved as durable processes. See [restart continuity](restart-recovery.md).
 
 ## Plans, Reviews, And Ralph
 

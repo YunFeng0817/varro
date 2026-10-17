@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { HealthResponse } from '../../shared/health';
-import type { Message, SessionStatus } from '../types';
+import type { Message, SessionStatus, UserMessage } from '../types';
 import {
   buildInterruptedSessionContinueBody,
   buildInterruptedSessionMessageID,
@@ -166,7 +166,7 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
-function userMessage(id: string): Message {
+function userMessage(id: string): UserMessage {
   return {
     id,
     sessionID: 'session-1',
@@ -291,6 +291,23 @@ describe('connection-bootstrap helpers', () => {
       ])
     ).toBe(false);
   });
+
+  it.each(['steer', 'queue'] as const)(
+    'does not replay a native pending %s input as an interrupted prompt',
+    (pendingDelivery) => {
+      expect(
+        shouldContinueInterruptedSession([
+          {
+            info: {
+              ...userMessage('native-pending'),
+              pendingDelivery,
+            },
+            parts: [],
+          },
+        ])
+      ).toBe(false);
+    }
+  );
 
   it('derives a stable continuation message ID from the interrupted message', () => {
     const source = {

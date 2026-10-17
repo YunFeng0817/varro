@@ -32,6 +32,18 @@ afterEach(async () => {
 });
 
 describe('v2 background completion', () => {
+  it('drops old process state on reconnect when the canonical shell snapshot is empty', async () => {
+    const adapter = new OpenCodeV2Adapter(async () => ({ data: {} }));
+    adapter.observe('shell.created', { info: shell }, undefined, '/repo');
+    adapter.observe('session.execution.succeeded', { sessionID: 'ses_one' });
+    expect(adapter.eventContext('ses_one')?.backgroundPending).toBe(true);
+
+    adapter.reset();
+
+    expect(adapter.eventContext('ses_one')?.backgroundPending).toBe(false);
+    expect(adapter.eventContext('ses_one')?.backgroundCommand).toBeUndefined();
+  });
+
   it('keeps awaited-job handoff alongside a service, and chat cancellation leaves the service alive', async () => {
     const service = { ...shell, id: 'sh_service', command: 'python3 tools/serve.py 18765' };
     let shells = [shell, service];

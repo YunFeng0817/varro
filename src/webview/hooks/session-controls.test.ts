@@ -3,6 +3,7 @@ import type { Message, Session } from '../types';
 import { setSessionHistoryPrompts } from '../lib/message-window';
 import {
   abortSessionWithDependencies,
+  interruptChildWithDependencies,
   compactSessionWithDependencies,
   editMessageWithDependencies,
   redoSessionWithDependencies,
@@ -82,6 +83,96 @@ function completedTaskPart(id: string, sessionId = id) {
 }
 
 describe('session-controls helpers', () => {
+  it.each([true, false])(
+    'interrupts exactly child A with native interrupted=%s',
+    async (interrupted) => {
+      const reconcile = vi.fn(async () => {});
+      const markPendingAbort = vi.fn();
+      const clearPendingAbort = vi.fn();
+      const interruptChild = vi.fn(async () => ({ interrupted }));
+      await expect(
+        interruptChildWithDependencies(
+          {
+            isCurrent: () => true,
+            markPendingAbort,
+            interruptChild,
+            reconcile,
+            logError: vi.fn(),
+          },
+          'child-a'
+        )
+      ).resolves.toEqual({ interrupted });
+      expect(markPendingAbort.mock.calls).toEqual(interrupted ? [['child-a']] : []);
+      expect(interruptChild.mock.calls).toEqual([['child-a']]);
+      expect(reconcile.mock.calls).toEqual([['child-a']]);
+      expect(clearPendingAbort).not.toHaveBeenCalled();
+    }
+  );
+
+  it('keeps an uncertain child stop scoped and reconciles without changing parent status', async () => {
+    const reconcile = vi.fn(async () => {});
+    const clearPendingAbort = vi.fn();
+    await expect(
+      interruptChildWithDependencies(
+        {
+          isCurrent: () => true,
+          markPendingAbort: vi.fn(),
+          interruptChild: vi.fn().mockRejectedValue(new Error('connection lost')),
+          reconcile,
+          logError: vi.fn(),
+        },
+        'child-a'
+      )
+    ).rejects.toThrow('connection lost');
+    expect(clearPendingAbort).not.toHaveBeenCalled();
+    expect(reconcile.mock.calls).toEqual([['child-a']]);
+  });
+
+  it('ignores late child completion after workspace replacement', async () => {
+    const reconcile = vi.fn(async () => {});
+    const clearPendingAbort = vi.fn();
+    const result = deferred<{ interrupted: boolean }>();
+    let current = true;
+    const stop = interruptChildWithDependencies(
+      {
+        isCurrent: () => current,
+        markPendingAbort: vi.fn(),
+        interruptChild: () => result.promise,
+        reconcile,
+        logError: vi.fn(),
+      },
+      'child-a'
+    );
+    current = false;
+    result.resolve({ interrupted: false });
+    await stop;
+    expect(reconcile).not.toHaveBeenCalled();
+    expect(clearPendingAbort).not.toHaveBeenCalled();
+  });
+
+  it('preserves whole-tree stopping from a grandchild view', async () => {
+    const abortRemoteSession = vi.fn(async () => true);
+    const ids = ['root', 'child-a', 'child-b', 'grandchild'];
+    const markPendingAbortTree = vi.fn();
+    await abortSessionWithDependencies({
+      getActiveSessionId: () => 'grandchild',
+      getSessionTreeRootId: () => 'root',
+      getSessionTreeIds: () => ids,
+      getSelectedAgentForSession: () => 'build',
+      skipPlanSession: vi.fn(),
+      getSessionStatus: () => ({ type: 'busy' }),
+      getSessionUsageLimit: () => null,
+      markPendingAbortTree,
+      setSessionStatusEntry: vi.fn(),
+      stopLoading: vi.fn(),
+      abortRemoteSession,
+      clearPendingAbortTree: vi.fn(),
+      setSessionUsageLimit: vi.fn(),
+      logError: vi.fn(),
+    });
+    expect(markPendingAbortTree).toHaveBeenCalledWith(ids);
+    expect(abortRemoteSession.mock.calls).toEqual(ids.map((id) => [id]));
+  });
   afterEach(() => setSessionHistoryPrompts('session-1', []));
   it('sends the review prompt so the send path can create a session', async () => {
     const sendMessage = vi.fn(async () => {});

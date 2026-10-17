@@ -158,6 +158,12 @@ tabs retain their private, unscoped serializer state. VS Code owns sidebar visib
 and maximization restoration; do not toggle or reset the workbench layout at startup.
 
 Essential snapshot readiness is separate from permission automation completion.
+V2 interrupted execution is owned by OpenCode's native recovery, not a Varro
+resubmission. An empty process-local active snapshot is not proof that no durable
+claim exists. The host skips automatic V2 restart-continuation prompts; explicit
+sends and V1's elected-owner continuation retain their existing admission checks.
+See [restart continuity](restart-recovery.md).
+
 Known automatic requests retain their bounded owner; unknown ancestry is visible
 while classification continues. Pending automatic requests also block interrupted
 recovery even when their prompt is hidden. Snapshot mutation guards and reply

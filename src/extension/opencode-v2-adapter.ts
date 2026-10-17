@@ -248,6 +248,8 @@ export class OpenCodeV2Adapter {
   private readonly inputTypes = new Map<string, string>();
   private readonly failures = new Map<string, V2MessageContext>();
   private readonly submissions = new Map<string, Promise<unknown>>();
+  private readonly foregroundChildProgress = new Map<string, string>();
+  private taskControlsGeneration = 0;
   private readonly oauth = new Map<
     string,
     { integrationID: string; attemptID: string; providerID: string; directory?: string }
@@ -282,6 +284,23 @@ export class OpenCodeV2Adapter {
     if ((type === 'shell.exited' || type === 'shell.deleted') && isString(data.id))
       this.cancelBackgroundReview(data.id);
     this.backgroundWork.observe(type, data, eventDirectory);
+    if (isString(data.sessionID) && isString(data.assistantMessageID) && isString(data.id)) {
+      const key = `${data.sessionID}:${data.assistantMessageID}:${data.id}`;
+      if (type === 'session.tool.progress') {
+        const metadata = asRecord(data.metadata);
+        if (isString(metadata?.sessionID) && metadata.status === 'running') {
+          this.foregroundChildProgress.set(key, metadata.sessionID);
+          while (this.foregroundChildProgress.size > 4096)
+            this.foregroundChildProgress.delete(this.foregroundChildProgress.keys().next().value!);
+        }
+      }
+      if (
+        type === 'session.tool.success' ||
+        type === 'session.tool.failed' ||
+        type === 'session.tool.called'
+      )
+        this.foregroundChildProgress.delete(key);
+    }
     if (isString(data.sessionID)) {
       const context = { ...this.contexts.get(data.sessionID) };
       const directory = asRecord(data.location)?.directory;
@@ -336,6 +355,8 @@ export class OpenCodeV2Adapter {
     this.inputTypes.clear();
     this.failures.clear();
     this.oauth.clear();
+    this.foregroundChildProgress.clear();
+    this.taskControlsGeneration += 1;
   }
 
   eventContext(sessionID: string): V2MessageContext | undefined {
@@ -668,6 +689,130 @@ export class OpenCodeV2Adapter {
       const sessionID = decodeURIComponent(sessionRoute[1]!);
       const endpoint = `/api/session/${encodeURIComponent(sessionID)}`;
       const action = sessionRoute[2] ?? '';
+      if (
+        (action === 'child-task-controls' && method === 'GET') ||
+        ((action === 'interrupt-child' || action === 'background-parent') && method === 'POST')
+      ) {
+        if (body !== undefined) throw new Error('Child task controls do not accept a body');
+        const generation = this.taskControlsGeneration;
+        const assertTaskConnection = () => {
+          options.signal?.throwIfAborted();
+          if (generation !== this.taskControlsGeneration)
+            throw new Error(
+              'Connection changed while managing child work. Refresh before retrying.'
+            );
+        };
+        const child = await data<SessionInfo>('GET', endpoint);
+        if (directory && !isSameWorkspacePath(child.location.directory, directory))
+          throw new Error('Conversation moved. Refresh before managing this child.');
+        const parentID = child.parentID;
+        const parentEndpoint = parentID ? `/api/session/${encodeURIComponent(parentID)}` : null;
+        if (parentEndpoint) {
+          const parent = await data<SessionInfo>('GET', parentEndpoint);
+          if (!isSameWorkspacePath(parent.location.directory, child.location.directory))
+            throw new Error('Child task controls require parent and child in the same directory');
+        }
+        const spec = asRecord(await raw('GET', '/openapi.json'));
+        const paths = asRecord(spec?.paths);
+        const interrupt = asRecord(asRecord(paths?.['/api/session/{sessionID}/interrupt'])?.post);
+        const background = asRecord(asRecord(paths?.['/api/session/{sessionID}/background'])?.post);
+        const parameters = Array.isArray(interrupt?.parameters) ? interrupt.parameters : [];
+        const resume = parameters.map(asRecord).find((entry) => entry?.name === 'resume');
+        const resumeSchema = asRecord(resume?.schema);
+        const resumeVariants = Array.isArray(resumeSchema?.anyOf)
+          ? resumeSchema.anyOf
+          : [resumeSchema];
+        const supportsNoResume = resumeVariants.some((variant) => {
+          const values = asRecord(variant)?.enum;
+          return Array.isArray(values) && values.includes('false') && values.includes('true');
+        });
+        const stopChild = Boolean(
+          parentID &&
+          interrupt?.operationId === 'session.interrupt' &&
+          resume?.in === 'query' &&
+          supportsNoResume
+        );
+        if (action === 'interrupt-child') {
+          if (!stopChild) throw new Error('Child-only interruption is unavailable on this server');
+          assertTaskConnection();
+          // Unlike abort, this neither resolves the root nor deletes background shells.
+          const result = asRecord(await raw('POST', `${endpoint}/interrupt?resume=false`, {}));
+          assertTaskConnection();
+          if (!isBoolean(result?.interrupted))
+            throw new Error('Invalid native child interruption acknowledgement');
+          return { interrupted: result.interrupted };
+        }
+        let backgroundEligible = false;
+        let messages: SessionMessageInfo[] = [];
+        if (parentEndpoint && background?.operationId === 'session.background') {
+          messages = await data<SessionMessageInfo[]>(
+            'GET',
+            `${parentEndpoint}/message?limit=50&order=desc`
+          );
+          const latest = messages.find((message) => message.type === 'assistant');
+          // Native subagent progress establishes a foreground child link. Do not infer
+          // eligibility from a shell, a local status, or a compatibility annotation.
+          backgroundEligible = Boolean(
+            latest?.type === 'assistant' &&
+            latest.content.some(
+              (part) =>
+                part.type === 'tool' &&
+                part.name === 'subagent' &&
+                part.state.status === 'running' &&
+                part.state.input.background !== true &&
+                ((part.state.metadata?.sessionID === sessionID &&
+                  part.state.metadata?.status === 'running') ||
+                  this.foregroundChildProgress.get(`${parentID}:${latest.id}:${part.id}`) ===
+                    sessionID)
+            )
+          );
+        }
+        assertTaskConnection();
+        if (action === 'child-task-controls')
+          return {
+            parentID: parentID ?? null,
+            stopChild,
+            backgroundEligible,
+            directory: child.location.directory,
+          };
+        if (!backgroundEligible || !parentEndpoint)
+          throw new Error('No verified foreground child work is eligible for background handoff');
+        const before = new Set(messages.map((message) => message.id));
+        const pendingBefore = await data<SessionInboxInfo[]>('GET', `${parentEndpoint}/inbox`);
+        for (const item of pendingBefore) before.add(item.id);
+        assertTaskConnection();
+        await raw('POST', `${parentEndpoint}/background`, {});
+        assertTaskConnection();
+        // Read admission before projection so delivery between reads cannot hide
+        // the native guidance from both snapshots.
+        const pendingAfter = await data<SessionInboxInfo[]>('GET', `${parentEndpoint}/inbox`);
+        const after = await data<SessionMessageInfo[]>(
+          'GET',
+          `${parentEndpoint}/message?limit=50&order=desc`
+        );
+        assertTaskConnection();
+        // The native route is a no-op if the job finished between inspection and
+        // execution. Its durable guidance, not HTTP 204 alone, proves a handoff.
+        return {
+          backgrounded:
+            pendingAfter.some(
+              (item) =>
+                !before.has(item.id) &&
+                item.type === 'synthetic' &&
+                item.payload.text.startsWith(
+                  'User requested that active blocking work be moved to the background.\n'
+                )
+            ) ||
+            after.some(
+              (message) =>
+                !before.has(message.id) &&
+                message.type === 'synthetic' &&
+                message.text.startsWith(
+                  'User requested that active blocking work be moved to the background.\n'
+                )
+            ),
+        };
+      }
       if (action === 'side-question' && method === 'POST') {
         if (
           Object.keys(input).some((key) => key !== 'question' && key !== 'history') ||
@@ -1002,7 +1147,28 @@ export class OpenCodeV2Adapter {
         }
         const messageIDs = new Set(messages.map((message) => message.info.id));
         for (const item of inbox.toSorted((a, b) => a.time.created - b.time.created)) {
-          if (item.type !== 'user' || messageIDs.has(item.id)) continue;
+          if (messageIDs.has(item.id)) continue;
+          // Restart cancellation notices are admitted without waking an idle owner.
+          // Show the canonical notice now, under the same ID it keeps on delivery.
+          if (
+            item.type === 'synthetic' &&
+            item.payload.metadata?.source === 'shell' &&
+            item.payload.metadata.state === 'cancelled'
+          ) {
+            const notice = projectV2Message(
+              { ...item.payload, id: item.id, type: 'synthetic', time: item.time },
+              sessionID,
+              directory,
+              '',
+              context,
+              options
+            );
+            if (options.stripMessageParts) notice.parts = [];
+            messages.push(notice);
+            messageIDs.add(item.id);
+            continue;
+          }
+          if (item.type !== 'user') continue;
           const projected = projectV2Message(
             { ...item.payload, id: item.id, type: 'user', time: item.time },
             sessionID,
@@ -1535,7 +1701,13 @@ export class OpenCodeV2Adapter {
   private async session(value: SessionInfo): Promise<UnknownRecord> {
     const projected = projectV2Session(value);
     const annotations = await this.annotations.read(value.id);
-    return { ...projected, ...annotations, time: { ...value.time, ...asRecord(annotations.time) } };
+    const session: UnknownRecord = {
+      ...projected,
+      ...annotations,
+      time: { ...value.time, ...asRecord(annotations.time) },
+    };
+    if (value.parentID) session.parentID = value.parentID;
+    return session;
   }
 
   private async providers(

@@ -1983,6 +1983,18 @@ describe('Message user editing', () => {
       '<shell command="npm test > results.txt" state="failed">Long test output</shell>',
       'Background command failed: npm test > results.txt',
     ],
+    [
+      '<shell command="npm test" state="cancelled">Long test output</shell>',
+      'Background command cancelled: npm test',
+    ],
+    [
+      "<shell command='npm test' state='cancelled'>Long test output</shell>",
+      'Background command cancelled: npm test',
+    ],
+    [
+      '<shell command="npm test" state="error">Long test output</shell>',
+      'Background command failed: npm test',
+    ],
     ['The following tool was executed by the user', 'Ran a shell command'],
     [
       'The plan at /repo/plan.md has been approved, you can now edit files. Execute the plan',

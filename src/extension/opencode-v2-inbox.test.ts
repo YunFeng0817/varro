@@ -1,6 +1,11 @@
 /* oxlint-disable anti-slop/no-module-mocking -- The adapter's transport imports the VS Code output channel. */
 import { describe, expect, it, vi } from 'vitest';
-import type { SessionInboxUser, SessionMessageUser } from '@opencode/client';
+import type {
+  SessionInboxInfo,
+  SessionInboxUser,
+  SessionMessageInfo,
+  SessionMessageUser,
+} from '@opencode/client';
 import { OpenCodeV2Adapter } from './opencode-v2-adapter';
 import { projectV2Message } from './opencode-v2-projection';
 
@@ -41,6 +46,47 @@ const original: SessionMessageUser = {
 };
 
 describe('v2 pending steering history', () => {
+  it('restores a native lost-shell notice without waking its idle owner or creating a user input', async () => {
+    const notice: SessionInboxInfo = {
+      id: 'msg_lost_shell',
+      sessionID: 'ses_one',
+      type: 'synthetic',
+      delivery: 'steer',
+      time: { created: 5 },
+      payload: {
+        text: 'Command cancelled because the server restarted',
+        metadata: { source: 'shell', shellID: 'sh_lost', state: 'cancelled' },
+      },
+    };
+    const wire = vi.fn(
+      async (
+        _method: string,
+        path: string
+      ): Promise<{ data: SessionInboxInfo[] | SessionMessageInfo[] }> => ({
+        data: path.endsWith('/inbox') ? [notice] : [original],
+      })
+    );
+    const adapter = new OpenCodeV2Adapter(wire);
+    const messages = await adapter.request('GET', '/session/ses_one/message', undefined);
+    expect(messages).toEqual([
+      projectV2Message(original, 'ses_one'),
+      projectV2Message(
+        { id: notice.id, type: 'synthetic', time: notice.time, ...notice.payload },
+        'ses_one'
+      ),
+    ]);
+    expect(wire.mock.calls.every(([method]) => method === 'GET')).toBe(true);
+
+    // Delivery can happen between inbox and history reads. The notice keeps its
+    // native identity and must not gain another row or become an editable input.
+    wire.mockImplementation(async (_method, path) => ({
+      data: path.endsWith('/inbox')
+        ? [notice]
+        : [{ id: notice.id, type: 'synthetic', time: notice.time, ...notice.payload }, original],
+    }));
+    expect(await adapter.request('GET', '/session/ses_one/message', undefined)).toEqual(messages);
+  });
+
   it.each([undefined, 'steer', 'queue'])(
     'retains explicit delivery metadata for %s after reload',
     async (delivery) => {

@@ -2033,6 +2033,31 @@ describe('v2 transcript and permission projection', () => {
     expect(events[1]?.seq).toBeUndefined();
   });
 
+  it('reports exhausted native recovery as a terminal failure before idle', () => {
+    const failureMessage =
+      'Execution was interrupted repeatedly and will not be resumed automatically.';
+    const events = projectV2Event({
+      id: 'evt_exhausted',
+      created: 20,
+      type: 'session.execution.failed',
+      durable: { seq: 8 },
+      data: { sessionID: 'ses_one', error: { type: 'aborted', message: failureMessage } },
+    }).map(parseServerEvent);
+
+    expect(events[0]).toMatchObject({
+      type: 'message.updated',
+      properties: { info: { error: { data: { message: failureMessage } } } },
+    });
+    expect(events[1]).toMatchObject({
+      type: 'session.error',
+      properties: { error: { data: { message: failureMessage } } },
+    });
+    expect(events[2]).toMatchObject({
+      type: 'session.status',
+      properties: { status: { type: 'idle' } },
+    });
+  });
+
   it('creates an error row before reporting a pre-turn authentication failure', () => {
     const events = projectV2Event(
       {

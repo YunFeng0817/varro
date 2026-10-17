@@ -4,6 +4,24 @@ import { diagnosticRoute, diagnosticTimeline, redactDiagnosticText } from './dia
 beforeEach(() => diagnosticTimeline.clear());
 
 describe('diagnostic export', () => {
+  it('retains bounded recovery decisions and connection generations without prompt contents', () => {
+    diagnosticTimeline.record({
+      event: 'interrupted-recovery',
+      generation: 4,
+      state: 'native-owned',
+    });
+    diagnosticTimeline.record({
+      event: 'interrupted-recovery',
+      generation: 5,
+      state: 'legacy-blocked',
+    });
+    const report = diagnosticTimeline.export('');
+    expect(report).toContain('interrupted-recovery');
+    expect(report).toContain('"generation":4');
+    expect(report).toContain('native-owned');
+    expect(report).toContain('legacy-blocked');
+  });
+
   it('redacts credentials and all URL query values while optionally retaining local paths', () => {
     const snapshot = [
       'Authorization: Bearer bearer-secret',

@@ -13,6 +13,7 @@ type DiagnosticEvent = {
     | 'stream-retry'
     | 'workspace-activated'
     | 'health'
+    | 'interrupted-recovery'
     | 'startup-phase';
   operationId?: string;
   state?: string;

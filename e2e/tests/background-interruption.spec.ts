@@ -82,7 +82,7 @@ for (const width of [441, 1100]) {
       const activity = page.locator('.assistant-activity-summary');
       await activity.click();
       const notice = page.locator('[data-msg-id="background-notice"] .tool-invocation-header');
-      await expect(notice).toContainText('Background command finished: npm test');
+      await expect(notice).toContainText('Background command failed: npm test');
       const noticeBox = await notice.boundingBox();
       const summaryBox = await summary.boundingBox();
       expect(summaryBox!.y).toBeGreaterThanOrEqual(noticeBox!.y + noticeBox!.height);

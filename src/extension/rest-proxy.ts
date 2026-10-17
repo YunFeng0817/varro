@@ -49,6 +49,7 @@ import {
 import type { LocalSessionSummaryData } from './local-session-summary';
 import { sessionSummary } from './session-summary';
 import { logger } from './logger';
+import { diagnosticTimeline } from './diagnostics';
 import { projectDeferredPart, projectPartAttachments } from './message-content';
 import { ImageThumbnails } from './image-thumbnails';
 import { RemoteImages } from './remote-images';
@@ -959,6 +960,58 @@ export class RestProxy {
           sessionWorkspaceDirectory ?? this.getCurrentWorkspacePath(),
           sessionWorkspaceDirectory ?? explicitWorkspaceDirectory ?? undefined
         );
+        if (
+          /^\/session\/[^/]+\/(?:child-task-controls|interrupt-child|background-parent)$/.test(
+            requestPathname
+          ) &&
+          directSessionID
+        ) {
+          if (payload.body !== undefined)
+            throw new Error('Child task controls do not accept a body');
+          if (this.isHiddenSession(directSessionID)) throw new Error('404 Session not found');
+          if (this.callbacks.server.apiVersion !== 2) {
+            if (method !== 'GET') throw new Error('Child task controls require OpenCode V2');
+            this.callbacks.postApiResponse(requestGeneration, {
+              id: payload.id,
+              data: { parentID: null, stopChild: false, backgroundEligible: false },
+            });
+            return;
+          }
+          const timeout = AbortSignal.timeout(15_000);
+          const signal = requestSignal ? AbortSignal.any([requestSignal, timeout]) : timeout;
+          const options = { signal, maxResponseBytes: 2 * 1024 * 1024 };
+          const snapshotPath = setExplicitWorkspaceDirectory(
+            `/session/${encodeURIComponent(directSessionID)}/child-task-controls`,
+            explicitWorkspaceDirectory ?? this.getCurrentWorkspacePath() ?? ''
+          );
+          const snapshot = asRecord(
+            await this.requestServer('GET', snapshotPath, undefined, options)
+          );
+          if (typeof snapshot?.directory !== 'string')
+            throw new Error('Invalid child task directory');
+          this.requireAuthorizedSessionDirectory(directSessionID, snapshot.directory);
+          if (typeof snapshot.parentID === 'string') {
+            if (this.isHiddenSession(snapshot.parentID)) throw new Error('404 Session not found');
+            this.requireAuthorizedSessionDirectory(snapshot.parentID, snapshot.directory);
+          } else if (method !== 'GET')
+            throw new Error('Child task controls require a native child');
+          signal.throwIfAborted();
+          if (this.callbacks.getRequestGeneration() !== requestGeneration)
+            throw new Error(
+              'Connection changed while managing child work. Refresh before retrying.'
+            );
+          const data =
+            method === 'GET'
+              ? snapshot
+              : await this.requestServer(method, forwardedPath, undefined, options);
+          signal.throwIfAborted();
+          if (this.callbacks.getRequestGeneration() !== requestGeneration)
+            throw new Error(
+              'Connection changed while managing child work. Refresh before retrying.'
+            );
+          this.callbacks.postApiResponse(requestGeneration, { id: payload.id, data });
+          return;
+        }
       }
 
       if (method === 'POST' && requestPathname.endsWith('/side-question') && directSessionID) {
@@ -1564,6 +1617,21 @@ export class RestProxy {
           throw new Error('Resume cancelled because generated dependencies are not ignored by Git');
       }
       if (promptSessionID) {
+        // V2 owns durable execution claims. Its active snapshot is process-local,
+        // so idle/absent cannot prove a claim needs a new prompt during startup.
+        // Older V2 servers without native recovery require an explicit user send.
+        if (payload.interruptedRecovery && this.callbacks.server.apiVersion === 2) {
+          diagnosticTimeline.record({
+            event: 'interrupted-recovery',
+            generation: requestGeneration,
+            state: 'native-owned',
+          });
+          this.callbacks.postApiResponse(requestGeneration, {
+            id: payload.id,
+            data: { skipped: true },
+          });
+          return;
+        }
         if (
           promptWorkspaceDirectory &&
           normalizeWorkspaceIdentity(promptWorkspaceDirectory) &&
@@ -1582,19 +1650,24 @@ export class RestProxy {
         ) {
           throw new Error('Queued message dispatch lease is no longer current');
         }
-        if (
-          payload.interruptedRecovery &&
-          !(await this.shouldAdmitInterruptedRecovery(
+        if (payload.interruptedRecovery) {
+          const admitted = await this.shouldAdmitInterruptedRecovery(
             promptSessionID,
             promptWorkspaceDirectory,
             requestSignal
-          ))
-        ) {
-          this.callbacks.postApiResponse(requestGeneration, {
-            id: payload.id,
-            data: { skipped: true },
+          );
+          diagnosticTimeline.record({
+            event: 'interrupted-recovery',
+            generation: requestGeneration,
+            state: admitted ? 'legacy-admitted' : 'legacy-blocked',
           });
-          return;
+          if (!admitted) {
+            this.callbacks.postApiResponse(requestGeneration, {
+              id: payload.id,
+              data: { skipped: true },
+            });
+            return;
+          }
         }
       }
       if (promptSessionID && promptWorkspaceDirectory) {

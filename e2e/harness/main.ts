@@ -3402,6 +3402,21 @@ function createScenarioState(name: ScenarioName): ScenarioState {
     state.messagesBySessionId[parent.id] = [];
     state.messagesBySessionId[childA.id] = [];
     state.messagesBySessionId[childB.id] = [];
+    if (new URLSearchParams(window.location.search).get('emptyChildModel') === '1') {
+      childA.model = { providerID: 'openai', id: 'gpt-6.1-sol' };
+      const interrupted = makeAssistantMessage(
+        childA.id,
+        'child-interrupted',
+        'child-user',
+        '',
+        BASE_TIME - 100
+      );
+      interrupted.info.providerID = '';
+      interrupted.info.modelID = '';
+      interrupted.info.error = { name: 'MessageAbortedError', data: {} };
+      interrupted.parts = [];
+      state.messagesBySessionId[childA.id] = [interrupted];
+    }
     state.persistedActiveSessionId = null;
     persistRecentSessionsListView(state);
     state.nextSequence = 310;
@@ -3427,6 +3442,104 @@ function createScenarioState(name: ScenarioName): ScenarioState {
           : part
       );
       state.messagesBySessionId[parent.id] = [result];
+      state.persistedActiveSessionId = parent.id;
+      persistRecentSessionView(state, parent.id);
+    }
+    const childTaskState = new URLSearchParams(window.location.search).get('childTaskState');
+    if (
+      childTaskState === 'running' ||
+      childTaskState === 'completed' ||
+      childTaskState === 'error'
+    ) {
+      const user = makeUserMessage(
+        parent.id,
+        'child-controls-user',
+        ['Inspect the API routes.'],
+        BASE_TIME - 200
+      );
+      const assistant = makeAssistantMessage(
+        parent.id,
+        'child-controls-assistant',
+        user.info.id,
+        '',
+        BASE_TIME - 100
+      );
+      const input = { agent: 'general', prompt: 'Review the API routes without modifying files.' };
+      const metadata = { sessionId: childA.id };
+      const task: Extract<Part, { type: 'tool' }> = {
+        id: 'child-controls-tool',
+        sessionID: parent.id,
+        messageID: assistant.info.id,
+        type: 'tool',
+        callID: 'child-controls-call',
+        tool: 'task',
+        state:
+          childTaskState === 'running'
+            ? {
+                status: 'running',
+                input,
+                metadata,
+                title: childA.title,
+                time: { start: BASE_TIME - 100 },
+              }
+            : childTaskState === 'completed'
+              ? {
+                  status: 'completed',
+                  input,
+                  metadata,
+                  title: childA.title,
+                  output: 'API review complete.',
+                  time: { start: BASE_TIME - 100, end: BASE_TIME },
+                }
+              : {
+                  status: 'error',
+                  input,
+                  metadata,
+                  error: 'Child interrupted.',
+                  time: { start: BASE_TIME - 100, end: BASE_TIME },
+                },
+      };
+      assistant.parts = [task];
+      if (childTaskState === 'running') markAssistantInProgress(assistant);
+      state.messagesBySessionId[parent.id] = [user, assistant];
+      state.sessionStatuses[parent.id] = { type: childTaskState === 'running' ? 'busy' : 'idle' };
+      state.sessionStatuses[childA.id] = { type: childTaskState === 'running' ? 'busy' : 'idle' };
+      if (new URLSearchParams(window.location.search).has('nestedChildTask')) {
+        const grandchild = {
+          ...makeSession('child-controls-grandchild', 'Review nested routes', BASE_TIME - 100),
+          parentID: childA.id,
+        };
+        state.sessions.push(grandchild);
+        const nested = makeAssistantMessage(
+          childA.id,
+          'nested-assistant',
+          'nested-user',
+          '',
+          BASE_TIME - 100
+        );
+        markAssistantInProgress(nested);
+        nested.parts = [
+          {
+            ...task,
+            id: 'nested-tool',
+            callID: 'nested-call',
+            sessionID: childA.id,
+            messageID: nested.info.id,
+            state: {
+              status: 'running',
+              input,
+              metadata: { sessionId: grandchild.id },
+              title: grandchild.title,
+              time: { start: BASE_TIME - 100 },
+            },
+          },
+        ];
+        state.messagesBySessionId[childA.id] = [
+          makeUserMessage(childA.id, 'nested-user', ['Review nested routes.'], BASE_TIME - 200),
+          nested,
+        ];
+        state.sessionStatuses[grandchild.id] = { type: 'busy' };
+      }
       state.persistedActiveSessionId = parent.id;
       persistRecentSessionView(state, parent.id);
     }
@@ -5600,6 +5713,17 @@ async function handleApiRequest(
 ) {
   const url = new URL(rawPath, 'http://varro.test');
   const path = url.pathname;
+
+  if (method === 'GET' && /^\/session\/[^/]+\/child-task-controls$/.test(path)) {
+    const id = decodeURIComponent(path.split('/')[2]!);
+    const parentID = state.sessions.find((session) => session.id === id)?.parentID ?? null;
+    return {
+      parentID,
+      stopChild: Boolean(parentID),
+      backgroundEligible:
+        Boolean(parentID) && new URLSearchParams(window.location.search).has('childTaskBackground'),
+    };
+  }
 
   const backgroundRoute = path.match(
     /^\/session\/([^/]+)\/background-process(?:\/([^/]+)\/output)?$/

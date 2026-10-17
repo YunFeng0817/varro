@@ -163,8 +163,13 @@ export async function openPlan(markdown: string, sessionId?: string | null) {
   await getCurrentOpenCodeRuntime().openPlan(markdown, sessionId);
 }
 
-export async function abortSession() {
-  await getCurrentOpenCodeRuntime().abortSession();
+export async function abortSession(sessionId?: string) {
+  if (sessionId) await getCurrentOpenCodeRuntime().abortSession(sessionId);
+  else await getCurrentOpenCodeRuntime().abortSession();
+}
+
+export async function manageChildTask(sessionId: string, action: 'stop' | 'background') {
+  return getCurrentOpenCodeRuntime().manageChildTask(sessionId, action);
 }
 
 export async function undoSession() {
