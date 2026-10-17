@@ -1700,7 +1700,7 @@ describe('ChatInput', () => {
     expect(container?.textContent).toContain('spec.pdf');
     const pdfChip = container?.querySelector('.chat-attachment-chip');
     expect(pdfChip).toBeInstanceOf(HTMLElement);
-    expect(pdfChip?.textContent).not.toContain('PDF');
+    expect(pdfChip?.textContent).toContain('PDF');
 
     setState('providers', 0, 'models', 'pdf-model', {
       id: 'pdf-model',
@@ -1714,8 +1714,39 @@ describe('ChatInput', () => {
     expect(pdfChip?.textContent).toContain('PDF');
 
     setState('selectedModel', { providerID: 'openai', modelID: 'gpt-4o' });
-    expect(pdfChip?.textContent).not.toContain('PDF');
+    expect(pdfChip?.textContent).toContain('PDF');
   });
+
+  it.each([undefined, ['text']])(
+    'keeps the PDF draft and explains capability %j on Enter',
+    async (input) => {
+      setupModelState();
+      setState('providers', 0, 'models', 'gpt-4o', 'capabilities', { input });
+      const pdf = {
+        id: 'pdf-blocked',
+        mime: 'application/pdf' as const,
+        filename: 'keep.pdf',
+        size: 5,
+        url: 'data:application/pdf;base64,JVBERi0=',
+      };
+      setState('nativePdfs', [pdf]);
+      setInputText('Keep my draft');
+      cleanup = render(() => ChatInput(), container!);
+      container
+        ?.querySelector('.rich-composer')
+        ?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      await flushAsyncWork();
+      expect(sendMessageMock).not.toHaveBeenCalled();
+      expect(inputText()).toBe('Keep my draft');
+      expect(state.nativePdfs).toEqual([pdf]);
+      expect(showSessionActionFeedbackMock).toHaveBeenCalledWith(
+        expect.stringContaining(
+          input ? 'does not support PDF input' : 'PDF input support is unknown'
+        ),
+        'warning'
+      );
+    }
+  );
 
   it('does not attach a delayed pasted PDF after switching sessions', async () => {
     const fileReader = installControllableFileReader();
@@ -1822,6 +1853,33 @@ describe('ChatInput', () => {
       await flushAsyncWork();
 
       expect(state.nativePdfs).toEqual([]);
+    } finally {
+      fileReader.restore();
+    }
+  });
+
+  it('preserves image/PDF/image paste order when the PDF finishes first', async () => {
+    const fileReader = installControllableFileReader();
+    try {
+      setupModelState();
+      cleanup = render(() => ChatInput(), container!);
+      const editor = container!.querySelector<HTMLDivElement>('.rich-composer')!;
+      dispatchImagePaste(editor, [
+        new File(['first'], 'first.png', { type: 'image/png' }),
+        new File(['%PDF-1.7\n'], 'middle.pdf', { type: 'application/pdf' }),
+        new File(['last'], 'last.png', { type: 'image/png' }),
+      ]);
+      await flushAsyncWork();
+      fileReader.resolve('middle.pdf');
+      await flushAsyncWork();
+      fileReader.resolve('last.png');
+      fileReader.resolve('first.png');
+      await flushAsyncWork();
+      expect(state.clipboardImages).toHaveLength(2);
+      expect(state.nativePdfs).toHaveLength(1);
+      const pdfSequence = state.nativePdfs[0]!.attachmentSequence!;
+      expect(state.clipboardImages[0]!.attachmentSequence!).toBeLessThan(pdfSequence);
+      expect(state.clipboardImages[1]!.attachmentSequence!).toBeGreaterThan(pdfSequence);
     } finally {
       fileReader.restore();
     }

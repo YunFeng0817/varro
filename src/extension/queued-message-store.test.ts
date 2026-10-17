@@ -1,6 +1,7 @@
 /* oxlint-disable anti-slop/no-unknown-parameters, anti-slop/require-safety-comment-for-type-assertion -- SAFETY: The Memento fake accepts opaque persisted values so corruption handling can be tested. */
 import { describe, expect, it, vi } from 'vitest';
 import type { Persistence } from '../shared/persistence';
+import { nativePdfFixture } from '../shared/native-pdf.test-support';
 import { QueuedMessageStore } from './queued-message-store';
 
 function createPersistence() {
@@ -65,22 +66,40 @@ describe('QueuedMessageStore', () => {
     expect(new QueuedMessageStore(persistence).list()).toEqual(messages);
   });
 
-  it('restores queued native PDF data through host persistence', async () => {
+  it('restores queued native PDF bytes, context identity and mixed order through host persistence', async () => {
     const { persistence } = createPersistence();
     const messages = [
       {
         id: 'queue-pdf',
         sessionId: 'session-1',
         text: 'review',
-        droppedFiles: [],
-        clipboardImages: [],
+        droppedFiles: [
+          {
+            path: '/repo/notes.txt',
+            relativePath: 'notes.txt',
+            type: 'file' as const,
+            attachmentSequence: 3,
+          },
+        ],
+        clipboardImages: [
+          {
+            id: 'image',
+            filename: 'first.png',
+            url: 'data:image/png;base64,AA==',
+            mime: 'image/png',
+            size: 1,
+            attachmentSequence: 1,
+          },
+        ],
         nativePdfs: [
           {
-            id: 'pdf-1',
-            url: 'data:application/pdf;base64,JVBERi0xCg==',
-            mime: 'application/pdf' as const,
-            filename: 'spec.pdf',
-            size: 7,
+            ...nativePdfFixture(),
+            attachmentSequence: 2,
+            contextFile: {
+              path: '/repo/text.pdf',
+              relativePath: 'text.pdf',
+              type: 'file' as const,
+            },
           },
         ],
         terminalSelection: null,

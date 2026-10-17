@@ -205,7 +205,17 @@ Use any of these flows to add more context.
 - Type `@agent-name` to mention an available agent.
 - Type `&` to search recent root sessions and insert a stable `session:<id>` reference. Session references in the composer and rendered responses open the referenced session.
 
-Varro keeps at most five pasted images, with a maximum size of 5 MiB per image. Native PDFs can be picked, dropped, or pasted and are limited to 20 MiB in total. When the selected model does not advertise PDF input support, a picked or dropped PDF with an available file path is sent as a file reference instead of native PDF data. A pasted PDF without an available path remains visible but is not sent. In environments where other dropped items do not expose local paths, content-only drops are limited to 20 files, 10 MiB per file, and 50 MiB in total.
+Varro keeps at most five pasted images, with a maximum size of 5 MiB per image. In environments where other dropped items do not expose local paths, content-only drops are limited to 20 files, 10 MiB per file, and 50 MiB in total.
+
+### PDF attachments
+
+Native PDFs can be picked, dropped, or pasted and are limited to 20 MiB in total, with filenames of at most 512 characters. Varro checks the PDF header, base64 encoding, and declared size, not whether the document is readable, encrypted, or structurally valid.
+
+Select a model whose catalog advertises PDF input. Unsupported or unknown capability blocks sending and leaves the draft and attachment intact. There is no automatic file-reference fallback, OCR, text extraction, rasterization, or resend after a provider rejection. Remove the PDF or explicitly convert it yourself if your model cannot read it.
+
+Send PDFs as regular prompts. V2 one-shot generation and configured-command PDF routing are not supported by this verification.
+
+Advertised capability does not prove provider support. Native conversion was verified only with OpenCode 2.0.31, client 2.0.32, and a local OpenAI-compatible fixture receiver on October 16, 2026. No external provider/model combination is certified by that test. V1, older V2 releases, and separately hosted remote profiles remain unverified. See [PDF compatibility](pdf-compatibility.md) for the evidence and the upstream documentation disagreement.
 
 ### Add vision to a text-only model
 

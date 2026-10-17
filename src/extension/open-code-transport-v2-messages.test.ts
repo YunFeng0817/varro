@@ -2,6 +2,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { SessionMessageInfo } from '@opencode/client';
 import { OpenCodeTransport } from './open-code-transport';
+import { nativePdfFixture } from '../shared/native-pdf.test-support';
 
 vi.mock('./logger', () => ({ logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }));
 
@@ -130,6 +131,58 @@ describe('v2 message response budgets', () => {
         },
       ],
     });
+  });
+
+  it('preserves inline and URI-backed PDF history under tool-attachment stripping', async () => {
+    const pdf = nativePdfFixture();
+    const original = messages[1]!;
+    messages[1] = {
+      id: 'msg_pdf',
+      type: 'user',
+      text: 'Inspect attachments',
+      time: { created: 1 },
+      files: [
+        {
+          mime: pdf.mime,
+          name: pdf.filename,
+          data: pdf.url.split(',')[1]!,
+          source: { type: 'inline' },
+        },
+        {
+          mime: pdf.mime,
+          name: 'local.pdf',
+          data: '',
+          source: { type: 'uri', uri: 'file:///repo/local.pdf' },
+        },
+      ],
+    };
+    try {
+      const client = await transport();
+      const result = await client.request('GET', '/session/ses_one/message?limit=2', undefined, {
+        ...options,
+        stripToolAttachments: true,
+      });
+      expect(result).toMatchObject({
+        data: [
+          {
+            info: { id: 'msg_pdf' },
+            parts: [
+              { type: 'text', text: 'Inspect attachments' },
+              { id: 'msg_pdf:content:1', mime: pdf.mime, filename: pdf.filename, url: pdf.url },
+              {
+                id: 'msg_pdf:content:2',
+                mime: pdf.mime,
+                filename: 'local.pdf',
+                url: 'file:///repo/local.pdf',
+              },
+            ],
+          },
+          expect.anything(),
+        ],
+      });
+    } finally {
+      messages[1] = original;
+    }
   });
 
   it('still enforces the raw response limit during attachment fallback', async () => {

@@ -7,6 +7,7 @@ import { areContextFilesEqual, mergeContextFile } from '../shared/context-files'
 import { isSameWorkspacePath, normalizeWorkspaceIdentity } from '../shared/workspace-path';
 import {
   MAX_NATIVE_PDF_TOTAL_BYTES,
+  MAX_NATIVE_PDF_FILENAME_LENGTH,
   NATIVE_PDF_MIME,
   isPdfBytes,
   type NativePdfAttachment,
@@ -101,6 +102,7 @@ export class SidebarProviderContextFiles {
     if (!result || result.length === 0) return;
 
     let pdfBytes = 0;
+    let rejectedPdf = false;
     const files: Array<
       { type: 'pdf'; value: NativePdfAttachment } | { type: 'context'; value: DroppedFile }
     > = [];
@@ -109,14 +111,22 @@ export class SidebarProviderContextFiles {
         const stat = await vscode.workspace.fs.stat(uri);
         const workspaceFolder = vscode.workspace.getWorkspaceFolder(uri);
         const relativePath = getRelativePath(uri, workspaceFolder);
-        if (
-          !(stat.type & vscode.FileType.Directory) &&
-          uri.path.toLowerCase().endsWith('.pdf') &&
-          stat.size > 0 &&
-          pdfBytes + stat.size <= MAX_NATIVE_PDF_TOTAL_BYTES
-        ) {
+        if (!(stat.type & vscode.FileType.Directory) && uri.path.toLowerCase().endsWith('.pdf')) {
+          const filename = uri.path.split('/').pop() || 'document.pdf';
+          if (
+            !Number.isSafeInteger(stat.size) ||
+            stat.size <= 0 ||
+            pdfBytes + stat.size > MAX_NATIVE_PDF_TOTAL_BYTES ||
+            filename.length > MAX_NATIVE_PDF_FILENAME_LENGTH
+          ) {
+            rejectedPdf = true;
+            continue;
+          }
           const content = await vscode.workspace.fs.readFile(uri);
-          if (!isPdfBytes(content) || content.byteLength !== stat.size) continue;
+          if (!isPdfBytes(content) || content.byteLength !== stat.size) {
+            rejectedPdf = true;
+            continue;
+          }
           pdfBytes += content.byteLength;
           files.push({
             type: 'pdf',
@@ -124,7 +134,7 @@ export class SidebarProviderContextFiles {
               id: randomUUID(),
               url: `data:${NATIVE_PDF_MIME};base64,${Buffer.from(content).toString('base64')}`,
               mime: NATIVE_PDF_MIME,
-              filename: uri.path.split('/').pop() || 'document.pdf',
+              filename,
               size: content.byteLength,
               contextFile: {
                 path: uri.fsPath,
@@ -143,15 +153,40 @@ export class SidebarProviderContextFiles {
             type: stat.type & vscode.FileType.Directory ? 'directory' : 'file',
           },
         });
-      } catch {}
+      } catch {
+        if (uri.path.toLowerCase().endsWith('.pdf')) rejectedPdf = true;
+      }
     }
 
-    const valid = files.flatMap((item) => (item?.type === 'context' ? [item.value] : []));
-    const pdfs = files.flatMap((item) => (item?.type === 'pdf' ? [item.value] : []));
-    if (pdfs.length > 0 && clearGeneration === this.clearGeneration) {
-      post({ type: 'pdfs/picked', payload: pdfs });
+    // The webview assigns shared attachment sequences in arrival order.
+    // Keep adjacent items batched so ordinary selections still use one message.
+    const groups: Array<typeof files> = [];
+    for (const file of files) {
+      const previous = groups.at(-1);
+      if (previous?.[0]?.type === file.type) previous.push(file);
+      else groups.push([file]);
     }
-    await this.applyPendingFiles(valid, clearGeneration, startedAt, post);
+    for (const group of groups) {
+      if (group[0]?.type === 'pdf') {
+        if (clearGeneration === this.clearGeneration)
+          post({
+            type: 'pdfs/picked',
+            payload: group.flatMap((file) => (file.type === 'pdf' ? [file.value] : [])),
+          });
+      } else {
+        await this.applyPendingFiles(
+          group.flatMap((file) => (file.type === 'context' ? [file.value] : [])),
+          clearGeneration,
+          startedAt,
+          post
+        );
+      }
+    }
+    if (rejectedPdf && clearGeneration === this.clearGeneration) {
+      void vscode.window.showWarningMessage(
+        'Some PDFs could not be attached. PDFs need a PDF header, filenames of 512 characters or less, and a total size of 20 MiB or less.'
+      );
+    }
   }
 
   postContextFiles(post: (message: ExtensionMessage) => void) {

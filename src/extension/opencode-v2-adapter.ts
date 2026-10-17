@@ -27,6 +27,14 @@ import { parseSkillAttachment } from '../shared/skill-reference';
 import { isNativeFormAnswer, parseNativeForm } from '../shared/native-form';
 import { isSameWorkspacePath } from '../shared/workspace-path';
 import {
+  getPdfDataUrlSize,
+  getPdfInputSupport,
+  getPdfInputError,
+  MAX_NATIVE_PDF_TOTAL_BYTES,
+  MAX_NATIVE_PDF_FILENAME_LENGTH,
+  NATIVE_PDF_MIME,
+} from '../shared/native-pdf';
+import {
   MAX_SIDE_QUESTION_LENGTH,
   MAX_SIDE_QUESTION_ANSWER_LENGTH,
   MAX_SIDE_QUESTION_TURNS,
@@ -1073,6 +1081,52 @@ export class OpenCodeV2Adapter {
           const parts = Array.isArray(input.parts)
             ? input.parts.map(asRecord).filter((part) => part !== null)
             : [];
+          const pdfs = parts.filter(
+            (part) => part.type === 'file' && part.mime === NATIVE_PDF_MIME
+          );
+          if (pdfs.length) {
+            let total = 0;
+            for (const pdf of pdfs) {
+              const size = isString(pdf.url) ? getPdfDataUrlSize(pdf.url) : null;
+              if (
+                size === null ||
+                !isString(pdf.filename) ||
+                !pdf.filename.length ||
+                pdf.filename.length > MAX_NATIVE_PDF_FILENAME_LENGTH
+              )
+                throw new Error('Invalid PDF attachment. Reattach the PDF and try again.');
+              total += size;
+            }
+            if (total > MAX_NATIVE_PDF_TOTAL_BYTES)
+              throw new Error('PDFs must total 20 MiB or less.');
+            if (action === 'message' && (input.system || input.format)) {
+              throw new Error('PDF attachments are not supported by one-shot generation.');
+            }
+            if (action === 'command') {
+              // The command catalog omits model/agent overrides, including child routing.
+              throw new Error(
+                'PDF input support cannot be verified for configured commands. Send the PDF as a regular prompt with a PDF-capable model.'
+              );
+            }
+            // Admission alone is insufficient: native V2 can replace unsupported media with text.
+            // Check the location's authoritative catalog before model changes or revert commits.
+            const selected = model ?? (await data<SessionInfo>('GET', endpoint)).model;
+            const catalog = await data<ModelInfo[]>('GET', query('/api/model', true)).catch(
+              (cause: unknown) => {
+                throw new Error(
+                  'Cannot verify PDF input support from the backend model catalog. No PDF was submitted. Refresh the catalog or choose another model.',
+                  { cause }
+                );
+              }
+            );
+            const resolved = selected
+              ? (Array.isArray(catalog) ? catalog : []).find(
+                  (entry) => entry.providerID === selected.providerID && entry.id === selected.id
+                )
+              : await data<ModelInfo | null>('GET', query('/api/model/default', true));
+            const error = getPdfInputError(getPdfInputSupport(resolved?.capabilities?.input));
+            if (error) throw new Error(error);
+          }
           const textParts = parts
             .filter((part) => part.type === 'text')
             .map((part) => part.text ?? '');

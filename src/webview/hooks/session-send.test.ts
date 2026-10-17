@@ -907,7 +907,7 @@ describe('session-send helpers', () => {
     ]);
   });
 
-  it('sends PDFs in attachment order regardless of advertised PDF input', () => {
+  it('sends PDF bytes in attachment order and rejects unadvertised input without a path fallback', () => {
     const pdf = {
       id: 'pdf-1',
       url: 'data:application/pdf;base64,JVBERi0xCg==',
@@ -922,7 +922,7 @@ describe('session-send helpers', () => {
         id: 'pdf-model',
         name: 'PDF Model',
         capabilities: {
-          input: { text: true, audio: false, image: false, video: false, pdf: true },
+          input: { text: true, audio: false, image: true, video: false, pdf: true },
         },
         cost: { input: 0, output: 0 },
       },
@@ -937,6 +937,16 @@ describe('session-send helpers', () => {
         droppedFiles: [
           { path: '/repo/a.ts', relativePath: 'a.ts', type: 'file', attachmentSequence: 1 },
         ],
+        clipboardImages: [
+          {
+            id: 'mixed-image',
+            filename: 'first.png',
+            mime: 'image/png',
+            url: 'data:image/png;base64,AA==',
+            size: 1,
+            attachmentSequence: 0,
+          },
+        ],
       }),
       'session-1',
       'Review',
@@ -944,23 +954,22 @@ describe('session-send helpers', () => {
     );
     expect(supported?.body.parts).toEqual([
       { type: 'text', text: 'Review' },
+      { type: 'file', mime: 'image/png', filename: 'first.png', url: 'data:image/png;base64,AA==' },
       { type: 'text', text: '[Attached file: /repo/a.ts]' },
       { type: 'file', mime: 'application/pdf', filename: 'spec.pdf', url: pdf.url },
     ]);
 
-    const unsupported = buildSessionSendBody(
-      createState({
-        editorContext: createEditorContext({ workspacePath: null }),
-        nativePdfs: [pdf],
-      }),
-      'session-1',
-      'Review',
-      () => false
-    );
-    expect(unsupported?.body.parts).toEqual([
-      { type: 'text', text: 'Review' },
-      { type: 'text', text: '[Attached file: /repo/spec.pdf]' },
-    ]);
+    expect(() =>
+      buildSessionSendBody(
+        createState({
+          editorContext: createEditorContext({ workspacePath: null }),
+          nativePdfs: [pdf],
+        }),
+        'session-1',
+        'Review',
+        () => false
+      )
+    ).toThrow('PDF input support is unknown');
 
     const supportedAgain = buildSessionSendBody(
       createState({

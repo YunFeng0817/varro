@@ -7,8 +7,38 @@ import { projectV2Message } from './opencode-v2-projection';
 import { parseServerEvent } from '../shared/protocol';
 import { parseSkillAttachment } from '../shared/skill-reference';
 import { asRecord } from '../shared/type-utils';
+import { nativePdfFixture } from '../shared/native-pdf.test-support';
 
 vi.mock('./logger', () => ({ logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }));
+
+describe('V2 PDF transcript restoration', () => {
+  it('keeps media order, MIME, filename, bytes and part identity on repeated projection', () => {
+    const pdf = nativePdfFixture();
+    const message: SessionMessageInfo = {
+      id: 'msg_pdf',
+      type: 'user',
+      text: 'Inspect',
+      time: { created: 1 },
+      files: [
+        { mime: 'image/png', name: 'first.png', data: 'AA==', source: { type: 'inline' } },
+        {
+          mime: pdf.mime,
+          name: pdf.filename,
+          data: pdf.url.split(',')[1]!,
+          source: { type: 'inline' },
+        },
+        { mime: 'text/plain', name: 'last.txt', data: 'bGFzdA==', source: { type: 'inline' } },
+      ],
+    };
+    const projected = projectV2Message(message, 'ses_pdf');
+    expect(projected.parts.slice(1)).toMatchObject([
+      { id: 'msg_pdf:content:1', filename: 'first.png', mime: 'image/png' },
+      { id: 'msg_pdf:content:2', filename: pdf.filename, mime: pdf.mime, url: pdf.url },
+      { id: 'msg_pdf:content:3', filename: 'last.txt', mime: 'text/plain' },
+    ]);
+    expect(projectV2Message(message, 'ses_pdf')).toEqual(projected);
+  });
+});
 
 describe('V2 transcript deletion', () => {
   const user: SessionMessageInfo = {

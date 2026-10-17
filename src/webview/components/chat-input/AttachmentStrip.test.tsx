@@ -327,7 +327,7 @@ describe('AttachmentStrip', () => {
     ]);
   });
 
-  it('switches PDF chips between native and normal file presentation', () => {
+  it('keeps the PDF label and explains unadvertised input without disguising it as a text file', () => {
     const onOpenFile = vi.fn();
     renderAttachmentStrip({
       files: [createDroppedFile({ attachmentSequence: 2 })],
@@ -351,9 +351,10 @@ describe('AttachmentStrip', () => {
       'example.ts',
     ]);
     expect(getChip('spec.pdf')?.getAttribute('data-disabled')).toBe('false');
-    expect(getChip('spec.pdf')?.getAttribute('data-title')).toBe('spec.pdf');
-    expect(getChip('spec.pdf')?.getAttribute('data-detail')).toBe('');
-    expect(getChip('spec.pdf')?.getAttribute('data-icon')).toBe('file');
+    expect(getChip('spec.pdf')?.getAttribute('data-title')).toContain(
+      'PDF input is not advertised'
+    );
+    expect(getChip('spec.pdf')?.getAttribute('data-detail')).toBe('PDF');
     expect(getChip('spec.pdf')?.getAttribute('data-path')).toBe('spec.pdf');
     getChip('spec.pdf')?.querySelector<HTMLButtonElement>('.attachment-chip-mock-click')?.click();
     expect(onOpenFile).toHaveBeenCalledWith({

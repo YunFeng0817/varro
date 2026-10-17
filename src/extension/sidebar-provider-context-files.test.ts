@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const vscodeMock = vi.hoisted(() => ({
   window: {
     showOpenDialog: vi.fn(),
+    showWarningMessage: vi.fn(),
   },
   workspace: {
     fs: {
@@ -21,6 +22,7 @@ vi.mock('vscode', () => vscodeMock);
 
 import type { DroppedFile, ExtensionMessage } from '../shared/protocol';
 import { SidebarProviderContextFiles } from './sidebar-provider-context-files';
+import { MAX_NATIVE_PDF_TOTAL_BYTES } from '../shared/native-pdf';
 
 type DroppedFilesServiceLike = {
   fromContent: ReturnType<typeof vi.fn>;
@@ -144,6 +146,79 @@ describe('SidebarProviderContextFiles', () => {
       ],
     });
     expect(service.getContextFiles()).toEqual([]);
+  });
+
+  it.each([0, MAX_NATIVE_PDF_TOTAL_BYTES + 1])(
+    'rejects PDF size %i without reading or using a path fallback',
+    async (size) => {
+      const { service, post } = createService();
+      vscodeMock.window.showOpenDialog.mockResolvedValue([
+        { path: '/repo/large.pdf', fsPath: '/repo/large.pdf' },
+      ]);
+      vscodeMock.workspace.fs.stat.mockResolvedValue({ type: 1, size });
+      await service.pickFiles(post);
+      expect(vscodeMock.workspace.fs.readFile).not.toHaveBeenCalled();
+      expect(post).not.toHaveBeenCalled();
+      expect(service.getContextFiles()).toEqual([]);
+      expect(vscodeMock.window.showWarningMessage).toHaveBeenCalledOnce();
+    }
+  );
+
+  it('rejects invalid headers and long PDF filenames with visible feedback', async () => {
+    const { service, post } = createService();
+    vscodeMock.window.showOpenDialog.mockResolvedValue(
+      ['bad.pdf', `${'a'.repeat(513)}.pdf`].map((name) => ({
+        path: `/repo/${name}`,
+        fsPath: `/repo/${name}`,
+      }))
+    );
+    vscodeMock.workspace.fs.stat.mockResolvedValue({ type: 1, size: 7 });
+    vscodeMock.workspace.fs.readFile.mockResolvedValue(new TextEncoder().encode('not PDF'));
+    await service.pickFiles(post);
+    expect(post).not.toHaveBeenCalled();
+    expect(vscodeMock.workspace.fs.readFile).toHaveBeenCalledOnce();
+    expect(vscodeMock.window.showWarningMessage).toHaveBeenCalledOnce();
+  });
+
+  it('keeps adjacent picker files batched', async () => {
+    const { service, post } = createService();
+    vscodeMock.window.showOpenDialog.mockResolvedValue(
+      ['a.txt', 'b.txt', 'first.pdf', 'second.pdf'].map((name) => ({
+        path: `/repo/${name}`,
+        fsPath: `/repo/${name}`,
+      }))
+    );
+    vscodeMock.workspace.fs.stat.mockResolvedValue({ type: 1, size: 7 });
+    vscodeMock.workspace.fs.readFile.mockResolvedValue(new TextEncoder().encode('%PDF-1\n'));
+    await service.pickFiles(post);
+    expect(
+      post.mock.calls.map(([message]) => [
+        message.type,
+        'payload' in message && Array.isArray(message.payload) ? message.payload.length : 0,
+      ])
+    ).toEqual([
+      ['files/dropped', 2],
+      ['pdfs/picked', 2],
+    ]);
+  });
+
+  it('posts mixed picker selections in their original order', async () => {
+    const { service, post } = createService();
+    vscodeMock.window.showOpenDialog.mockResolvedValue(
+      ['a.txt', 'first.pdf', 'b.txt', 'second.pdf'].map((name) => ({
+        path: `/repo/${name}`,
+        fsPath: `/repo/${name}`,
+      }))
+    );
+    vscodeMock.workspace.fs.stat.mockResolvedValue({ type: 1, size: 7 });
+    vscodeMock.workspace.fs.readFile.mockResolvedValue(new TextEncoder().encode('%PDF-1\n'));
+    await service.pickFiles(post);
+    expect(post.mock.calls.map(([message]) => message.type)).toEqual([
+      'files/dropped',
+      'pdfs/picked',
+      'files/dropped',
+      'pdfs/picked',
+    ]);
   });
 
   it('does not restore an async content drop after context is cleared', async () => {

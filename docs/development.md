@@ -357,7 +357,7 @@ When sending a prompt, the webview builds message parts in roughly this order:
 3. Active file or active selection reference, when current-document context is enabled for the session
 4. Terminal selection block
 5. Explicitly attached diagnostics
-6. Explicit files and folders, clipboard images, and native PDFs in their attachment order, subject to model capabilities; unsupported path-backed PDFs use text references
+6. Explicit files and folders, clipboard images, and native PDFs in their attachment order, subject to model capabilities. Unsupported or unknown PDF input blocks sending without a file-reference fallback; V2 verifies the native model catalog before admission. See [PDF compatibility](pdf-compatibility.md).
 
 ## Session Behavior
 

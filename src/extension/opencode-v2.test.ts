@@ -23,6 +23,7 @@ import { parseServerEvent } from '../shared/protocol';
 import { parseHealthResponse } from '../shared/health';
 import { normalizeRecycleBinSession } from '../shared/recycle-bin';
 import { formatSkillAttachment } from '../shared/skill-reference';
+import { nativePdfFixture } from '../shared/native-pdf.test-support';
 
 vi.mock('./logger', () => ({ logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }));
 afterEach(() => vi.unstubAllGlobals());
@@ -179,6 +180,140 @@ describe('v2 Windows location paths', () => {
 });
 
 describe('v2 prompt delivery', () => {
+  it.each(['steer', 'queue'])(
+    'preserves exact PDF bytes and media order with %s delivery',
+    async (delivery) => {
+      const pdf = nativePdfFixture();
+      const wire = vi.fn<ConstructorParameters<typeof OpenCodeV2Adapter>[0]>(
+        async (_method, path) => ({
+          data: path.startsWith('/api/model?')
+            ? [{ providerID: 'fixture', id: 'pdf', capabilities: { input: ['text', 'pdf'] } }]
+            : { id: 'ses_pdf' },
+        })
+      );
+      await new OpenCodeV2Adapter(wire).request(
+        'POST',
+        '/session/ses_pdf/prompt_async',
+        {
+          model: { providerID: 'fixture', modelID: 'pdf' },
+          delivery,
+          parts: [
+            { type: 'text', text: 'Inspect the attachment.' },
+            {
+              type: 'file',
+              mime: 'image/png',
+              filename: 'first.png',
+              url: 'data:image/png;base64,AA==',
+            },
+            { type: 'file', mime: pdf.mime, filename: pdf.filename, url: pdf.url },
+            {
+              type: 'file',
+              mime: 'text/plain',
+              filename: 'last.txt',
+              url: 'data:text/plain;base64,bGFzdA==',
+            },
+          ],
+        },
+        { directory: '/repo' }
+      );
+      expect(wire).toHaveBeenLastCalledWith(
+        'POST',
+        '/api/session/ses_pdf/prompt',
+        expect.objectContaining({
+          delivery,
+          files: [
+            { uri: 'data:image/png;base64,AA==', name: 'first.png' },
+            { uri: pdf.url, name: pdf.filename },
+            { uri: 'data:text/plain;base64,bGFzdA==', name: 'last.txt' },
+          ],
+        }),
+        expect.anything()
+      );
+    }
+  );
+
+  it.each([undefined, ['text']])(
+    'rejects PDF input before any mutation when native capability is %j',
+    async (input) => {
+      const pdf = nativePdfFixture();
+      const wire = vi.fn<ConstructorParameters<typeof OpenCodeV2Adapter>[0]>(async () => ({
+        data: [{ providerID: 'fixture', id: 'pdf', capabilities: { input } }],
+      }));
+      const adapter = new OpenCodeV2Adapter(wire);
+      await expect(
+        adapter.request('POST', '/session/ses_pdf/prompt_async', {
+          model: { providerID: 'fixture', modelID: 'pdf' },
+          parts: [{ type: 'file', mime: pdf.mime, filename: pdf.filename, url: pdf.url }],
+        })
+      ).rejects.toThrow(input ? 'does not support PDF input' : 'PDF input support is unknown');
+      expect(wire.mock.calls.every(([method]) => method === 'GET')).toBe(true);
+    }
+  );
+
+  it('does not replay an admitted PDF after a provider rejection', async () => {
+    const pdf = nativePdfFixture();
+    const wire = vi.fn<ConstructorParameters<typeof OpenCodeV2Adapter>[0]>(async (method, path) => {
+      if (method === 'GET' && path === '/api/model')
+        return { data: [{ providerID: 'fixture', id: 'pdf', capabilities: { input: ['pdf'] } }] };
+      if (path.endsWith('/wait')) throw new Error('Provider rejected PDF');
+      return { data: { id: 'ses_pdf' } };
+    });
+    await expect(
+      new OpenCodeV2Adapter(wire).request('POST', '/session/ses_pdf/prompt', {
+        model: { providerID: 'fixture', modelID: 'pdf' },
+        parts: [{ type: 'file', mime: pdf.mime, filename: pdf.filename, url: pdf.url }],
+      })
+    ).rejects.toThrow('Provider rejected PDF');
+    expect(
+      wire.mock.calls.filter(([, path]) => path === '/api/session/ses_pdf/prompt')
+    ).toHaveLength(1);
+  });
+
+  it('rejects malformed PDF bytes, one-shot media and unverified command routing without mutations', async () => {
+    const pdf = nativePdfFixture();
+    const wire = vi.fn();
+    const adapter = new OpenCodeV2Adapter(wire);
+    await expect(
+      adapter.request('POST', '/session/ses_pdf/prompt_async', {
+        parts: [
+          {
+            type: 'file',
+            mime: pdf.mime,
+            filename: pdf.filename,
+            url: 'data:application/pdf;base64,bm90IGEgcGRm',
+          },
+        ],
+      })
+    ).rejects.toThrow('Invalid PDF');
+    await expect(
+      adapter.request('POST', '/session/ses_pdf/message', {
+        system: 'Reply briefly',
+        parts: [{ type: 'file', mime: pdf.mime, filename: pdf.filename, url: pdf.url }],
+      })
+    ).rejects.toThrow('one-shot generation');
+    await expect(
+      adapter.request('POST', '/session/ses_pdf/command', {
+        command: 'review',
+        parts: [{ type: 'file', mime: pdf.mime, filename: pdf.filename, url: pdf.url }],
+      })
+    ).rejects.toThrow('cannot be verified for configured commands');
+    expect(wire).not.toHaveBeenCalled();
+  });
+
+  it('reports unavailable backend PDF capability without submitting or mutating the session', async () => {
+    const pdf = nativePdfFixture();
+    const wire = vi.fn<ConstructorParameters<typeof OpenCodeV2Adapter>[0]>(async () => {
+      throw new Error('404 native catalog unavailable');
+    });
+    await expect(
+      new OpenCodeV2Adapter(wire).request('POST', '/session/ses_pdf/prompt_async', {
+        model: { providerID: 'fixture', modelID: 'pdf' },
+        parts: [{ type: 'file', mime: pdf.mime, filename: pdf.filename, url: pdf.url }],
+      })
+    ).rejects.toThrow('Cannot verify PDF input support from the backend model catalog');
+    expect(wire.mock.calls.every(([method]) => method === 'GET')).toBe(true);
+  });
+
   it.each(['steer', 'queue'])(
     'sends selected skills as native attachments with %s delivery',
     async (delivery) => {

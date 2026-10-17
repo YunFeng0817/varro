@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { spawn, execFile, execFileSync } from 'node:child_process';
 import { once } from 'node:events';
 import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
@@ -8,6 +8,7 @@ import http from 'node:http';
 import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import test from 'node:test';
+import { build } from 'esbuild';
 import { AiOpenCodeClient } from './ai-opencode-client.mjs';
 import { requireIsolatedTestServer } from './ai-test-isolation.mjs';
 import { CdpController } from './ai-fuzzy-live.mjs';
@@ -15,6 +16,9 @@ import { cleanupOwnedHost } from './ai-streaming.mjs';
 import { reloadVscodeWindow } from './vscode-launch-process.mjs';
 
 const binary = process.env.VARRO_OPENCODE_TEST_BINARY;
+function pdfTransportHash(value) {
+  return createHash('sha256').update(value).digest('hex');
+}
 test(
   'AI controller lifecycle against an isolated released backend',
   { skip: !binary, timeout: 90000 },
@@ -46,9 +50,20 @@ test(
       else process.env.OPENCODE_SERVER_PASSWORD = previousPassword;
     });
     let generationCount = 0;
+    const pdfRequests = [];
     const model = http.createServer(async (request, response) => {
-      await Array.fromAsync(request);
+      const body = JSON.parse(Buffer.concat(await Array.fromAsync(request)).toString());
       generationCount += 1;
+      if (body.model?.startsWith('fixture-pdf')) pdfRequests.push(body);
+      if (body.model === 'fixture-pdf-error') {
+        response.writeHead(400, { 'content-type': 'application/json' });
+        response.end(
+          JSON.stringify({
+            error: { message: 'Fixture provider rejected PDF', type: 'invalid_request_error' },
+          })
+        );
+        return;
+      }
       response.writeHead(200, { 'content-type': 'text/event-stream' });
       for (const content of ['AI-CONTROLLER ', 'VERIFIED']) {
         response.write(
@@ -72,7 +87,23 @@ test(
               fixture: {
                 package: '@opencode/ai/providers/openai-compatible',
                 settings: { baseURL, apiKey: 'fixture-only' },
-                models: { fixture: { name: 'Fixture', limit: { context: 32000, output: 1000 } } },
+                models: {
+                  fixture: { name: 'Fixture', limit: { context: 32000, output: 1000 } },
+                  ...Object.fromEntries(
+                    ['fixture-pdf', 'fixture-pdf-error'].map((id) => [
+                      id,
+                      {
+                        name: id,
+                        capabilities: {
+                          input: ['text', 'image', 'pdf'],
+                          output: ['text'],
+                          tools: false,
+                        },
+                        limit: { context: 32000, output: 1000 },
+                      },
+                    ])
+                  ),
+                },
               },
             },
           }
@@ -164,6 +195,168 @@ test(
         JSON.stringify(messages)
       );
       assert.ok(generationCount > 0);
+      if (major === 2) {
+        const { outputFiles } = await build({
+          entryPoints: ['src/shared/native-pdf.test-support.ts'],
+          bundle: true,
+          platform: 'node',
+          format: 'esm',
+          write: false,
+        });
+        const { nativePdfFixture } = await import(
+          `data:text/javascript;base64,${Buffer.from(outputFiles[0].text).toString('base64')}`
+        );
+        const evidence = {
+          date: new Date().toISOString(),
+          server: version,
+          client: JSON.parse(await readFile('node_modules/@opencode/client/package.json', 'utf8'))
+            .version,
+          provider: '@opencode/ai/providers/openai-compatible',
+          model: 'fixture-pdf',
+          isolation,
+          cases: [],
+        };
+        for (const kind of ['text', 'image']) {
+          await t.test(`PDF ${kind} bytes reach the local fixture provider`, async () => {
+            const pdf = nativePdfFixture(kind);
+            const next = await client.request('POST', '/session', {
+              title: `${title} PDF ${kind}`,
+            });
+            sessions.push(next.id);
+            const previous = pdfRequests.length;
+            await client.request('POST', `/session/${next.id}/prompt`, {
+              model: { providerID: 'fixture', modelID: 'fixture-pdf' },
+              parts: [
+                { type: 'text', text: 'Inspect the attachment without using tools.' },
+                { type: 'file', mime: pdf.mime, filename: pdf.filename, url: pdf.url },
+              ],
+            });
+            assert.equal(pdfRequests.length, previous + 1);
+            const media = pdfRequests
+              .at(-1)
+              .messages.flatMap((message) =>
+                Array.isArray(message.content) ? message.content : []
+              )
+              .filter((part) => part.type === 'file');
+            assert.equal(media.length, 1);
+            assert.equal(media[0].file.filename, pdf.filename);
+            assert.equal(
+              pdfTransportHash(media[0].file.file_data),
+              pdfTransportHash(pdf.url),
+              'Provider must receive the original PDF bytes'
+            );
+            const restored = await new AiOpenCodeClient(url, workspace).request(
+              'GET',
+              `/session/${next.id}/message?limit=100`
+            );
+            const file = restored
+              .flatMap((message) => message.parts)
+              .find((part) => part.type === 'file');
+            assert.equal(file.mime, pdf.mime);
+            assert.equal(file.filename, pdf.filename);
+            assert.equal(pdfTransportHash(file.url), pdfTransportHash(pdf.url));
+            evidence.cases.push({
+              kind,
+              status: 'PASS',
+              representation: 'file.file_data data URL',
+              size: pdf.size,
+              sha256: createHash('sha256')
+                .update(Buffer.from(pdf.url.split(',')[1], 'base64'))
+                .digest('hex'),
+              modelReceipt: 'Not tested: fixture HTTP receiver only',
+            });
+          });
+        }
+        await t.test(
+          'pending PDF reload retains identity and bytes without generation',
+          async () => {
+            const pdf = nativePdfFixture();
+            const next = await client.request('POST', '/session', { title: `${title} PDF inbox` });
+            sessions.push(next.id);
+            const previous = pdfRequests.length;
+            await client.request('POST', `/session/${next.id}/prompt_async`, {
+              model: { providerID: 'fixture', modelID: 'fixture-pdf' },
+              noReply: true,
+              delivery: 'queue',
+              parts: [{ type: 'file', mime: pdf.mime, filename: pdf.filename, url: pdf.url }],
+            });
+            const reopened = new AiOpenCodeClient(url, workspace);
+            const history = await reopened.request('GET', `/session/${next.id}/message?limit=100`);
+            const pending = history.find((message) => message.info.pendingDelivery === 'queue');
+            assert.ok(pending);
+            const file = pending.parts.find((part) => part.type === 'file');
+            assert.equal(file.filename, pdf.filename);
+            assert.equal(pdfTransportHash(file.url), pdfTransportHash(pdf.url));
+            assert.equal(pdfRequests.length, previous);
+            const again = await reopened.request('GET', `/session/${next.id}/message?limit=100`);
+            assert.equal(
+              pdfTransportHash(JSON.stringify(again)),
+              pdfTransportHash(JSON.stringify(history))
+            );
+            evidence.cases.push({ kind: 'pending reload', status: 'PASS', generationCount: 0 });
+          }
+        );
+        await t.test('unsupported PDF input fails before admission', async () => {
+          const pdf = nativePdfFixture();
+          const next = await client.request('POST', '/session', {
+            title: `${title} PDF unsupported`,
+          });
+          sessions.push(next.id);
+          const previous = generationCount;
+          await assert.rejects(
+            client.request('POST', `/session/${next.id}/prompt_async`, {
+              model: { providerID: 'fixture', modelID: 'fixture' },
+              parts: [{ type: 'file', mime: pdf.mime, filename: pdf.filename, url: pdf.url }],
+            }),
+            /does not support PDF input/
+          );
+          assert.deepEqual(
+            await client.request('GET', `/session/${next.id}/message?limit=100`),
+            []
+          );
+          assert.equal(generationCount, previous);
+          evidence.cases.push({ kind: 'unsupported', status: 'PASS', admission: false });
+        });
+        await t.test('provider rejection retains history and never resends the PDF', async () => {
+          const pdf = nativePdfFixture();
+          const next = await client.request('POST', '/session', {
+            title: `${title} PDF rejection`,
+          });
+          sessions.push(next.id);
+          const previous = pdfRequests.length;
+          await client.request('POST', `/session/${next.id}/prompt`, {
+            model: { providerID: 'fixture', modelID: 'fixture-pdf-error' },
+            parts: [{ type: 'file', mime: pdf.mime, filename: pdf.filename, url: pdf.url }],
+          });
+          const history = await client.request('GET', `/session/${next.id}/message?limit=100`);
+          assert.equal(pdfRequests.length, previous + 1);
+          assert.equal(
+            history.filter(
+              (message) =>
+                message.info.role === 'user' && message.parts.some((part) => part.type === 'file')
+            ).length,
+            1
+          );
+          assert.ok(
+            history.some(
+              (message) =>
+                message.info.error &&
+                JSON.stringify(message.info.error).includes('Fixture provider rejected PDF')
+            )
+          );
+          evidence.cases.push({
+            kind: 'provider rejection',
+            status: 'PASS',
+            admission: true,
+            providerRequests: 1,
+          });
+        });
+        await writeFile(
+          path.join(root, 'pdf-compatibility.json'),
+          JSON.stringify(evidence, null, 2)
+        );
+        t.diagnostic(`PDF fixture-provider evidence: ${root}/pdf-compatibility.json`);
+      }
       if (process.env.VARRO_AI_TEST_EDITOR === '1') {
         const { stdout } = await promisify(execFile)(
           process.execPath,

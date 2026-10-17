@@ -324,7 +324,7 @@ Typical part sequence:
 3. active file or active selection marker, if current-document context is enabled for the session
 4. terminal selection block
 5. explicitly attached diagnostics
-6. explicit context files and folders, pasted images, and native PDFs in attachment order; unsupported path-backed PDFs become text references, images require vision support, and native PDFs require PDF support
+6. explicit context files and folders, pasted images, and native PDFs in attachment order; images require vision support, while unsupported or unknown PDF input blocks sending without a path-reference fallback. V2 also checks the native model catalog before PDF admission. See [PDF compatibility](pdf-compatibility.md).
 
 This is where Varro turns live VS Code context into OpenCode-compatible prompt parts.
 

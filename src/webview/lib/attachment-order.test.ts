@@ -11,7 +11,9 @@ import {
   resetAttachmentOrderState,
   seedClipboardImageAttachmentSequences,
   seedContextFileAttachmentSequences,
+  seedNativePdfAttachmentSequences,
 } from './attachment-order';
+import { nativePdfFixture } from '../../shared/native-pdf.test-support';
 
 describe('attachment order state', () => {
   beforeEach(() => {
@@ -82,5 +84,26 @@ describe('attachment order state', () => {
     expect(getClipboardImageAttachmentSequence('image-a')).toBeUndefined();
     expect(getNativePdfAttachmentSequence('pdf-a')).toBeUndefined();
     expect(ensureClipboardImageAttachmentSequence('image-b')).toBe(1);
+  });
+
+  it('restores mixed queued attachment sequences without changing identity or order', () => {
+    seedNativePdfAttachmentSequences([{ ...nativePdfFixture(), attachmentSequence: 2 }]);
+    seedClipboardImageAttachmentSequences([
+      {
+        id: 'image',
+        url: 'data:image/png;base64,AA==',
+        mime: 'image/png',
+        filename: 'image.png',
+        size: 1,
+        attachmentSequence: 1,
+      },
+    ]);
+    seedContextFileAttachmentSequences([
+      { path: '/repo/notes.txt', relativePath: 'notes.txt', type: 'file', attachmentSequence: 3 },
+    ]);
+    expect(getClipboardImageAttachmentSequence('image')).toBe(1);
+    expect(getNativePdfAttachmentSequence('pdf-text')).toBe(2);
+    expect(getContextFileAttachmentSequence('/repo/notes.txt')).toBe(3);
+    expect(ensureNativePdfAttachmentSequence('next')).toBe(4);
   });
 });

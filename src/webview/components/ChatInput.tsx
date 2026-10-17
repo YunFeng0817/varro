@@ -185,6 +185,7 @@ import {
 import { getPromptTextForClipboardImages } from '../lib/clipboard-images';
 import {
   modelSupportsPdf,
+  modelPdfInputSupport,
   modelSupportsTools,
   modelSupportsVision,
 } from '../lib/model-capabilities';
@@ -193,6 +194,7 @@ import {
   getClipboardImageAttachmentSequence,
   getContextFileAttachmentSequence,
   getNativePdfAttachmentSequence,
+  reserveAttachmentSequence,
 } from '../lib/attachment-order';
 import { getLeafPathName, isSamePath } from '../lib/path-display';
 import { splitExternalLinkText } from '../lib/external-link';
@@ -271,7 +273,13 @@ import {
   MAX_DROPPED_CONTENT_FILE_BYTES,
   MAX_DROPPED_CONTENT_TOTAL_BYTES,
 } from '../../shared/dropped-content-policy';
-import { MAX_NATIVE_PDF_TOTAL_BYTES, NATIVE_PDF_MIME, isPdfBytes } from '../../shared/native-pdf';
+import {
+  MAX_NATIVE_PDF_TOTAL_BYTES,
+  MAX_NATIVE_PDF_FILENAME_LENGTH,
+  NATIVE_PDF_MIME,
+  getPdfInputError,
+  isPdfBytes,
+} from '../../shared/native-pdf';
 import {
   getSafeUsageLimitAction,
   getUsageLimitPresentation,
@@ -592,7 +600,7 @@ function requestAbortSession() {
   void abortSession().catch(() => {});
 }
 
-type StagedPastedImage = { url: string; mime: string; size: number };
+type StagedPastedImage = { url: string; mime: string; size: number; attachmentSequence?: number };
 type PastedImageRejection = 'duplicate' | 'limit' | 'oversized' | 'unreadable';
 const PASTED_IMAGE_DECODE_CONCURRENCY = 2;
 const PASTED_IMAGE_READ_TIMEOUT_MS = 10_000;
@@ -615,6 +623,7 @@ type PasteTransaction = {
   images: Array<StagedPastedImage | null> | undefined;
   imageRejections: Set<PastedImageRejection>;
   imageFiles: File[];
+  imageSequences: Map<File, number>;
   imageWorkStarted: boolean;
   mentions: Awaited<ReturnType<typeof resolvePastedMentionContextFiles>> | undefined;
 };
@@ -962,24 +971,32 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     requestWorkspaceSelection(activeWorkspacePath);
   });
 
-  async function attachNativePdfFiles(files: File[]) {
+  async function attachNativePdfFiles(files: File[], sequences?: ReadonlyMap<File, number>) {
     const ownerSessionId = composerSessionId();
     const ownerEpoch = pdfAttachmentEpoch;
     const ownsComposer = () =>
       !composerDisposed &&
       composerSessionId() === ownerSessionId &&
       pdfAttachmentEpoch === ownerEpoch;
+    const fileSequences =
+      sequences ?? new Map(files.map((file) => [file, reserveAttachmentSequence()]));
     let remaining =
       MAX_NATIVE_PDF_TOTAL_BYTES - state.nativePdfs.reduce((total, pdf) => total + pdf.size, 0);
     let rejected = false;
     for (const file of files) {
-      if (!Number.isSafeInteger(file.size) || file.size <= 0 || file.size > remaining) {
+      if (
+        !Number.isSafeInteger(file.size) ||
+        file.size <= 0 ||
+        file.size > remaining ||
+        file.name.length > MAX_NATIVE_PDF_FILENAME_LENGTH
+      ) {
         rejected = true;
         continue;
       }
       try {
         const content = await readPdfFile(file);
         if (!ownsComposer()) return;
+        if (content.size !== file.size) throw new Error('PDF size changed while reading');
         const id = createAttachmentID();
         // SAFETY: The surrounding shape or discriminator check establishes the File contract used below.
         const path = (file as File & { path?: string }).path;
@@ -989,6 +1006,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
           mime: NATIVE_PDF_MIME,
           filename: file.name || 'document.pdf',
           size: content.size,
+          attachmentSequence: fileSequences.get(file),
           contextFile: path
             ? { path, relativePath: file.name || path, type: 'file' as const }
             : undefined,
@@ -1014,7 +1032,10 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       }
     }
     if (rejected) {
-      showSessionActionFeedback('PDFs must be valid and total 20 MiB or less', 'warning');
+      showSessionActionFeedback(
+        'PDFs need a PDF header, filenames of 512 characters or less, and a total size of 20 MiB or less',
+        'warning'
+      );
     }
   }
 
@@ -4613,6 +4634,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
             url,
             mime: file.type || 'image/png',
             size: file.size,
+            attachmentSequence: transaction.imageSequences.get(file),
           };
         } catch (err) {
           logError('chat-input:readPastedImage', err);
@@ -4643,14 +4665,22 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     const imageItems = Array.from(clipboardData.items).filter(
       (item) => item.kind === 'file' && item.type.startsWith('image/')
     );
+    const itemSequences = new Map<DataTransferItem, number>();
+    const pdfSequences = new Map<File, number>();
     const pdfFiles = Array.from(clipboardData.items).flatMap((item) => {
       if (item.kind !== 'file') return [];
       const file = item.getAsFile();
-      return file && isPdfFile(file) ? [file] : [];
+      if (!file || (!item.type.startsWith('image/') && !isPdfFile(file))) return [];
+      // Reserve before asynchronous reads so decode completion cannot reorder mixed media.
+      const sequence = reserveAttachmentSequence();
+      itemSequences.set(item, sequence);
+      if (!isPdfFile(file)) return [];
+      pdfSequences.set(file, sequence);
+      return [file];
     });
     if (pdfFiles.length > 0) {
       if (!pastedText) e.preventDefault();
-      void attachNativePdfFiles(pdfFiles);
+      void attachNativePdfFiles(pdfFiles, pdfSequences);
     }
     if (
       imageItems.length === 0 &&
@@ -4706,6 +4736,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       images: undefined,
       imageRejections: new Set(),
       imageFiles: [],
+      imageSequences: new Map(),
       imageWorkStarted: false,
       mentions: undefined,
     };
@@ -4732,6 +4763,8 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
         continue;
       }
       imageFiles.push(file);
+      const sequence = itemSequences.get(item);
+      if (sequence !== undefined) transaction.imageSequences.set(file, sequence);
       pendingPasteImageBytes += file.size;
     }
     transaction.imageFiles = imageFiles;
@@ -5352,8 +5385,13 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     );
   }
 
-  const hasPendingPdfFallback = () =>
-    !currentModelSupportsPdf() && state.nativePdfs.some((pdf) => !pdf.contextFile);
+  const pdfSendError = () => {
+    if (state.nativePdfs.length === 0) return null;
+    const current = currentModel();
+    return getPdfInputError(
+      modelPdfInputSupport(current.providerID, current.modelID, state.providers)
+    );
+  };
 
   function hasSendableClipboardImages() {
     return state.clipboardImages.length > 0 && currentPromptCanHandleImages();
@@ -5436,7 +5474,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
         isPauseSlashCommand(inputText()) ||
         (!state.workspaceCatalogReloadPending &&
           !pendingWorkspacePath() &&
-          !hasPendingPdfFallback() &&
+          !pdfSendError() &&
           pendingTableCount() === 0 &&
           !pendingProblems() &&
           !hasPendingDelegatedImages() &&
@@ -5467,7 +5505,8 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     }
     const pendingWorkspace = pendingWorkspacePath();
     if (pendingWorkspace) return `Waiting for the workspace to switch to ${pendingWorkspace}`;
-    if (hasPendingPdfFallback()) return 'Preparing attachments: storing PDFs';
+    const pdfError = pdfSendError();
+    if (pdfError) return pdfError;
     if (hasPendingDelegatedImages()) {
       return 'Preparing attachments: storing images for vision delegation';
     }
@@ -5496,7 +5535,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
             .filter((image) => imageLoadResults().get(image.id)?.url !== image.url)
             .map((image) => image.id),
           pendingImageStoreIds: [...pendingImageStores.keys()],
-          pendingPdfFallback: hasPendingPdfFallback(),
+          pdfInputBlocked: pdfSendError() !== null,
           pendingDelegatedImages: hasPendingDelegatedImages(),
           pendingTableCount: pendingTableCount(),
           pendingProblems: pendingProblems(),

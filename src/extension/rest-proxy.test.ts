@@ -5175,43 +5175,50 @@ describe('RestProxy handleRequest', () => {
     });
   });
 
-  it('loads original attachment content only through the scoped detail request', async () => {
-    const part = {
-      id: 'image-1',
-      sessionID: 's1',
-      messageID: 'm1',
-      type: 'file',
-      mime: 'image/png',
-      filename: 'shot.png',
-      url: `data:image/png;base64,${'a'.repeat(100_000)}`,
-    };
-    const message = { ...makeSessionMessage('m1', 'image-1'), parts: [part] };
-    const serverRequest = vi.fn(async (_method: string, path: string) =>
-      path.includes('/message/m1') ? message : { data: [message] }
-    );
-    const { proxy, callbacks } = createProxy({
-      server: { ...createCallbacks().server, request: serverRequest } as never,
-    });
-    await proxy.handleRequest(makePayload(191, 'GET', '/session/s1/message?limit=200'));
-    const response = vi.mocked(callbacks.postApiResponse).mock.calls.at(-1)?.[1];
-    expect(JSON.stringify(response).length).toBeLessThan(1000);
-    expect(JSON.stringify(response)).toContain('varro-content:');
-    expect(serverRequest).toHaveBeenCalledTimes(1);
+  it.each(['image', 'pdf'])(
+    'loads original %s attachment content only through the scoped detail request',
+    async (kind) => {
+      const part = {
+        id: 'image-1',
+        sessionID: 's1',
+        messageID: 'm1',
+        type: 'file',
+        mime: kind === 'pdf' ? 'application/pdf' : 'image/png',
+        filename: kind === 'pdf' ? 'document.pdf' : 'shot.png',
+        url:
+          kind === 'pdf'
+            ? `data:application/pdf;base64,${Buffer.from('%PDF-1.7\n' + ' '.repeat(100_000)).toString('base64')}`
+            : `data:image/png;base64,${'a'.repeat(100_000)}`,
+      };
+      const message = { ...makeSessionMessage('m1', 'image-1'), parts: [part] };
+      const serverRequest = vi.fn(async (_method: string, path: string) =>
+        path.includes('/message/m1') ? message : { data: [message] }
+      );
+      const { proxy, callbacks } = createProxy({
+        server: { ...createCallbacks().server, request: serverRequest } as never,
+      });
+      await proxy.handleRequest(makePayload(191, 'GET', '/session/s1/message?limit=200'));
+      const response = vi.mocked(callbacks.postApiResponse).mock.calls.at(-1)?.[1];
+      expect(JSON.stringify(response).length).toBeLessThan(1000);
+      expect(JSON.stringify(response)).toContain('varro-content:');
+      expect(JSON.stringify(response)).not.toContain(part.url);
+      expect(serverRequest).toHaveBeenCalledTimes(1);
 
-    await proxy.handleRequest(makePayload(192, 'GET', '/session/s1/message/m1/part/image-1'));
-    expect(callbacks.postApiResponse).toHaveBeenLastCalledWith(1, { id: 192, data: part });
-    expect(serverRequest).toHaveBeenLastCalledWith(
-      'GET',
-      '/session/s1/message/m1',
-      undefined,
-      withSignal({ maxResponseBytes: 256 * 1024 * 1024 })
-    );
-    await proxy.handleRequest(makePayload(193, 'GET', '/session/s1/message/m1/part/missing'));
-    expect(callbacks.postApiResponse).toHaveBeenLastCalledWith(1, {
-      id: 193,
-      error: '404 Message content not found',
-    });
-  });
+      await proxy.handleRequest(makePayload(192, 'GET', '/session/s1/message/m1/part/image-1'));
+      expect(callbacks.postApiResponse).toHaveBeenLastCalledWith(1, { id: 192, data: part });
+      expect(serverRequest).toHaveBeenLastCalledWith(
+        'GET',
+        '/session/s1/message/m1',
+        undefined,
+        withSignal({ maxResponseBytes: 256 * 1024 * 1024 })
+      );
+      await proxy.handleRequest(makePayload(193, 'GET', '/session/s1/message/m1/part/missing'));
+      expect(callbacks.postApiResponse).toHaveBeenLastCalledWith(1, {
+        id: 193,
+        error: '404 Message content not found',
+      });
+    }
+  );
 
   it('generates uncached external-session thumbnails and sends originals only on detail requests', async () => {
     const part = {

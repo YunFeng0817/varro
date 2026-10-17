@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ExtensionContext } from '../../shared/extension-context';
+import { nativePdfFixture } from '../../shared/native-pdf.test-support';
 import type { EditorContext } from '../../shared/protocol';
 import {
   applySessionSelectedModelsSnapshot,
@@ -352,8 +353,54 @@ describe('SessionSendOperations', () => {
     }
   );
 
+  it.each([undefined, ['text']])('preserves PDFs on capability rejection: %j', async (input) => {
+    appStore.setState('activeSessionId', 'session-1');
+    appStore.setState('providers', [
+      {
+        id: 'fixture',
+        name: 'Fixture',
+        source: 'api',
+        models: {
+          text: {
+            id: 'text',
+            name: 'Text',
+            capabilities: { input },
+            cost: { input: 0, output: 0 },
+          },
+        },
+      },
+    ]);
+    appStore.setState('selectedModel', { providerID: 'fixture', modelID: 'text' });
+    const pdf = nativePdfFixture();
+    appStore.setState('nativePdfs', [pdf]);
+    const sendAsync = vi.fn<SendAsync>();
+    expect(await createOperations(sendAsync).sendMessage('Keep this draft')).toBe(false);
+    expect(error()).toContain(
+      input ? 'does not support PDF input' : 'PDF input support is unknown'
+    );
+    expect(appStore.state.nativePdfs).toEqual([pdf]);
+    expect(sendAsync).not.toHaveBeenCalled();
+    expect(appStore.state.messages).toEqual([]);
+  });
+
   it('builds the payload from stores and clears sent composer attachments', async () => {
     appStore.setState('activeSessionId', 'session-1');
+    appStore.setState('providers', [
+      {
+        id: 'openai',
+        name: 'OpenAI',
+        source: 'api',
+        models: {
+          'gpt-5': {
+            id: 'gpt-5',
+            name: 'PDF fixture',
+            capabilities: { input: ['text', 'image', 'pdf'] },
+            cost: { input: 0, output: 0 },
+          },
+        },
+      },
+    ]);
+    appStore.setState('selectedModel', { providerID: 'openai', modelID: 'gpt-5' });
     appStore.setState('editorContext', {
       workspacePath: null,
       activeFile: null,
@@ -437,6 +484,7 @@ describe('SessionSendOperations', () => {
 
     expect(sendAsync).toHaveBeenCalledWith('session-1', {
       messageID: expect.stringMatching(/^msg_[0-9a-f]{12}[0-9A-Za-z]{14}$/),
+      model: { providerID: 'openai', modelID: 'gpt-5' },
       parts: [
         { type: 'text', text: 'hello' },
         {
@@ -450,7 +498,12 @@ describe('SessionSendOperations', () => {
           filename: 'image.png',
           url: 'blob:image-1',
         },
-        { type: 'text', text: '[Attached file: /tmp/varro-drops/spec.pdf]' },
+        {
+          type: 'file',
+          mime: 'application/pdf',
+          filename: 'spec.pdf',
+          url: 'data:application/pdf;base64,JVBERi0=',
+        },
       ],
     });
     expect(appStore.state.droppedFiles).toEqual([]);

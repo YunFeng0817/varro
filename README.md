@@ -69,6 +69,8 @@ The optional [companion app](native/macos-tray/README.md) shows active sessions,
 
 The composer includes the active file and selection by default; use its context chip to disable this per session. Add context with `Varro: Add to Context`, `Cmd+Shift+K` / `Ctrl+Shift+K`, drag-and-drop, or pasted images. Type `@` for files and agents, or `&` for recent root sessions. Unsent drafts and explicit file or folder attachments survive reloads.
 
+PDF attachments require advertised PDF input support and are limited to 20 MiB in total. Varro does not silently substitute file references or convert pages. Provider delivery is not universally verified; see [PDF compatibility and tested versions](https://github.com/koltyakov/varro/blob/main/docs/pdf-compatibility.md).
+
 Remote images default to `ask`, with **Load image** and **Load all** controls. Load all applies to the current response. Set `varro.chat.remoteImages` to `on` in user settings to load nearby images automatically, or `off` to show only alt text. Downloads accept bounded public HTTPS raster images and send no cookies or authorization headers, but disclose the requested URL and extension host's IP to the image server. Workspace settings cannot enable automatic loading.
 
 Queue follow-ups, steer a run, or stop it and send a replacement. Queued prompts can be reordered, paused, edited, retried, or removed. The transcript keeps failures, questions, approvals, edits, and final responses visible while grouping routine work into expandable summaries.
