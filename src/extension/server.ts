@@ -604,7 +604,7 @@ export class OpenCodeServer extends EventEmitter {
   }
 
   private startExistingServerPreparation(disposeGeneration: number, signal: AbortSignal) {
-    if (this.isAttachOnly) return;
+    if (this.isAttachOnly && !this.processManager.hasCredentialVerifiedConnection) return;
     if (this.existingServerPreparationOperation) return;
     const operation = (async () => {
       try {
@@ -620,7 +620,7 @@ export class OpenCodeServer extends EventEmitter {
           }
         }
         if (signal.aborted || disposeGeneration !== this.disposeGeneration) return;
-        await this.processManager.prepareForHealthyExistingServer();
+        await this.processManager.prepareForHealthyExistingServer(signal);
         if (signal.aborted || disposeGeneration !== this.disposeGeneration) return;
         this.requestMaintenanceCheck();
       } catch (err) {

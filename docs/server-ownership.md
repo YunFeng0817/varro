@@ -282,6 +282,11 @@ stop, restart, upgrade, or cleanup rights. Ordinary requests retain strict bound
 verification rather than reusing PID-based connection confirmation; SSE reconnects
 recheck enforced credentials. Endpoint or saved-credential changes revoke attachment.
 
+After credential fallback, startup preparation rechecks the private registration
+once. If OS inspection now verifies the original registered process, normal
+ownership recovery can restore management or observe its live owning editor.
+Credentials alone never promote a replacement process or grant lifecycle rights.
+
 Automatic discovery can also recover a changed service port when its exact
 username and password match a private Varro lease or credential companion. The
 discovered endpoint must be loopback and must enforce those credentials. Failed

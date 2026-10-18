@@ -1701,10 +1701,14 @@ export class OpenCodeProcess {
     if (!reconnect && Date.now() - this.lastConnectionVerification < 1000) return;
     if (this.connectionVerification) return this.connectionVerification;
     const operation = (async () => {
-      if (!(await this.matchesOwnershipLease(lease)))
+      const verification = await this.inspectOwnershipLease(lease);
+      if (!verification.matches) {
+        const message = `The managed OpenCode listener could not be verified; its registration was retained for recovery. ${verification.reason}`;
+        if (verification.inconclusive) throw new Error(message);
         throw new ManagedServerConnectionChangedError(
-          'The managed OpenCode listener changed; its registration was retained for recovery'
+          `The managed OpenCode listener changed; its registration was retained for recovery. ${verification.reason}`
         );
+      }
       this.lastConnectionVerification = Date.now();
     })();
     this.connectionVerification = operation;
@@ -2068,8 +2072,16 @@ export class OpenCodeProcess {
     this._processErrorHandler = value;
   }
 
-  async prepareForHealthyExistingServer() {
-    if (this.credentialRegistration) return;
+  async prepareForHealthyExistingServer(signal?: AbortSignal) {
+    signal?.throwIfAborted();
+    if (this.credentialRegistration) {
+      // Credential fallback can follow one missed OS observation of our original
+      // process. Recheck its private lease before making attachment permanent.
+      // Changed or still-unverifiable processes retain credential-only attachment.
+      await this.refreshStartupRegistration(signal);
+      signal?.throwIfAborted();
+      if (this.credentialRegistration) return;
+    }
     if (this._managedProcess && this.ownershipLease) {
       this.portFallbackAttempts = Math.max(0, this._port - this.originalPort);
       this.portInUseDetected = false;
@@ -3231,12 +3243,15 @@ export class OpenCodeProcess {
 
   private async inspectOwnershipLease(
     lease: ManagedServerOwnershipLease
-  ): Promise<{ matches: true } | { matches: false; reason: string }> {
+  ): Promise<{ matches: true } | { matches: false; reason: string; inconclusive?: boolean }> {
     const listeners = await findListeningPids(lease.port, this.linuxProcRoot);
     if (!listeners.includes(lease.pid))
       return {
         matches: false,
         reason: `Expected PID ${lease.pid} on port ${lease.port}; observed listening PIDs: ${listeners.join(', ') || 'none'}.`,
+        // Missing OS visibility is not evidence that a live process was replaced.
+        // Startup and lifecycle callers still reject this unverified observation.
+        inconclusive: listeners.length === 0 && isProcessAlive(lease.pid),
       };
     const windowsIdentity =
       process.platform === 'win32' ? await readWindowsProcessIdentity(lease.pid) : undefined;

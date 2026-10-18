@@ -1266,6 +1266,54 @@ describe('OpenCodeProcess server ownership leases', () => {
       };
     }
 
+    it.each(['active', 'relinquished'] as const)(
+      'recovers original Varro ownership after transient inspection with an %s lease',
+      async (state) => {
+        const { root, path, lease, listeners, authorization, manager } = await fixture(
+          'linux',
+          51197,
+          42424
+        );
+        await writeFile(path, JSON.stringify({ ...lease, state }), { mode: 0o600 });
+        listeners.mockResolvedValue([]);
+        try {
+          await expect(manager.refreshStartupRegistration()).resolves.toBe(true);
+          expect(manager.hasCredentialVerifiedConnection).toBe(true);
+          expect(manager.serverOwnership).toBe('unmanaged');
+
+          listeners.mockResolvedValue([lease.pid]);
+          vi.spyOn(processInspection, 'readProcessExecutable').mockResolvedValue(lease.executable);
+          await manager.prepareForHealthyExistingServer();
+
+          expect(manager.hasCredentialVerifiedConnection).toBe(false);
+          expect(manager.serverOwnership).toBe(state === 'active' ? 'other-host' : 'current-host');
+          expect(manager.serverAuthorization).toBe(authorization);
+          expect(vi.mocked(process.kill).mock.calls.every(([, signal]) => signal === 0)).toBe(true);
+        } finally {
+          await rm(root, { recursive: true, force: true });
+        }
+      }
+    );
+
+    it('does not report a live managed process as replaced after one empty listener observation', async () => {
+      const { root, path, lease, raw, listeners, manager } = await fixture('linux', 51197, 42424);
+      listeners.mockResolvedValue([lease.pid]);
+      vi.spyOn(processInspection, 'readProcessExecutable').mockResolvedValue(lease.executable);
+      try {
+        await expect(manager.refreshStartupRegistration()).resolves.toBe(true);
+        listeners.mockResolvedValueOnce([]);
+        await expect(manager.verifyManagedServerConnection(true)).rejects.toMatchObject({
+          name: 'Error',
+          message: expect.stringContaining('observed listening PIDs: none'),
+        });
+        await expect(manager.verifyManagedServerConnection(true)).resolves.toBeUndefined();
+        expect(manager.hasCredentialVerifiedConnection).toBe(false);
+        expect(await readFile(path, 'utf8')).toBe(raw);
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    });
+
     it.each(['lease', 'marker'] as const)(
       'retains private-service selection after reloading a verified %s',
       async (record) => {
@@ -3819,7 +3867,7 @@ describe('OpenCodeProcess server ownership leases', () => {
 
     expect(manager.isAdoptedManagedServer).toBe(false);
     expect(manager.managedProcess).toBe(false);
-    expect(kill).not.toHaveBeenCalled();
+    expect(kill.mock.calls.every(([, signal]) => signal === 0)).toBe(true);
     await expect(stat(leasePath)).rejects.toMatchObject({ code: 'ENOENT' });
     kill.mockRestore();
     await rm(directory, { recursive: true, force: true });

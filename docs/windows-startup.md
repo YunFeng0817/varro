@@ -69,6 +69,14 @@ observed process exit, PID/birth/account changes, reset, and reconnect require f
 admission. This attachment confirmation never grants permission to stop a server;
 restart, adoption, maintenance, and cleanup retain their independent identity checks.
 
+An empty listener observation while the registered PID is alive is inconclusive,
+not proof of process replacement. Background monitoring retains its confirmed
+connection, while startup and lifecycle checks still reject that observation.
+Credential-only startup attachment gets one background private-registration recheck.
+Only fresh matching PID, executable, birth identity, and ordinary ownership checks
+can restore the original managed connection. A changed or unverifiable process
+remains attach-only. Diagnostics include the specific identity mismatch.
+
 Commit-message preparation has a separate bounded deadline from model generation.
 Git history and server preparation run concurrently, and model selection is reused
 when one-shot generation falls back to a helper session. Preparation timeout reports

@@ -929,7 +929,7 @@ describe('automatic-port migration and admission', () => {
     await server.disconnect();
   });
 
-  it('keeps credential-only reconnection quiet but attach-only, without background ownership repair', async () => {
+  it('rechecks credential-only registration but stays attach-only without fresh ownership proof', async () => {
     const server = new OpenCodeServer('auto', true);
     const { api, children } = configureManagedStartup(server);
     const { processManager } = server as unknown as { processManager: OpenCodeProcess };
@@ -938,12 +938,14 @@ describe('automatic-port migration and admission', () => {
     vi.mocked(inspectLocalServerAccount).mockResolvedValue({ kind: 'unknown' });
     vi.spyOn(processManager, 'hasCredentialVerifiedConnection', 'get').mockReturnValue(true);
     vi.spyOn(processManager, 'verifyManagedServerAdmission').mockResolvedValue(true);
-    const prepare = vi.spyOn(processManager, 'prepareForHealthyExistingServer');
+    const prepare = vi
+      .spyOn(processManager, 'prepareForHealthyExistingServer')
+      .mockResolvedValue(undefined);
     await expect(server.start()).resolves.toBe(server.url);
     await flushMicrotasks();
     expect(vscodeMock.window.showWarningMessage).not.toHaveBeenCalled();
     expect(server.isAttachOnly).toBe(true);
-    expect(prepare).not.toHaveBeenCalled();
+    expect(prepare).toHaveBeenCalledOnce();
     expect(children).toHaveLength(0);
     await expect(server.restart()).rejects.toThrow('attach-only');
     await server.disconnect();

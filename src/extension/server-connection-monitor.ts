@@ -155,7 +155,7 @@ export class ServerConnectionMonitor {
         (observed.kind !== 'same-user' || observed.identity !== confirmation.account.identity))
     ) {
       this.options.reportDiagnostic(
-        'OpenCode process identity changed; fresh connection verification is required'
+        `OpenCode process identity changed; fresh connection verification is required${managed.status === 'rejected' && managed.reason instanceof Error ? `: ${managed.reason.message}` : ''}`
       );
       this.invalidate();
       return;
