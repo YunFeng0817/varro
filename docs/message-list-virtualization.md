@@ -356,6 +356,10 @@ the shared invariants below remain true.
 - A bottom-pinned activity exit may temporarily reserve the disappearing flow space and freeze its
   existing bottom target. The reserve is a bounded geometry owner, must not compete with bottom-follow,
   and yields immediately to direct user movement, session replacement, or transition cancellation.
+  Restoring its summary reserves only the scroll target's actual shortfall. Growth above the summary
+  already extends the scroll range; adding the same position delta as reserve double-counts it and can
+  accumulate more than a viewport of empty space. Keep the target at the requested coordinate, not the
+  coordinate plus its shortfall. `scroll-activity-collapse.spec.ts` checks repeated reachable growth.
   Appended assistant steps must not start a measured append transition while this owner or its
   retained summary anchor is active. A group-collapse settle restores that summary instead of
   briefly jumping to a different bottom target and letting the summary undo it next frame.

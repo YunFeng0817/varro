@@ -447,6 +447,79 @@ for (const scenario of exitCases) {
   });
 }
 
+test('summary anchoring does not accumulate reserve for already-reachable layout growth', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 495, height: 1269 });
+  await page.goto(
+    '/e2e/harness/index.html?scenario=tool-cards&activeTray=1&activeTrayReasoning=1&activeTrayPrefix=1&activeTrayCompletedPrefix=1&activeTrayCount=3'
+  );
+  await expect(page.locator('.assistant-active-activity-item')).toHaveCount(1);
+  await page.waitForTimeout(2100);
+  await page.evaluate(() => {
+    const harness = (
+      window as typeof window & {
+        __varroE2E: {
+          getSessionMessages: (id: string) => MessageEntry[];
+          updateMessagePart: (part: Part) => void;
+        };
+      }
+    ).__varroE2E;
+    const running = harness
+      .getSessionMessages('session-tool-cards')
+      .flatMap((message) => message.parts)
+      .filter(
+        (part): part is Extract<Part, { type: 'reasoning' }> =>
+          part.type === 'reasoning' && part.time.end === undefined
+      );
+    if (running.length !== 3) throw new Error('Expected three running reasoning parts');
+    for (const part of running) {
+      const completed: Part = { ...part, time: { ...part.time, end: Date.now() } };
+      harness.updateMessagePart(completed);
+      window.postMessage(
+        {
+          type: 'server/event',
+          payload: { type: 'message.part.updated', properties: { part: completed } },
+        },
+        '*'
+      );
+    }
+  });
+  await expect(page.locator('.assistant-active-activity-item')).toHaveCount(0);
+  await expect(page.locator('.activity-exit-bottom-reserve')).toHaveCount(0);
+  await expect(page.locator('.append-scroll-bottom-reserve')).toHaveCount(1);
+  const result = await page.locator('.interactive-list').evaluate(async (container) => {
+    const summary = container.querySelector<HTMLElement>('.assistant-activity-summary');
+    if (!summary) throw new Error('Surviving summary missing');
+    const reserve = () =>
+      container.querySelector('.append-scroll-bottom-reserve')?.getBoundingClientRect().height ?? 0;
+    const top = () => summary.getBoundingClientRect().top - container.getBoundingClientRect().top;
+    const before = { reserve: reserve(), top: top(), viewport: container.clientHeight };
+    const samples = [];
+    // Synthetic geometry-only changes model late layout corrections above the retained
+    // summary. They add real flow height, so its new scroll target is already reachable.
+    for (let step = 1; step <= 20; step++) {
+      summary.style.marginTop = `${step * 80}px`;
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      samples.push({ reserve: reserve(), top: top() });
+    }
+    return { before, samples };
+  });
+  await test
+    .info()
+    .attach('reachable-summary-growth', {
+      body: JSON.stringify(result, null, 2),
+      contentType: 'application/json',
+    });
+  expect(
+    Math.max(...result.samples.map((sample) => sample.reserve)),
+    'Real content growth must not be counted again as empty space'
+  ).toBeLessThanOrEqual(result.before.reserve + 2);
+  for (const sample of result.samples)
+    expect(Math.abs(sample.top - result.before.top)).toBeLessThanOrEqual(2);
+});
+
 test('activity exit tolerates persistent summary drift without observer feedback', async ({
   page,
 }) => {

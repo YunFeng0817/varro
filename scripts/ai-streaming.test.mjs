@@ -24,6 +24,7 @@ import {
   loopbackPortOpen,
   ownedProcessExists,
   parseArgs,
+  readRouteEvidence,
   runCapture,
   stopLauncher,
   waitForSessionRoute,
@@ -160,6 +161,35 @@ test('bounded waits resolve, reject on deadline, and honor cancellation', async 
   await assert.rejects(
     bounded(Promise.reject(new Error('late rejection')), 100, 'setup', controller.signal),
     /stop requested/
+  );
+});
+
+test('route evidence reads the current folder sidebar route instead of a stale shared route', () => {
+  const workspace = '/isolated/workspace';
+  const expected = { type: 'session', sessionId: 'wanted', directory: workspace };
+  const context = {
+    __initialWebviewState: {
+      webviewContext: { surface: 'sidebar', viewId: 'sidebar' },
+      editorContext: { workspacePath: workspace },
+    },
+    __vscodeWebviewState: {
+      getState: () => ({
+        'varro.lastOpenedView': { type: 'session', sessionId: 'stale' },
+        [`varro.lastOpenedView:${workspace}`]: expected,
+        'varro.lastOpenedView:/other': { type: 'session', sessionId: 'other', directory: '/other' },
+      }),
+    },
+    localStorage: { getItem: () => null },
+    document: { querySelectorAll: () => [] },
+  };
+  const result = vm.runInNewContext(`(${readRouteEvidence.toString()})()`, context);
+  assert.equal(result.route, expected);
+  context.__initialWebviewState.editorContext.workspacePath = '/missing';
+  assert.equal(vm.runInNewContext(`(${readRouteEvidence.toString()})()`, context).route, null);
+  context.__initialWebviewState.webviewContext.surface = 'editor';
+  assert.equal(
+    vm.runInNewContext(`(${readRouteEvidence.toString()})()`, context).route.sessionId,
+    'stale'
   );
 });
 

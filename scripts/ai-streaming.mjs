@@ -347,10 +347,25 @@ export function isSidebarContext(context) {
 }
 
 export function readRouteEvidence() {
-  const context = globalThis.__initialWebviewState?.webviewContext ?? null;
+  const initial = globalThis.__initialWebviewState;
+  const context = initial?.webviewContext ?? null;
+  const stored = globalThis.__vscodeWebviewState?.getState() ?? {};
+  const workspace = initial?.editorContext?.workspacePath;
+  const hasScopedRoutes = Object.keys(stored).some((key) =>
+    key.startsWith('varro.lastOpenedView:')
+  );
+  const scopedRoutes = Object.entries(stored).filter(
+    ([key, value]) => key.startsWith('varro.lastOpenedView:') && value?.directory === workspace
+  );
+  // Sidebar routes are folder-scoped. Do not mistake a stale shared route for the
+  // selected session, or pick another folder when several scoped routes exist.
   const route =
-    globalThis.__vscodeWebviewState?.getState()?.['varro.lastOpenedView'] ??
-    JSON.parse(localStorage.getItem('varro.lastOpenedView') ?? 'null');
+    context?.surface === 'sidebar' && hasScopedRoutes
+      ? scopedRoutes.length === 1
+        ? scopedRoutes[0][1]
+        : null
+      : (stored['varro.lastOpenedView'] ??
+        JSON.parse(localStorage.getItem('varro.lastOpenedView') ?? 'null'));
   return {
     context,
     route,
