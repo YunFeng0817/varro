@@ -15,6 +15,104 @@ type ScrollSample = { top: number; height: number };
 // Headless Chromium hides native scrollbars by default, making thumb drags inert.
 test.use({ launchOptions: { ignoreDefaultArgs: ['--hide-scrollbars'] } });
 
+for (const destination of ['top', 'bottom'] as const) {
+  test(`releasing a thumb at the ${destination} drops obsolete range reserve before the next drag`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 504, height: 800 });
+    await page.goto(
+      '/e2e/harness/index.html?scenario=tool-cards&activeTray=1&activeTrayPrefix=1&activeTrayCompletedPrefix=1&activeTrayCount=4'
+    );
+    const list = page.locator('.interactive-list');
+    await expect(list).toBeVisible();
+    await appendAssistantText(page, 'range-correction', 100);
+    await expect(list).toContainText('Hidden growth paragraph 99.');
+    await waitForAnimationFrames(page, 40);
+    const viewport = await list.boundingBox();
+    if (!viewport) throw new Error('Missing transcript viewport');
+    await page.mouse.move(viewport.x + 100, viewport.y + 100);
+    await page.mouse.wheel(0, -100_000);
+    await expect.poll(() => list.evaluate((element) => element.scrollTop)).toBe(0);
+    await page.mouse.wheel(0, 500);
+    await expect.poll(() => list.evaluate((element) => element.scrollTop)).toBeGreaterThan(100);
+    await waitForAnimationFrames(page, 10);
+    const thumb = await getThumb(list);
+    const bounds = await list.boundingBox();
+    if (!bounds) throw new Error('Missing transcript viewport');
+    await page.mouse.move(thumb.x, thumb.y);
+    await page.mouse.down();
+    await expect(list).toHaveAttribute('data-pointer-scroll-owned', '');
+    // Stand in for a measured virtual-prefix correction: shorten existing flow while the thumb
+    // owns the old physical range. This is an isolated fixture, not a source-session mutation.
+    await list.getByText('Hidden growth paragraph 99.', { exact: true }).evaluate((element) => {
+      const block = element.closest<HTMLElement>('[data-assistant-render-key]');
+      if (!block) throw new Error('Missing measured text block');
+      block.style.height = '20px';
+      block.style.overflow = 'hidden';
+    });
+    await expect(list.locator('.append-scroll-bottom-reserve')).toBeVisible();
+    await page.mouse.move(
+      thumb.x,
+      destination === 'top' ? bounds.y - 40 : bounds.y + bounds.height + 40,
+      { steps: 12 }
+    );
+    if (destination === 'top')
+      await expect.poll(() => list.evaluate((element) => element.scrollTop)).toBe(0);
+    // Exhaust deferred resize/reconciliation work while the old range is still pointer-owned.
+    // Releasing immediately can accidentally pass because a queued frame cleans up afterward.
+    await waitForAnimationFrames(page, 60);
+    if (destination === 'top')
+      await expect(list.locator('.append-scroll-bottom-reserve')).toBeVisible();
+    else {
+      const paintedFrames = await list.evaluate(async (element) => {
+        const frames = [];
+        for (let frame = 0; frame < 60; frame++) {
+          const view = element.getBoundingClientRect();
+          frames.push(
+            [...element.querySelectorAll('[data-msg-id]')].some((row) => {
+              const rect = row.getBoundingClientRect();
+              return rect.height > 0 && rect.bottom > view.top && rect.top < view.bottom;
+            })
+          );
+          await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        }
+        return frames;
+      });
+      expect(paintedFrames.every(Boolean)).toBe(true);
+    }
+    await page.mouse.up();
+    if (destination === 'top')
+      await expect(list.locator('.append-scroll-bottom-reserve')).toHaveCount(0);
+    else
+      expect(
+        await list.evaluate(
+          (element) =>
+            (element.querySelector('.append-scroll-bottom-reserve')?.getBoundingClientRect()
+              .height ?? 0) < element.clientHeight
+        )
+      ).toBe(true);
+    if (destination === 'top') expect(await list.evaluate((element) => element.scrollTop)).toBe(0);
+
+    const nextThumb = await getThumb(list);
+    await page.mouse.move(nextThumb.x, nextThumb.y);
+    await page.mouse.down();
+    await page.mouse.move(nextThumb.x, bounds.y + bounds.height + 40, { steps: 12 });
+    await waitForAnimationFrames(page, 3);
+    await page.mouse.up();
+    await expect
+      .poll(() =>
+        list.evaluate((element) => {
+          const view = element.getBoundingClientRect();
+          return [...element.querySelectorAll('[data-msg-id]')].some((row) => {
+            const rect = row.getBoundingClientRect();
+            return rect.height > 0 && rect.bottom > view.top && rect.top < view.bottom;
+          });
+        })
+      )
+      .toBe(true);
+  });
+}
+
 test('streaming yields to a held scrollbar, stays at the top, and follows a drag back to bottom', async ({
   page,
 }) => {

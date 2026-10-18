@@ -382,6 +382,12 @@ the shared invariants below remain true.
   collapses before removal: resize delivery is too late to prevent native thumb mapping from seeing
   the shorter range. Keep offscreen reserve through the hold, consume it against the held range,
   and exclude reserve from new range growth so repeated replacements cannot accumulate blank space.
+  On pointer release or cancellation, discard reserve wholly below the viewport even if no further
+  scroll or resize event arrives. Otherwise a later drag can inherit that obsolete range and land
+  below every message. Preserve reserve intersecting the viewport and do not write a scroll position.
+  If a measurement correction leaves the entire held viewport inside trailing reserve, retire that
+  obsolete range and let the browser clamp to real content. There is no painted anchor to preserve
+  there; range protection must not maintain a wholly blank viewport during or after the gesture.
   Finish activity-entry height animations immediately while the pointer owns scrolling. Their
   incremental growth otherwise changes native thumb mapping even when no JavaScript scroll write
   occurs. Preserve animation-end cleanup and restore normal entry timing on release.

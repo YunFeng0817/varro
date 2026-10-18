@@ -208,6 +208,45 @@ test('route verification rejects a wrong selected session despite the correct fr
   assert.equal(await waitForSessionRoute(frame, 'wanted', new AbortController().signal), evidence);
 });
 
+test('route evidence selects the normalized workspace key independently of session directory', () => {
+  for (const [workspace, key] of [
+    ['/repo/', '/repo'],
+    ['C:\\Work\\Repo\\', 'c:/work/repo'],
+    ['\\\\Server\\Share\\Repo', '//server/share/repo'],
+    ['\\\\?\\UNC\\Server\\Share\\Repo', '//server/share/repo'],
+    ['\\\\?\\C:\\Work\\Repo', 'c:/work/repo'],
+    ['\\\\?\\Volume{ABC}\\Repo\\', '//?/volume{abc}/repo'],
+    ['/repo/child/../', '/repo'],
+    ['/repo/back\\slash', '/repo/back\\slash'],
+  ]) {
+    for (const expected of [
+      { type: 'session', sessionId: 'wanted', directory: '/repo/nested' },
+      { type: 'new-session' },
+      { type: 'sessions-list' },
+    ]) {
+      const result = vm.runInNewContext(`(${readRouteEvidence.toString()})()`, {
+        __initialWebviewState: {
+          webviewContext: { surface: 'sidebar', viewId: 'sidebar' },
+          editorContext: { workspacePath: workspace },
+        },
+        __vscodeWebviewState: {
+          getState: () => ({
+            [`varro.lastOpenedView:${key}`]: expected,
+            'varro.lastOpenedView:/other': {
+              type: 'session',
+              sessionId: 'stale',
+              directory: workspace,
+            },
+          }),
+        },
+        localStorage: { getItem: () => null },
+        document: { querySelectorAll: () => [] },
+      });
+      assert.equal(result.route, expected);
+    }
+  }
+});
+
 test('direct frame CDP selects exact context and disposal rejects pending evaluation', async (t) => {
   const server = new SocketServer({ host: '127.0.0.1', port: 0 });
   await once(server, 'listening');

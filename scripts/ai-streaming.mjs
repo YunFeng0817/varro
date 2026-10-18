@@ -351,19 +351,56 @@ export function readRouteEvidence() {
   const context = initial?.webviewContext ?? null;
   const stored = globalThis.__vscodeWebviewState?.getState() ?? {};
   const workspace = initial?.editorContext?.workspacePath;
+  // This function is serialized into the webview, so keep path normalization local.
+  // Match workspace-path.ts identities, not a session's (possibly nested) directory.
+  const identity = (path) => {
+    if (!path) return null;
+    let value = path;
+    const extended = value.match(/^(?:\\\\|\/\/)\?[\\/](.*)$/s);
+    if (extended) {
+      value = extended[1];
+      if (/^UNC[\\/]/i.test(value)) value = `//${value.slice(4)}`;
+      else if (!/^(?:[a-z]:[\\/]|Volume\{[^\\/]+\}[\\/])/i.test(value)) return null;
+    } else if (/^(?:\\\\|\/\/)\.[\\/]/.test(value) || /^[\\/]+\?\?[\\/]/.test(value)) return null;
+    let root = '';
+    let lower = false;
+    const drive = value.match(/^([a-z]):[\\/](.*)$/is);
+    const volume = extended && value.match(/^(Volume\{[^\\/]+\})[\\/](.*)$/is);
+    const unc = value.match(/^(?:\\\\|\/\/)([^\\/]+)[\\/]([^\\/]+)(?:[\\/](.*))?$/s);
+    if (drive || volume) {
+      const match = drive || volume;
+      root = drive ? `${match[1].toLowerCase()}:/` : `//?/${match[1].toLowerCase()}/`;
+      value = match[2];
+      lower = true;
+    } else if (unc) {
+      if ([unc[1], unc[2]].some((part) => ['.', '..', '?'].includes(part))) return null;
+      root = `//${unc[1].toLowerCase()}/${unc[2].toLowerCase()}`;
+      value = unc[3] ?? '';
+      lower = true;
+    } else if (value.startsWith('//') || value.startsWith('\\\\')) return null;
+    else if (value.startsWith('/')) {
+      root = '/';
+      value = value.slice(1);
+    }
+    const parts = [];
+    for (const part of value.split(lower ? /[\\/]+/ : /\/+/)) {
+      if (!part || part === '.') continue;
+      if (part === '..') {
+        if (parts.length > 0 && parts.at(-1) !== '..') parts.pop();
+        else if (!root) parts.push(part);
+      } else parts.push(lower ? part.toLowerCase() : part);
+    }
+    const suffix = parts.join('/');
+    return root ? `${root}${suffix && !root.endsWith('/') ? '/' : ''}${suffix}` : suffix || '.';
+  };
   const hasScopedRoutes = Object.keys(stored).some((key) =>
     key.startsWith('varro.lastOpenedView:')
-  );
-  const scopedRoutes = Object.entries(stored).filter(
-    ([key, value]) => key.startsWith('varro.lastOpenedView:') && value?.directory === workspace
   );
   // Sidebar routes are folder-scoped. Do not mistake a stale shared route for the
   // selected session, or pick another folder when several scoped routes exist.
   const route =
     context?.surface === 'sidebar' && hasScopedRoutes
-      ? scopedRoutes.length === 1
-        ? scopedRoutes[0][1]
-        : null
+      ? (stored[`varro.lastOpenedView:${identity(workspace)}`] ?? null)
       : (stored['varro.lastOpenedView'] ??
         JSON.parse(localStorage.getItem('varro.lastOpenedView') ?? 'null'));
   return {

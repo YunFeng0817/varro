@@ -62,6 +62,127 @@ test('awaits asynchronous frame observations before returning their values', asy
   assert.deepEqual(await controller.evaluate('Promise.resolve(42)'), 42);
 });
 
+test('live snapshots use the folder-scoped sidebar route in a fresh profile', async () => {
+  const controller = Object.create(CdpController.prototype);
+  controller.mainContextId = 1;
+  controller.evaluate = async () => ({ title: 'wanted' });
+  controller.call = async (_method, params) => ({
+    result: {
+      value: vm.runInNewContext(params.expression, {
+        __initialWebviewState: {
+          webviewContext: { surface: 'sidebar', viewId: 'sidebar' },
+          editorContext: { workspacePath: '/repo' },
+        },
+        __vscodeWebviewState: {
+          getState: () => ({
+            'varro.lastOpenedView:/repo': {
+              type: 'session',
+              sessionId: 'wanted',
+              directory: '/repo/nested',
+            },
+          }),
+        },
+        localStorage: { getItem: () => null },
+        document: { querySelectorAll: () => [] },
+      }),
+    },
+  });
+  assert.equal((await controller.snapshot()).routeSessionId, 'wanted');
+});
+
+test('diff toggles require a rendered visibility transition, not just command dispatch', () => {
+  assert.deepEqual(
+    verifyActionEffect(
+      { action: 'show file diffs' },
+      { inlineDiffCount: 0 },
+      { inlineDiffCount: 1 },
+      { dispatched: true }
+    ),
+    { verified: true }
+  );
+  assert.deepEqual(
+    verifyActionEffect(
+      { action: 'hide file diffs' },
+      { inlineDiffCount: 1 },
+      { inlineDiffCount: 0 },
+      { dispatched: true }
+    ),
+    { verified: true }
+  );
+  assert.equal(
+    verifyActionEffect(
+      { action: 'show file diffs' },
+      { inlineDiffCount: 0 },
+      { inlineDiffCount: 0 },
+      { dispatched: true }
+    ).verified,
+    false
+  );
+});
+
+test('held scrollbar actions require pointer ownership, boundary arrival, and painted content', () => {
+  const before = {};
+  const after = {
+    transcript: {
+      scrollTop: 800,
+      scrollHeight: 1000,
+      clientHeight: 200,
+      visibleRows: [{ messageId: 'last', top: 0 }],
+    },
+  };
+  const action = { action: 'held scrollbar to bottom' };
+  assert.deepEqual(verifyActionEffect(action, before, after, { dispatched: true, held: true }), {
+    verified: true,
+  });
+  assert.equal(
+    verifyActionEffect(action, before, after, { dispatched: true, held: false }).verified,
+    false
+  );
+  assert.equal(
+    verifyActionEffect(
+      action,
+      before,
+      { transcript: { ...after.transcript, visibleRows: [] } },
+      { dispatched: true, held: true }
+    ).verified,
+    false
+  );
+});
+
+test('held native scrollbar input releases the button even if an intermediate move fails', async () => {
+  const controller = Object.create(CdpController.prototype);
+  controller.evaluate = async () => ({ x: 490, start: 20, end: 400 });
+  const calls = [];
+  controller.call = async (_method, params) => {
+    calls.push(params.type);
+    if (params.type === 'mouseMoved') throw new Error('lost target');
+  };
+  await assert.rejects(controller.dragTranscriptScrollbar(1), /lost target/);
+  assert.deepEqual(calls, ['mousePressed', 'mouseMoved', 'mouseReleased']);
+});
+
+test('native thumb targeting re-grabs once only after observed range growth with painted content', async () => {
+  const controller = Object.create(CdpController.prototype);
+  controller.evaluate = async (expression) =>
+    expression.includes('hasAttribute') ? true : { x: 490, start: 20, end: 1, range: 1000 };
+  let releases = 0;
+  controller.call = async (_method, params) => {
+    if (params.type === 'mouseReleased') releases++;
+  };
+  controller.captureActionState = async () => ({
+    transcript: {
+      scrollTop: releases === 1 ? 100 : 0,
+      scrollHeight: 1300,
+      clientHeight: 200,
+      visibleRows: [{ messageId: 'visible', top: 0 }],
+    },
+  });
+  const result = await controller.dragTranscriptScrollbar(0);
+  assert.equal(result.attempts.length, 2);
+  assert.equal(result.attempts[1].reached, true);
+  assert.equal(releases, 2);
+});
+
 test('retries an exhausted live tool window without retrying a scrolling failure', () => {
   const execution = { executed: false, actions: [{ outcome: 'active-window-ended' }] };
   assert.equal(shouldRetryActivityWithFreshStream(execution, 1, 3), true);
@@ -385,6 +506,40 @@ test('dispatches editable-control keys to the composer during AI-08', async () =
     ['[aria-label="Message composer"]', 'Space'],
     ['[aria-label="Message composer"]', 'Shift+Space'],
   ]);
+  assert.equal(
+    results.every(({ executed }) => executed),
+    true
+  );
+});
+
+test('dispatches both native scrollbar destinations through the AI-08 executor', async () => {
+  const destinations = [];
+  let fraction = 0;
+  const cdp = {
+    dragTranscriptScrollbar: async (next) => {
+      destinations.push(next);
+      fraction = next;
+      return { dispatched: true, held: true };
+    },
+    captureActionState: async () => ({
+      transcript: {
+        scrollTop: fraction * 800,
+        scrollHeight: 1000,
+        clientHeight: 200,
+        visibleRows: [{ messageId: fraction ? 'last' : 'first', top: 0 }],
+      },
+    }),
+  };
+  const results = await executeActionPlan(
+    cdp,
+    [
+      { step: 1, action: 'held scrollbar to top' },
+      { step: 2, action: 'held scrollbar to bottom' },
+    ],
+    'session',
+    0
+  );
+  assert.deepEqual(destinations, [0, 1]);
   assert.equal(
     results.every(({ executed }) => executed),
     true

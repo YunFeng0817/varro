@@ -16,7 +16,7 @@ import { requireFixtureWorkspace } from './ai-fuzzy-preconditions.mjs';
 import { requireIsolatedTestServer } from './ai-test-isolation.mjs';
 import { AiOpenCodeClient } from './ai-opencode-client.mjs';
 import { normalizeCapturedEvents, savePlaybackCapture } from './ai-session-playback.mjs';
-import { installObserver } from './ai-streaming.mjs';
+import { installObserver, readRouteEvidence } from './ai-streaming.mjs';
 import { goToLatest } from './ai-fuzzy-navigation.mjs';
 import { ReversibleFixtureEdit } from './ai-fuzzy-fixture-edit.mjs';
 
@@ -527,17 +527,7 @@ async function inspectVarroTarget(port, target) {
     const inspected = await controller.call('Runtime.evaluate', {
       contextId: mainContext.id,
       expression: `(() => {
-        const context = globalThis.__initialWebviewState?.webviewContext ?? null;
-        let persisted = null;
-        try {
-          persisted = globalThis.__vscodeWebviewState?.getState?.()?.['varro.lastOpenedView'] ?? null;
-        } catch {}
-        if (!persisted) {
-          try {
-            const raw = localStorage.getItem('varro.lastOpenedView');
-            persisted = raw ? JSON.parse(raw) : null;
-          } catch {}
-        }
+        const { context, route: persisted } = (${readRouteEvidence.toString()})();
         const route = persisted?.type === 'session' && typeof persisted.sessionId === 'string'
           ? { type: 'session', sessionId: persisted.sessionId }
           : context?.initialRoute ?? null;
@@ -843,13 +833,7 @@ export class CdpController {
     const route = await this.call('Runtime.evaluate', {
       contextId: this.mainContextId,
       expression: `(() => {
-        let persisted = globalThis.__vscodeWebviewState?.getState?.()?.['varro.lastOpenedView'] ?? null;
-        if (!persisted) {
-          try {
-            const raw = localStorage.getItem('varro.lastOpenedView');
-            persisted = raw ? JSON.parse(raw) : null;
-          } catch {}
-        }
+        const { route: persisted } = (${readRouteEvidence.toString()})();
         return persisted?.type === 'session' ? persisted.sessionId ?? null : null;
       })()`,
       returnByValue: true,
@@ -1498,6 +1482,7 @@ export class CdpController {
           label: element.getAttribute('aria-label'),
         })),
         expandedDiffCount: scoped('[aria-label^="Collapse changes in"], [aria-label="Close expanded diff"], .diff-view-overlay-content').length,
+        inlineDiffCount: scoped('.file-change-inline-diffs').length,
         queueItems: [...document.querySelectorAll('[data-queued-message-id]')].map((element) => ({
           id: element.getAttribute('data-queued-message-id'),
           ownerViewId: element.getAttribute('data-queued-message-owner'),
@@ -1513,6 +1498,84 @@ export class CdpController {
         }),
       };
     })()`);
+  }
+
+  async dragTranscriptScrollbar(fraction) {
+    const attempts = [];
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const geometry = await this.evaluate(`(() => {
+      const list = document.querySelector('.interactive-list');
+      if (!list || list.scrollHeight <= list.clientHeight) return null;
+      const rect = list.getBoundingClientRect();
+      const thumb = Math.max(20, rect.height * list.clientHeight / list.scrollHeight);
+      const travel = rect.height - thumb;
+      return {
+        range: list.scrollHeight - list.clientHeight,
+        x: rect.right - Math.max(3, (list.offsetWidth - list.clientWidth) / 2),
+        start: rect.top + list.scrollTop / (list.scrollHeight - list.clientHeight) * travel + thumb / 2,
+        end: ${JSON.stringify(fraction)} === 0
+          ? Math.max(1, rect.top - 40)
+          : Math.min(innerHeight - 1, rect.bottom + 40),
+      };
+    })()`);
+      if (!geometry) return { dispatched: attempts.length > 0, held: false, attempts };
+      await this.call('Input.dispatchMouseEvent', {
+        type: 'mousePressed',
+        x: geometry.x,
+        y: geometry.start,
+        button: 'left',
+        buttons: 1,
+        clickCount: 1,
+      });
+      let held;
+      try {
+        await new Promise((resolve) => setTimeout(resolve, 400));
+        for (let step = 1; step <= 12; step++) {
+          await this.call('Input.dispatchMouseEvent', {
+            type: 'mouseMoved',
+            x: geometry.x,
+            y: geometry.start + ((geometry.end - geometry.start) * step) / 12,
+            button: 'left',
+            buttons: 1,
+          });
+          await new Promise((resolve) => setTimeout(resolve, 25));
+        }
+        await new Promise((resolve) => setTimeout(resolve, 650));
+        held = await this.evaluate(
+          `document.querySelector('.interactive-list')?.hasAttribute('data-pointer-scroll-owned') === true`
+        );
+      } finally {
+        await this.call('Input.dispatchMouseEvent', {
+          type: 'mouseReleased',
+          x: geometry.x,
+          y: geometry.end,
+          button: 'left',
+          buttons: 0,
+          clickCount: 1,
+        });
+      }
+      const after = await this.captureActionState();
+      const range = after.transcript
+        ? after.transcript.scrollHeight - after.transcript.clientHeight
+        : null;
+      const reached =
+        after.transcript &&
+        (fraction === 0
+          ? after.transcript.scrollTop <= 1.5
+          : range - after.transcript.scrollTop <= 1.5);
+      attempts.push({ geometry, held, after, reached: !!reached });
+      // First-time virtual measurements can grow the range after the grab. Only that observed
+      // targeting miss gets one re-grab with fresh geometry; never replay a blank-content failure.
+      if (
+        reached ||
+        !held ||
+        !after.transcript?.visibleRows?.length ||
+        range === null ||
+        Math.abs(range - geometry.range) <= 1.5
+      )
+        break;
+    }
+    return { dispatched: true, held: attempts.every((entry) => entry.held), attempts };
   }
 
   countScoped(selector, scope) {
@@ -2046,6 +2109,30 @@ function transcriptAtBoundary(action, state) {
 
 export function verifyActionEffect(action, before, after, details = {}) {
   if (!details.dispatched) return { verified: false, reason: 'input was not dispatched' };
+  if (action.action === 'show file diffs' || action.action === 'hide file diffs') {
+    const enabled = action.action === 'show file diffs';
+    return (
+      enabled
+        ? (after?.inlineDiffCount ?? 0) > (before?.inlineDiffCount ?? 0)
+        : (before?.inlineDiffCount ?? 0) > 0 && after?.inlineDiffCount === 0
+    )
+      ? { verified: true }
+      : { verified: false, reason: 'inline diff visibility transition was not observed' };
+  }
+  if (action.action.startsWith('held scrollbar to ')) {
+    const transcript = after?.transcript;
+    const atDestination =
+      transcript &&
+      (action.action.endsWith('top')
+        ? transcript.scrollTop <= 1.5
+        : transcript.scrollHeight - transcript.clientHeight - transcript.scrollTop <= 1.5);
+    return details.held && atDestination && transcript.visibleRows?.length > 0
+      ? { verified: true }
+      : {
+          verified: false,
+          reason: 'held native thumb, destination, and painted rows were not all verified',
+        };
+  }
   if (action.action === 'switch session away and back') {
     return details.switchedAway && details.returned
       ? { verified: true }
@@ -2151,7 +2238,18 @@ export async function executeActionPlan(cdp, plan, currentTitle, port, options =
     const before = await cdp.captureActionState(options.scope);
     let dispatched = false;
     const details = {};
-    if (action.action === 'switch session away and back') {
+    if (action.action === 'show file diffs' || action.action === 'hide file diffs') {
+      await executeVscodeCommand(
+        port,
+        `Varro: ${action.action.startsWith('show') ? 'Show' : 'Hide'} File Diffs`
+      );
+      dispatched = true;
+    } else if (action.action.startsWith('held scrollbar to ')) {
+      const drag = await cdp.dragTranscriptScrollbar(action.action.endsWith('top') ? 0 : 1);
+      dispatched = drag.dispatched;
+      details.held = drag.held;
+      details.nativeDrag = drag;
+    } else if (action.action === 'switch session away and back') {
       const switched = await switchAwayAndBack(cdp, options.sessionId, currentTitle);
       dispatched = switched.dispatched;
       details.switchedAway = switched.switchedAway;
@@ -2275,6 +2373,8 @@ export async function executeActionPlan(cdp, plan, currentTitle, port, options =
     if (settledAfter) result.settledAfter = settledAfter;
     if (details.messageOrder) result.messageOrder = details.messageOrder;
     if (details.targetingAttempts) result.targetingAttempts = details.targetingAttempts;
+    if (details.held !== undefined) result.pointerHeld = details.held;
+    if (details.nativeDrag) result.nativeDrag = details.nativeDrag;
     if (effect.reason) result.reason = effect.reason;
     results.push(result);
     if (!effect.verified) break;

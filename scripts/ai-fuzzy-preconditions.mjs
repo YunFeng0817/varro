@@ -153,6 +153,12 @@ export function buildActionPlan(seed) {
     'open file card and diff',
     'focus and close diff',
     'click sticky or jump to latest',
+    'show file diffs',
+    'held scrollbar to top',
+    'held scrollbar to bottom',
+    'hide file diffs',
+    'held scrollbar to top',
+    'held scrollbar to bottom',
   ];
   return Array.from({ length: 50 }, (_, index) => {
     const step = index + 1;

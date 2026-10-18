@@ -33,7 +33,9 @@ function turn(number, tall = false) {
 }
 
 test('validates reusable history against scenario-specific static gates', () => {
-  const messages = Array.from({ length: 110 }, (_, index) => turn(index + 1, (index + 1) % 10 === 0)).flat();
+  const messages = Array.from({ length: 110 }, (_, index) =>
+    turn(index + 1, (index + 1) % 10 === 0)
+  ).flat();
   const summary = inspectGoldenMessages(messages);
   const report = buildPreconditionReport(summary);
 
@@ -65,7 +67,21 @@ test('creates a stable 50-step mixed-ownership action plan', () => {
     first.slice(4, 7).map(({ action }) => action),
     ['PageDown in composer', 'Space in composer', 'Shift+Space in composer']
   );
-  assert.equal(first.some(({ action }) => action.includes('inline editor')), false);
+  assert.equal(
+    first.some(({ action }) => action.includes('inline editor')),
+    false
+  );
+  assert.deepEqual(
+    first.slice(13, 19).map(({ action }) => action),
+    [
+      'show file diffs',
+      'held scrollbar to top',
+      'held scrollbar to bottom',
+      'hide file diffs',
+      'held scrollbar to top',
+      'held scrollbar to bottom',
+    ]
+  );
 });
 
 test('rejects AI workspaces outside the canonical fixture', async () => {
