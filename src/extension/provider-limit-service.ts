@@ -204,7 +204,9 @@ export class ProviderLimitService {
       JSON.stringify([this.directory ?? null, providerID, modelID])
     );
     const checkedAt = Date.now();
-    if (this.server.isAttachOnly) {
+    const attachedOpenAI =
+      this.server.isAttachOnly && this.server.apiVersion === 2 && providerID === 'openai';
+    if (this.server.isAttachOnly && !attachedOpenAI) {
       return createProviderLimitLoadResult({
         providerID,
         modelID,
@@ -269,6 +271,16 @@ export class ProviderLimitService {
         source: 'provider',
         checkedAt,
         note: 'Failed to read active OpenCode provider credentials',
+      });
+    }
+    if (attachedOpenAI && authStore.openai?.type !== 'oauth') {
+      return createProviderLimitLoadResult({
+        providerID,
+        modelID,
+        status: 'unsupported',
+        source: 'provider',
+        checkedAt,
+        note: 'OpenAI subscription limits require an active Codex OAuth connection on the OpenCode server.',
       });
     }
     const credentialFingerprint = getProviderCredentialFingerprint(provider, authStore);
@@ -445,6 +457,30 @@ export class ProviderLimitService {
     const generation = this.providerSnapshotGeneration;
     const promise = (async () => {
       if (this.server.apiVersion === 2) {
+        if (this.server.isAttachOnly) {
+          // Read the connected server's selected account, never this host's database
+          // or Codex files. Attachment grants no process lifecycle authority.
+          const response = asRecord(
+            await this.server.request('GET', '/api/credential', undefined, { signal })
+          );
+          if (!Array.isArray(response?.data)) {
+            throw new Error('Invalid OpenCode V2 credential response');
+          }
+          const active = response.data
+            .map((entry) => asRecord(entry))
+            .find((entry) => entry?.integrationID === 'openai' && entry.active === true);
+          const value = asRecord(active?.value);
+          if (!value) return {};
+          const metadata = asRecord(value.metadata);
+          return parseProviderAuthStore(
+            JSON.stringify({
+              openai: {
+                ...value,
+                accountId: metadata?.accountID ?? metadata?.accountId,
+              },
+            })
+          );
+        }
         const hostname = this.server.url ? new URL(this.server.url).hostname : '';
         if (!['localhost', '127.0.0.1', '[::1]'].includes(hostname)) {
           throw new Error('OpenCode V2 credentials are only available for local servers');

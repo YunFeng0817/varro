@@ -136,7 +136,7 @@ describe('ProviderLimitService', () => {
         isAttachOnly: true,
       };
       const service = new ProviderLimitService(server);
-      await expect(service.get('openai', 'gpt-5.4')).resolves.toMatchObject({
+      await expect(service.get('anthropic', 'claude-sonnet-4')).resolves.toMatchObject({
         status: 'unsupported',
         note: expect.stringContaining('attach-only mode'),
       });
@@ -164,6 +164,102 @@ describe('ProviderLimitService', () => {
     vi.unstubAllGlobals();
     vi.useRealTimers();
   });
+
+  it('restores OpenAI limits on a credential-only V2 reconnection using only the active server account', async () => {
+    const server = {
+      ...createServer(),
+      apiVersion: 2 as const,
+      url: 'http://127.0.0.1:60632',
+      isAttachOnly: true,
+    };
+    const credentials = [
+      {
+        integrationID: 'openai',
+        active: false,
+        value: { type: 'oauth', access: 'inactive-token' },
+      },
+      {
+        integrationID: 'openai',
+        active: true,
+        value: {
+          type: 'oauth',
+          methodID: 'chatgpt-browser',
+          access: 'active-server-token',
+          metadata: { accountID: 'active-server-account' },
+        },
+      },
+    ];
+    server.request.mockImplementation(async (_method, path) => {
+      if (path === '/config/providers') return { providers: [{ id: 'openai', models: {} }] };
+      if (path === '/api/credential') return { data: credentials };
+      throw new Error(`Unexpected path: ${path}`);
+    });
+    const { parseProviderAuthStore } =
+      await vi.importActual<typeof ProviderLimitModule>('./util/provider-limit');
+    mocks.parseProviderAuthStoreMock.mockImplementation(parseProviderAuthStore);
+    const available = createStatus('available');
+    mocks.fetchProviderLimitFromAdapterMock.mockResolvedValue(available);
+    const service = new ProviderLimitService(server);
+
+    await expect(service.get('openai', 'gpt-5.4')).resolves.toEqual(available);
+    expect(mocks.fetchProviderLimitFromAdapterMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        authStore: {
+          openai: {
+            type: 'oauth',
+            methodID: 'chatgpt-browser',
+            access: 'active-server-token',
+            accountId: 'active-server-account',
+          },
+        },
+        setProviderAuth: undefined,
+      })
+    );
+    expect(mocks.readFileMock).not.toHaveBeenCalled();
+    expect(mocks.readV2AuthStoreMock).not.toHaveBeenCalled();
+    expect(server.isAttachOnly).toBe(true);
+    service.dispose();
+  });
+
+  it.each(['inactive', 'api-key', 'malformed', 'unavailable'])(
+    'does not substitute local credentials when attached V2 credentials are %s',
+    async (failure) => {
+      const server = {
+        ...createServer(),
+        apiVersion: 2 as const,
+        url: 'http://127.0.0.1:4096',
+        isAttachOnly: true,
+      };
+      server.request.mockImplementation(async (_method, path) => {
+        if (path === '/config/providers') return { providers: [{ id: 'openai', models: {} }] };
+        if (path === '/api/credential') {
+          if (failure === 'unavailable') throw new Error('Credential API unavailable');
+          if (failure === 'malformed') return {};
+          return {
+            data: [
+              {
+                integrationID: 'openai',
+                active: failure !== 'inactive',
+                value:
+                  failure === 'api-key'
+                    ? { type: 'key', key: 'server-key' }
+                    : { type: 'oauth', access: 'inactive-token' },
+              },
+            ],
+          };
+        }
+        throw new Error(`Unexpected path: ${path}`);
+      });
+      const service = new ProviderLimitService(server);
+      await expect(service.get('openai', 'gpt-5.4')).resolves.toMatchObject({
+        status: ['malformed', 'unavailable'].includes(failure) ? 'error' : 'unsupported',
+      });
+      expect(mocks.fetchProviderLimitFromAdapterMock).not.toHaveBeenCalled();
+      expect(mocks.readFileMock).not.toHaveBeenCalled();
+      expect(mocks.readV2AuthStoreMock).not.toHaveBeenCalled();
+      service.dispose();
+    }
+  );
 
   it('uses active V2 credentials instead of stale V1 auth and leaves rotation to V2', async () => {
     const server = {

@@ -17,6 +17,10 @@ Supported identities:
   for token sharing. Numeric limits and reset credits require the Codex browser
   login. Never substitute an inactive Codex credential or a local Codex account
   for the selected token-sharing connection.
+  V2 attach-only connections read the active OpenAI OAuth credential through the
+  authenticated server's `/api/credential` endpoint. They never read the extension
+  host's credential database or fall back to local Codex files, inactive accounts,
+  or environment tokens. Quota reads do not grant server lifecycle ownership.
 - Anthropic OAuth: fixed usage endpoint and exact resolved access token, from the
   OpenCode auth store or Claude credentials file. Statusline and local proxy results
   are read outside coordination, never published under an OAuth credential identity.
