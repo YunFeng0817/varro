@@ -6,6 +6,19 @@
   "editor.insertSpaces": true,
   "editor.detectIndentation": false,
   "oxc.fmt.configPath": "oxfmt.config.mts",
+  "freshDeps.packageRules": [
+    {
+      "ecosystem": "npm",
+      "name": "@types/vscode",
+      "ignoreUpdates": true
+    },
+    {
+      "ecosystem": "npm",
+      "name": "node",
+      "section": "volta",
+      "ignoreMajorUpdates": true
+    }
+  ],
   "tailwindCSS.files.exclude": [
     "**/.git/**",
     "**/node_modules/**",

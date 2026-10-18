@@ -16,6 +16,11 @@ This npm command is for macOS, Linux, or WSL. On native Windows, use the standal
 
 ## Install Dependencies
 
+Volta and CI use the Node and npm versions pinned in `package.json`. npm 12 blocks Git dependencies
+and dependency install scripts by default. `.npmrc` allows direct Git dependencies for the lint
+plugin, and `allowScripts` in `package.json` approves the locked build-tool scripts. After dependency
+updates, use `npm install-scripts ls` to review blocked scripts before approving their new versions.
+
 ```sh
 npm install
 ```

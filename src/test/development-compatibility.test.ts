@@ -37,11 +37,47 @@ describe('development compatibility', () => {
     expect(packageJson.engines.node).toBe('^22.22.2 || >=24.15.0');
     expect(workflow.match(/^\s*runs-on: ubuntu-24\.04$/gm)).toHaveLength(4);
     expect(workflow).not.toContain('ubuntu-latest');
-    expect(workflow.match(/^\s*node-version: 24\.21\.0$/gm)).toHaveLength(4);
+    expect(workflow.match(/^\s*node-version-file: package\.json$/gm)).toHaveLength(4);
     expect(workflow).not.toContain('matrix.node-version');
-    expect(workflow).not.toMatch(/^\s*node-version:\s+(?:22|24)\s*$/m);
+    expect(workflow).not.toMatch(/^\s*node-version:/m);
     expect(readme).toContain(advertisedFloors);
     expect(developmentGuide).toContain(advertisedFloors);
+  });
+
+  it('uses the manifest toolchain pins in every workflow', async () => {
+    const workflows = await Promise.all(
+      ['ci', 'opencode-compatibility', 'windows-vscode-smoke'].map((name) =>
+        readFile(resolve(`.github/workflows/${name}.yml`), 'utf8')
+      )
+    );
+
+    expect(packageJson.volta.npm).toBe('12.2.1');
+    for (const workflow of workflows) {
+      const setups = workflow.match(/uses: actions\/setup-node@/g) ?? [];
+      expect(setups.length).toBeGreaterThan(0);
+      expect(workflow.match(/^\s*node-version-file: package\.json$/gm)).toHaveLength(setups.length);
+      expect(workflow).not.toMatch(/^\s*node-version:/m);
+      expect(workflow).toContain(
+        'npm install -g npm@$(node -p "require(\'./package.json\').volta.npm")'
+      );
+    }
+  });
+
+  it('allows direct Git dependencies and the locked install scripts for npm 12', async () => {
+    const [npmrc, lockSource] = await Promise.all([
+      readFile(resolve('.npmrc'), 'utf8'),
+      readFile(resolve('package-lock.json'), 'utf8'),
+    ]);
+    // SAFETY: The repository's npm v3 lockfile records package versions and install-script flags.
+    const lock = JSON.parse(lockSource) as {
+      packages: Record<string, { version: string; hasInstallScript?: boolean }>;
+    };
+    const scripts = Object.entries(lock.packages)
+      .filter(([path, entry]) => path && entry.hasInstallScript)
+      .map(([path, entry]) => [`${path.split('node_modules/').at(-1)}@${entry.version}`, true]);
+
+    expect(npmrc).toMatch(/^allow-git=root$/m);
+    expect(packageJson.allowScripts).toEqual(Object.fromEntries(scripts));
   });
 
   it('runs Linux and Windows without matrices and runs E2E independently', async () => {
