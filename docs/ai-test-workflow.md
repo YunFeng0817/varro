@@ -116,6 +116,8 @@ npm run ai:streaming -- run --capture <capture.json> --output artifacts/ai-strea
 ```
 
 Use `afterEvents` values from inspection, not the example numbers. The host arms before delivery. The
+inspector includes native v2 text/reasoning starts and tool pending/running/completed/error boundaries,
+as well as v1 part updates, without exposing their bodies. The
 controlling AI attaches to the target in `run.json`, starts playback, and manages the remaining commands:
 
 ```sh

@@ -136,9 +136,39 @@ export function inspectCapture(capture, timing = {}) {
   const boundaries = [];
   const seen = new Set();
   const toolStates = new Map();
+  const nativeTools = new Map();
   for (const [index, entry] of timeline.entries()) {
     scheduledMs += entry.delayMs;
     const { type, properties } = entry.event;
+    const native =
+      /^session\.next\.(text|reasoning|tool)\.(started|input\.started|called|success|failed)$/.exec(
+        type
+      );
+    if (native) {
+      const partType = native[1];
+      const phase = native[2];
+      const partID =
+        properties.callID ?? properties.textID ?? properties.reasoningID ?? properties.id;
+      if (partType === 'tool' && phase === 'input.started')
+        nativeTools.set(partID, properties.name);
+      const states = {
+        'input.started': 'pending',
+        called: 'running',
+        success: 'completed',
+        failed: 'error',
+      };
+      boundaries.push({
+        afterEvents: index + 1,
+        scheduledMs,
+        type,
+        messageID: properties.assistantMessageID,
+        partID,
+        partType,
+        tool: partType === 'tool' ? nativeTools.get(partID) : undefined,
+        state: partType === 'tool' ? states[phase] : undefined,
+      });
+      continue;
+    }
     const part = properties?.part;
     const state = part?.state?.status;
     const firstPart = part && !seen.has(part.id);

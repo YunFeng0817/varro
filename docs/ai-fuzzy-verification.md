@@ -834,6 +834,12 @@ AI-08 establishes these gates independently. It can start from the clean recorde
 edits whose commit, status, exact changed paths, and content hash equal the latest fixture exit evidence.
 An AI-07 timing miss does not block it. Unknown edits or a changed commit still block fixture reuse.
 
+AI-08 starts with inline diffs enabled, so its first planned visibility transition hides them and its
+second shows them. Setup distinguishes the exclusive Show/Hide command state from mounted previews;
+an already-enabled setting with no mounted diff is not an unavailable-command failure. The action
+oracle still requires an actual preview visibility transition for both timed toggles. Native composer
+sends select all and verify the replacement text before Enter, rather than appending to a restored draft.
+
 Generate and record all 50 seeded actions before starting the stream. Reserve an early position for the
 session switch so the model cannot normally finish before that action.
 Perform exactly those 50 actions and ensure the sequence contains at least one of every category:
@@ -938,8 +944,11 @@ edit, not a successful AI-07 scrolling verdict. The root session is openable in 
 and inventories one child session for route testing. Cleanup must remove that run-created child and
 verify its recorded ancestry.
 
-The child appends one uniquely marked comment to `packages/opencode/src/util/timeout.ts`.
-The controller saves that file's original bytes beside the manifest before sending, waits for the
+The child appends one uniquely marked comment to `packages/util/src/bom.ts`. Use
+`--fixture-edit-path <workspace-relative-path>` for a different pinned fixture layout. The controller
+validates the regular, unlinked target and saves its original bytes beside the manifest before creating
+or navigating child/editor state. It rechecks those bytes before sending and requests the exact append
+string, including its line endings and no extra blank line. It waits for the
 child to become idle, saves the observed edit, and restores only that file while the commit remains
 unchanged. It then verifies the original commit,
 status, changed paths, and content hash. Unexpected content remains a failed containment check even

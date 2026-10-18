@@ -441,6 +441,7 @@ test.describe('diff preview anchoring', () => {
     await page.getByRole('button', { name: 'Scroll to latest message' }).click();
     await expect(row).toHaveCount(1);
     await waitForAnimationFrames(page, 12);
+    await page.waitForTimeout(350);
     // The remounted summary must occupy the exact loaded height throughout the delayed request.
     expect(await row.evaluate((element) => element.getBoundingClientRect().height)).toBe(
       loadedHeight
@@ -593,6 +594,128 @@ test.describe('diff preview anchoring', () => {
     expect((await getScrollMetrics(page, '.interactive-list')).distanceFromBottom).toBeGreaterThan(
       90
     );
+  });
+
+  test('keeps a twelve-edit same-file and multi-file burst painted and ordered', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 486, height: 794 });
+    await page.goto(
+      '/e2e/harness/index.html?scenario=diff-preview-large-transcript&expandedActivity=1'
+    );
+    const list = page.locator('.interactive-list');
+    await expect(list).toBeVisible();
+    await waitForAnimationFrames(page, 12);
+    const result = await page.evaluate(async () => {
+      const sessionID = 'session-diff-preview-large-transcript';
+      const messageID = 'message-diff-preview-burst';
+      const host = window as typeof window & {
+        __varroE2E: {
+          getSessionMessages: (id: string) => Array<{ info: Record<string, unknown> }>;
+          updateMessageInfo: (info: Record<string, unknown>) => void;
+          updateMessagePart: (part: unknown) => void;
+          updateSessionStatus: (id: string, status: { type: 'busy' }) => void;
+        };
+      };
+      const info = {
+        ...host.__varroE2E.getSessionMessages(sessionID).at(-1)!.info,
+        id: messageID,
+        finish: undefined,
+        time: { created: Date.now() },
+      };
+      const emit = (type: string, properties: Record<string, unknown>) =>
+        window.postMessage(
+          {
+            type: 'server/event',
+            payload: { type, properties },
+          },
+          '*'
+        );
+      host.__varroE2E.updateMessageInfo(info);
+      host.__varroE2E.updateSessionStatus(sessionID, { type: 'busy' });
+      emit('message.updated', { info });
+      emit('session.status', { sessionID, status: { type: 'busy' } });
+      const times: number[] = [];
+      const frames: Array<{ painted: boolean; duplicate: boolean }> = [];
+      let stopped = false;
+      const observe = () => {
+        const transcript = document.querySelector<HTMLElement>('.interactive-list')!;
+        const view = transcript.getBoundingClientRect();
+        const rows = [...transcript.querySelectorAll<HTMLElement>('[data-msg-id]')];
+        const keys = [...transcript.querySelectorAll('[data-assistant-render-key]')].map(
+          (element) => element.getAttribute('data-assistant-render-key')
+        );
+        frames.push({
+          painted: rows.some((row) => {
+            const rect = row.getBoundingClientRect();
+            return rect.height > 0 && rect.bottom > view.top && rect.top < view.bottom;
+          }),
+          duplicate: new Set(keys).size !== keys.length,
+        });
+        if (!stopped) requestAnimationFrame(observe);
+      };
+      requestAnimationFrame(observe);
+      for (let index = 0; index < 12; index++) {
+        const id = `${messageID}-edit-${index}`;
+        const fileCount = 1 + Math.floor(index / 3);
+        const patchText = [
+          '*** Begin Patch',
+          ...Array.from({ length: fileCount }, (_, file) =>
+            [
+              `*** Update File: src/burst-${file}.ts`,
+              '@@',
+              `-export const value = 'burst-${index - 1}';`,
+              `+export const value = 'burst-${index}';`,
+            ].join('\n')
+          ),
+          '*** End Patch',
+        ].join('\n');
+        const part = {
+          id,
+          sessionID,
+          messageID,
+          type: 'tool',
+          callID: `${id}-call`,
+          tool: 'apply_patch',
+          state: {
+            status: 'completed',
+            input: { patchText },
+            output: 'Done',
+            metadata: {},
+            time: { start: index * 2 + 1, end: index * 2 + 2 },
+          },
+        };
+        host.__varroE2E.updateMessagePart(part);
+        times.push(performance.now());
+        emit('message.part.updated', { part });
+        await new Promise<void>((resolve) =>
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+        );
+      }
+      stopped = true;
+      return { times, frames };
+    });
+    await test.info().attach('rapid-diff-edit-frames', {
+      body: JSON.stringify(result),
+      contentType: 'application/json',
+    });
+    expect(result.times).toHaveLength(12);
+    expect(result.times.at(-1)! - result.times[0]!).toBeLessThan(1000);
+    expect(result.frames.every((frame) => frame.painted && !frame.duplicate)).toBe(true);
+    const row = page.locator('[data-msg-id="message-diff-preview-burst"]');
+    await expect(row.locator('.file-change-inline-diffs')).toHaveCount(4);
+    // Equal consecutive file sets coalesce; adding a file starts the next ordered stack.
+    await expect(row.locator('.file-change-inline-diffs')).toContainText([
+      'burst-2',
+      'burst-5',
+      'burst-8',
+      'burst-11',
+    ]);
+    await expect
+      .poll(() =>
+        getScrollMetrics(page, '.interactive-list').then((value) => value.distanceFromBottom)
+      )
+      .toBeLessThanOrEqual(1);
   });
 
   for (const transition of ['completes', 'arrives'] as const) {

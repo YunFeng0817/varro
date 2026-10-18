@@ -24,6 +24,7 @@ const execFileAsync = promisify(execFile);
 const DEFAULT_MODEL = 'openai/gpt-6-luna-fast';
 const DEFAULT_MAX_PROMPTS = 3;
 const DEFAULT_GATE_TIMEOUT_MS = 90_000;
+export const DEFAULT_AI18_FIXTURE_EDIT_PATH = 'packages/util/src/bom.ts';
 
 function parseArgs(argv) {
   const [command, ...rest] = argv;
@@ -1285,16 +1286,23 @@ export class CdpController {
     if (!(await this.click('[aria-label="Message composer"]'))) return false;
     const selectAllModifier = process.platform === 'darwin' ? 4 : 2;
     for (const type of ['keyDown', 'keyUp']) {
-      await this.call('Input.dispatchKeyEvent', {
+      const event = {
         type,
         key: 'a',
         code: 'KeyA',
         windowsVirtualKeyCode: 65,
         nativeVirtualKeyCode: 65,
         modifiers: selectAllModifier,
-      });
+      };
+      if (type === 'keyDown') event.commands = ['selectAll'];
+      await this.call('Input.dispatchKeyEvent', event);
     }
     await this.call('Input.insertText', { text: prompt });
+    if ((await this.readComposerText()) !== prompt) {
+      throw new Error(
+        'Native composer text did not match the requested prompt; Enter was not sent'
+      );
+    }
     for (const type of ['keyDown', 'keyUp']) {
       await this.call('Input.dispatchKeyEvent', {
         type,
@@ -1668,6 +1676,13 @@ async function writeJsonAtomic(filePath, value) {
   await rename(temporaryPath, filePath);
 }
 
+function controllerErrorMessage(error) {
+  if (error instanceof AggregateError) {
+    return [error.message, ...error.errors.map(controllerErrorMessage)].join(': ');
+  }
+  return error instanceof Error ? error.message : String(error);
+}
+
 export async function persistFixtureExitEvidence({
   manifest,
   manifestPath,
@@ -1680,9 +1695,7 @@ export async function persistFixtureExitEvidence({
   const fixture = await readFixture(workspace);
   manifest.livePreparation ??= {};
   const previous = manifest.livePreparation[scenario] ?? { scenario, prepared: false };
-  const failure = error
-    ? `controller failure: ${error instanceof Error ? error.message : String(error)}`
-    : null;
+  const failure = error ? `controller failure: ${controllerErrorMessage(error)}` : null;
   const record = {
     ...previous,
     prepared: error ? false : previous.prepared,
@@ -2891,6 +2904,7 @@ async function runMultiWebviewScenario({
   descendantsBefore,
   promptRun,
   markModelMayEdit,
+  childEdit,
 }) {
   const timeoutMs = Number(options['gate-timeout-ms'] ?? DEFAULT_GATE_TIMEOUT_MS);
   const permissionMode = options['permission-mode'] ?? 'auto';
@@ -3155,20 +3169,18 @@ async function runMultiWebviewScenario({
     evidence.leakage.rootAbsentFromChild = !(await editor.evaluate(
       `${JSON.stringify(rootMarkers)}.some((marker) => document.body.innerText.includes(marker))`
     ));
-    const childEdit = new ReversibleFixtureEdit(
-      manifest.workspace,
-      'packages/opencode/src/util/timeout.ts',
-      `VFZ AI18 transient ${manifest.seed} R${String(promptRun)}`
-    );
-    const childEditEvidencePath = `${manifestPath}.AI-18.R${String(promptRun)}.fixture-edit.json`;
-    await childEdit.prepare(childEditEvidencePath);
+    const childEditEvidencePath = childEdit.evidencePath;
+    await childEdit.verifyTarget();
+    if (!(await readFile(childEdit.file)).equals(childEdit.original)) {
+      throw new Error('AI-18 fixture edit target changed after preflight; model edit was not sent');
+    }
     let childEditSettled = false;
     let childEditSent = false;
     let childEditError = null;
     try {
       await client.send(
         child.id,
-        `${childEditTurn.promptMarker} Work only in the current OpenCode repository. Read ${childEdit.relativePath}. Use the edit tool once to append the exact standalone comment ${JSON.stringify(childEdit.comment)} at the end of the file. Preserve all existing bytes and line endings. Leave this comment in place; the test controller will restore the recorded original after your turn. Do not change any other content, spawn subagents, or delegate work. Finish with ${childEditTurn.responseMarker}.`,
+        `${childEditTurn.promptMarker} Work only in the current OpenCode repository. Read ${childEdit.relativePath}. Use the edit tool once to append exactly this string at the end of the file: ${JSON.stringify(childEdit.appendText)}. Preserve all existing bytes and line endings. Add no extra blank line before or after that string. Leave it in place; the test controller will restore the recorded original after your turn. Do not change any other content, spawn subagents, or delegate work. Finish with ${childEditTurn.responseMarker}.`,
         parseModel(requestedModel)
       );
       childEditSent = true;
@@ -4121,6 +4133,15 @@ async function runLive(options) {
   let playbackSource = null;
   let activityObservationStarted = false;
   try {
+    let childEdit;
+    if (scenario === 'AI-18') {
+      childEdit = new ReversibleFixtureEdit(
+        manifest.workspace,
+        options['fixture-edit-path'] ?? DEFAULT_AI18_FIXTURE_EDIT_PATH,
+        `VFZ AI18 transient ${manifest.seed} R${String(promptRun)}`
+      );
+      await childEdit.prepare(`${manifestPath}.AI-18.R${String(promptRun)}.fixture-edit.json`);
+    }
     await (async () => {
       if (scenario === 'AI-17') {
         for (let restart = 0; restart < restartCount; restart += 1) {
@@ -4146,13 +4167,12 @@ async function runLive(options) {
         const width = await cdp.evaluate('innerWidth');
         if (Math.abs(width - 486) > 8) throw new Error(`Live sidebar width remained ${width}`);
       }
-      if (scenario === 'AI-08' && manifest.hostState?.fileDiffsEnabled !== true) {
-        const diffsVisible = await cdp.evaluate(
-          `!!document.querySelector('.file-change-inline-diffs')`
-        );
-        if (!diffsVisible) {
-          await executeVscodeCommand(launch.remoteDebuggingPort, 'Varro: Show File Diffs');
-        }
+      if (scenario === 'AI-08') {
+        // Hidden/unmounted previews do not describe the setting. VS Code exposes the
+        // opposite exclusive command when this setting is already enabled.
+        await executeVscodeCommand(launch.remoteDebuggingPort, 'Varro: Show File Diffs', {
+          alreadySelectedCommand: 'Varro: Hide File Diffs',
+        });
         await new Promise((resolve) => setTimeout(resolve, 300));
         manifest.hostState = {
           ...manifest.hostState,
@@ -4305,6 +4325,7 @@ async function runLive(options) {
           fixture,
           descendantsBefore,
           promptRun,
+          childEdit,
           markModelMayEdit: () => {
             modelMayEdit = true;
           },
@@ -4676,13 +4697,13 @@ async function main() {
   const { command, options } = parseArgs(process.argv.slice(2));
   if (command === 'run') return runLive(options);
   throw new Error(
-    'Usage: ai-fuzzy-live.mjs run --manifest <path> --launch <path> --scenario AI-07|AI-08|AI-17|AI-18|AI-19 [--playback-label <label>]'
+    'Usage: ai-fuzzy-live.mjs run --manifest <path> --launch <path> --scenario AI-07|AI-08|AI-17|AI-18|AI-19 [--playback-label <label>] [--fixture-edit-path <workspace-relative-path> for AI-18]'
   );
 }
 
 if (path.resolve(process.argv[1] ?? '') === fileURLToPath(import.meta.url)) {
   main().catch((error) => {
-    process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
+    process.stderr.write(`${controllerErrorMessage(error)}\n`);
     process.exitCode = 1;
   });
 }

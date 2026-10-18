@@ -147,6 +147,110 @@ test('capture inspection identifies exact part and tool boundaries without expos
   assert.equal(JSON.stringify(result).includes('private output'), false);
 });
 
+test('inspection exposes native v2 part and tool checkpoints without leaking bodies', () => {
+  const event = (kind, properties) => ({
+    offsetMs: 0,
+    event: {
+      type: `session.next.${kind}`,
+      properties: { assistantMessageID: 'message', ...properties },
+    },
+  });
+  const result = inspectCapture({
+    initialMessages: [],
+    events: [
+      event('reasoning.started', { reasoningID: 'reasoning' }),
+      event('reasoning.delta', { reasoningID: 'reasoning', delta: 'private reasoning' }),
+      event('text.started', { textID: 'text' }),
+      event('text.delta', { textID: 'text', delta: 'private text' }),
+      event('tool.input.started', { id: 'patch', name: 'patch' }),
+      event('tool.input.ended', { callID: 'patch', text: 'private input' }),
+      event('tool.called', { callID: 'patch', input: 'private input' }),
+      event('tool.progress', { callID: 'patch', output: 'private progress' }),
+      event('tool.success', { callID: 'patch', output: 'private output' }),
+      event('tool.input.started', { callID: 'read', name: 'read' }),
+      event('tool.called', { callID: 'read' }),
+      event('tool.failed', { callID: 'read', error: 'private error' }),
+    ],
+  });
+  assert.deepEqual(
+    result.boundaries.map(({ afterEvents, messageID, partID, partType, tool, state }) => ({
+      afterEvents,
+      messageID,
+      partID,
+      partType,
+      tool,
+      state,
+    })),
+    [
+      {
+        afterEvents: 1,
+        messageID: 'message',
+        partID: 'reasoning',
+        partType: 'reasoning',
+        tool: undefined,
+        state: undefined,
+      },
+      {
+        afterEvents: 3,
+        messageID: 'message',
+        partID: 'text',
+        partType: 'text',
+        tool: undefined,
+        state: undefined,
+      },
+      {
+        afterEvents: 5,
+        messageID: 'message',
+        partID: 'patch',
+        partType: 'tool',
+        tool: 'patch',
+        state: 'pending',
+      },
+      {
+        afterEvents: 7,
+        messageID: 'message',
+        partID: 'patch',
+        partType: 'tool',
+        tool: 'patch',
+        state: 'running',
+      },
+      {
+        afterEvents: 9,
+        messageID: 'message',
+        partID: 'patch',
+        partType: 'tool',
+        tool: 'patch',
+        state: 'completed',
+      },
+      {
+        afterEvents: 10,
+        messageID: 'message',
+        partID: 'read',
+        partType: 'tool',
+        tool: 'read',
+        state: 'pending',
+      },
+      {
+        afterEvents: 11,
+        messageID: 'message',
+        partID: 'read',
+        partType: 'tool',
+        tool: 'read',
+        state: 'running',
+      },
+      {
+        afterEvents: 12,
+        messageID: 'message',
+        partID: 'read',
+        partType: 'tool',
+        tool: 'read',
+        state: 'error',
+      },
+    ]
+  );
+  assert.equal(JSON.stringify(result).includes('private'), false);
+});
+
 test('bounded waits resolve, reject on deadline, and honor cancellation', async () => {
   assert.equal(await bounded(Promise.resolve(42), 100, 'ready'), 42);
   await assert.rejects(bounded(new Promise(() => {}), 5, 'watcher'), /watcher timed out/);

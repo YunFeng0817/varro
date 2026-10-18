@@ -243,7 +243,11 @@ export function getVscodeSidebarGeometry(documentValue, viewportWidth) {
   };
 }
 
-export async function executeVscodeCommand(remoteDebuggingPort, commandLabel) {
+export async function executeVscodeCommand(
+  remoteDebuggingPort,
+  commandLabel,
+  { alreadySelectedCommand } = {}
+) {
   const targets = await fetch(`http://127.0.0.1:${String(remoteDebuggingPort)}/json/list`).then(
     (response) => response.json()
   );
@@ -260,6 +264,16 @@ export async function executeVscodeCommand(remoteDebuggingPort, commandLabel) {
   });
   const requests = createCdpRequestClient(socket);
   try {
+    const dismissPalette = async () => {
+      for (const type of ['keyDown', 'keyUp']) {
+        await requests.call('Input.dispatchKeyEvent', {
+          type,
+          key: 'Escape',
+          code: 'Escape',
+          windowsVirtualKeyCode: 27,
+        });
+      }
+    };
     const waitForPalette = async (expression, description) => {
       const deadline = Date.now() + 3_000;
       while (Date.now() < deadline) {
@@ -291,21 +305,26 @@ export async function executeVscodeCommand(remoteDebuggingPort, commandLabel) {
         'did not find the requested command'
       );
     } catch (error) {
+      if (alreadySelectedCommand) {
+        const selected = await requests.call('Runtime.evaluate', {
+          expression: `[...document.querySelectorAll('.quick-input-list .monaco-list-row')].some(row => row.querySelector('.label-name')?.textContent?.trim() === ${JSON.stringify(alreadySelectedCommand)} && row.getBoundingClientRect().height > 0)`,
+          returnByValue: true,
+        });
+        if (selected.result?.value === true) {
+          await dismissPalette();
+          return { alreadySelected: true };
+        }
+      }
       if (
         commandLabel !== 'Varro: Focus on Varro View' ||
         !(error instanceof Error) ||
         !error.message.startsWith('VS Code command palette did not find the requested command:')
-      )
+      ) {
+        await dismissPalette();
         throw error;
-      // Cold VS Code workbenches can expose the container before its generated focus command.
-      for (const type of ['keyDown', 'keyUp']) {
-        await requests.call('Input.dispatchKeyEvent', {
-          type,
-          key: 'Escape',
-          code: 'Escape',
-          windowsVirtualKeyCode: 27,
-        });
       }
+      // Cold VS Code workbenches can expose the container before its generated focus command.
+      await dismissPalette();
       const response = await requests.call('Runtime.evaluate', {
         expression: `(() => {
           const points = [...document.querySelectorAll('a[aria-label="Varro"]')].flatMap(element => {
@@ -357,7 +376,10 @@ export async function executeVscodeCommand(remoteDebuggingPort, commandLabel) {
       }
       await new Promise((resolve) => setTimeout(resolve, 50));
     }
-    if (!selected) throw new Error(`VS Code command could not be selected: ${commandLabel}`);
+    if (!selected) {
+      await dismissPalette();
+      throw new Error(`VS Code command could not be selected: ${commandLabel}`);
+    }
     for (const type of ['keyDown', 'keyUp']) {
       await requests.call('Input.dispatchKeyEvent', {
         type,

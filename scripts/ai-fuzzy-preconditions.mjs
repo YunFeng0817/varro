@@ -153,10 +153,11 @@ export function buildActionPlan(seed) {
     'open file card and diff',
     'focus and close diff',
     'click sticky or jump to latest',
-    'show file diffs',
+    // AI-08 enables inline diffs before admitting its live turn.
+    'hide file diffs',
     'held scrollbar to top',
     'held scrollbar to bottom',
-    'hide file diffs',
+    'show file diffs',
     'held scrollbar to top',
     'held scrollbar to bottom',
   ];

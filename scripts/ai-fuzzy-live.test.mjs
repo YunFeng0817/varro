@@ -52,6 +52,44 @@ const ready = {
   nestedActivityScroller: { hasRange: true },
 };
 
+test('AI-18 defaults to the current pinned fixture layout', async () => {
+  const { DEFAULT_AI18_FIXTURE_EDIT_PATH } = await import('./ai-fuzzy-live.mjs');
+  assert.equal(DEFAULT_AI18_FIXTURE_EDIT_PATH, 'packages/util/src/bom.ts');
+});
+
+test('composer replacement uses native select-all and verifies the exact input before Enter', async () => {
+  const controller = Object.create(CdpController.prototype);
+  const calls = [];
+  let value = '@old-file.ts ';
+  let selected = false;
+  controller.click = async () => true;
+  controller.readComposerText = async () => value;
+  controller.call = async (method, params) => {
+    calls.push({ method, params });
+    if (params.commands?.includes('selectAll')) selected = true;
+    if (method === 'Input.insertText') value = selected ? params.text : value + params.text;
+  };
+  assert.equal(await controller.sendComposerPrompt('/thinking'), true);
+  assert.equal(value, '/thinking');
+  assert.ok(calls.some((call) => call.params.commands?.includes('selectAll')));
+  assert.equal(calls.filter((call) => call.params.key === 'Enter').length, 2);
+});
+
+test('composer replacement never submits a contaminated or restored draft', async () => {
+  const controller = Object.create(CdpController.prototype);
+  const calls = [];
+  controller.click = async () => true;
+  controller.readComposerText = async () => 'old draft /thinking';
+  controller.call = async (method, params) => {
+    calls.push({ method, params });
+  };
+  await assert.rejects(controller.sendComposerPrompt('/thinking'), /composer.*match/i);
+  assert.equal(
+    calls.some((call) => call.params.key === 'Enter'),
+    false
+  );
+});
+
 test('awaits asynchronous frame observations before returning their values', async () => {
   const controller = Object.create(CdpController.prototype);
   controller.contextId = 7;
@@ -1023,6 +1061,32 @@ test('atomically records fixture evidence and controller failures on exit', asyn
   assert.deepEqual(saved.livePreparation['AI-07'].fixtureExitEvidence.changedPaths, ['source.ts']);
   assert.equal(saved.livePreparation['AI-07'].prepared, false);
   assert.match(saved.livePreparation['AI-07'].failures[0], /CDP disconnected/);
+});
+
+test('cleanup aggregation retains the original controller failure and nested cleanup cause', async () => {
+  const manifest = {};
+  await persistFixtureExitEvidence({
+    manifest,
+    manifestPath: '/manifest.json',
+    scenario: 'AI-08',
+    workspace: '/fixture',
+    error: new AggregateError(
+      [
+        new Error('original action target disappeared'),
+        new AggregateError(
+          [new Error('observer context was destroyed')],
+          'observer cleanup failed'
+        ),
+      ],
+      'frame observation cleanup failed'
+    ),
+    readFixture: async () => ({ commit: 'abc', status: '', changedPaths: [] }),
+    writeManifest: async () => {},
+  });
+  const failure = manifest.livePreparation['AI-08'].controllerFailure;
+  assert.match(failure, /original action target disappeared/);
+  assert.match(failure, /observer cleanup failed/);
+  assert.match(failure, /observer context was destroyed/);
 });
 
 test('records only verified action effects', () => {

@@ -24,10 +24,8 @@ export class ReversibleFixtureEdit {
     const newline = this.original.includes('\r\n') ? '\r\n' : '\n';
     const separator = this.original.at(-1) === 10 ? '' : newline;
     this.comment = `// ${this.marker}`;
-    this.edited = Buffer.concat([
-      this.original,
-      Buffer.from(`${separator}${this.comment}${newline}`),
-    ]);
+    this.appendText = `${separator}${this.comment}${newline}`;
+    this.edited = Buffer.concat([this.original, Buffer.from(this.appendText)]);
     this.evidencePath = evidencePath;
     // A timeout can leave the child busy. Retain recovery bytes before sending,
     // rather than depending on this controller process surviving the model turn.

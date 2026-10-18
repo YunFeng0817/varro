@@ -74,14 +74,30 @@ test('creates a stable 50-step mixed-ownership action plan', () => {
   assert.deepEqual(
     first.slice(13, 19).map(({ action }) => action),
     [
-      'show file diffs',
+      'hide file diffs',
       'held scrollbar to top',
       'held scrollbar to bottom',
-      'hide file diffs',
+      'show file diffs',
       'held scrollbar to top',
       'held scrollbar to bottom',
     ]
   );
+});
+
+test('both planned diff toggles change the enabled AI-08 starting state', () => {
+  let enabled = true;
+  const transitions = [];
+  for (const step of buildActionPlan('visibility-regression')) {
+    if (!['show file diffs', 'hide file diffs'].includes(step.action)) continue;
+    const next = step.action === 'show file diffs';
+    assert.notEqual(next, enabled, `step ${step.step} requests an already-active setting`);
+    transitions.push([enabled, next]);
+    enabled = next;
+  }
+  assert.deepEqual(transitions, [
+    [true, false],
+    [false, true],
+  ]);
 });
 
 test('rejects AI workspaces outside the canonical fixture', async () => {

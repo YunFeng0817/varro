@@ -171,6 +171,62 @@ for (const scenario of [
   });
 }
 
+for (const alreadyEnabled of [false, true]) {
+  test(`file-diff setup handles an ${alreadyEnabled ? 'enabled' : 'disabled'} setting without guessing from mounted previews`, async (t) => {
+    const sent = [];
+    t.mock.method(globalThis, 'fetch', async () => ({
+      json: async () => [
+        {
+          type: 'page',
+          title: '[Extension Development Host]',
+          webSocketDebuggerUrl: 'ws://127.0.0.1/test',
+        },
+      ],
+    }));
+    let now = 0;
+    t.mock.method(Date, 'now', () => (now += 1_000));
+    const originalWebSocket = globalThis.WebSocket;
+    t.after(() => {
+      globalThis.WebSocket = originalWebSocket;
+    });
+    globalThis.WebSocket = class extends FakeSocket {
+      constructor() {
+        super();
+        queueMicrotask(() => this.emit('open'));
+      }
+      send(value) {
+        const request = JSON.parse(value);
+        sent.push(request);
+        const expression = request.params.expression ?? '';
+        const available =
+          !expression.includes('.quick-input-list') ||
+          (expression.includes('Varro: Hide File Diffs') ? alreadyEnabled : !alreadyEnabled);
+        queueMicrotask(() =>
+          this.emit('message', {
+            data: JSON.stringify({
+              id: request.id,
+              result: request.method === 'Runtime.evaluate' ? { result: { value: available } } : {},
+            }),
+          })
+        );
+      }
+      close() {}
+    };
+    const result = await executeVscodeCommand(12345, 'Varro: Show File Diffs', {
+      alreadySelectedCommand: 'Varro: Hide File Diffs',
+    });
+    assert.equal(result?.alreadySelected === true, alreadyEnabled);
+    assert.equal(
+      sent.filter((request) => request.params.key === 'Enter').length,
+      alreadyEnabled ? 0 : 2
+    );
+    assert.equal(
+      sent.filter((request) => request.params.key === 'Escape').length,
+      alreadyEnabled ? 2 : 0
+    );
+  });
+}
+
 function fakeElement(rect, { src = '', title = '' } = {}) {
   return {
     src,

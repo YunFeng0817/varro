@@ -42,12 +42,30 @@ test('retains original recovery bytes before a child can start or outlive the co
 test('preserves CRLF, missing final newline, and unchanged model output', async (t) => {
   for (const original of ['one\r\ntwo\r\n', 'one\r\ntwo', 'one']) {
     const { file, evidencePath, edit } = await fixture(t, original);
+    assert.deepEqual(
+      Buffer.concat([Buffer.from(original), Buffer.from(edit.appendText)]),
+      edit.edited
+    );
     const unchanged = await edit.restore(evidencePath);
     assert.equal(unchanged.unchanged, true);
     await writeFile(file, edit.edited);
     assert.equal((await edit.restore(evidencePath)).expectedEdit, true);
     assert.equal(await readFile(file, 'utf8'), original);
   }
+});
+
+test('the prompt suffix does not add a blank line to a newline-terminated file', async (t) => {
+  const { edit } = await fixture(t, 'existing content\n');
+  assert.equal(edit.appendText, '// VFZ AI18 transient test\n');
+});
+
+test('an extra model blank line remains an unexpected edit and is restored exactly', async (t) => {
+  const { edit, file } = await fixture(t, 'existing content\n');
+  await writeFile(file, `existing content\n\n${edit.appendText}`);
+  const result = await edit.restore();
+  assert.equal(result.expectedEdit, false);
+  assert.equal(result.restored, true);
+  assert.equal(await readFile(file, 'utf8'), 'existing content\n');
 });
 
 test('retains unexpected model content as evidence instead of promoting it to an expected edit', async (t) => {
