@@ -1033,7 +1033,7 @@ describe('SessionListView model details', () => {
 
   it.each([
     { name: 'GPT-6.1 Sol Fast', count: 1, text: 'GPT-6.1 Sol ' },
-    { name: 'GPT-6.1 Sol Ultrafast', count: 3, text: 'GPT-6.1 Sol ' },
+    { name: 'GPT-6.1 Sol Ultrafast', count: 2, text: 'GPT-6.1 Sol ' },
     { name: 'GPT-6.1 Sol', count: 0, text: 'GPT-6.1 Sol' },
   ])('renders $name with $count speed icons instead of emoji', async ({ name, count, text }) => {
     vi.spyOn(client.varro.session, 'diffSummary').mockResolvedValue({

@@ -3789,6 +3789,76 @@ describe('MessageList session scoping', () => {
     ]);
   });
 
+  it.each([
+    { speed: 'Fast', count: 1 },
+    { speed: 'Ultrafast', count: 2 },
+  ])(
+    'uses $count speed icons for $speed model transitions and tooltips',
+    async ({ speed, count }) => {
+      setState('activeSessionId', 'session-1');
+      setState('providers', [
+        {
+          id: 'openai',
+          name: 'OpenAI',
+          source: 'api',
+          models: {
+            standard: {
+              id: 'standard',
+              name: 'GPT-6.1 Sol',
+              capabilities: { reasoning: true, toolcall: true },
+              cost: { input: 0, output: 0 },
+            },
+            speedy: {
+              id: 'speedy',
+              name: `GPT-6.1 Sol ${speed}`,
+              capabilities: { reasoning: true, toolcall: true },
+              cost: { input: 0, output: 0 },
+            },
+          },
+        },
+      ]);
+      replaceMessages([
+        {
+          info: assistantMessage('assistant-1', { modelID: 'standard' }),
+          parts: [textPart('text-1', 'First response')],
+        },
+        {
+          info: assistantMessage('assistant-2', { modelID: 'speedy' }),
+          parts: [textPart('text-2', 'Second response')],
+        },
+        {
+          info: assistantMessage('assistant-3', { modelID: 'standard' }),
+          parts: [textPart('text-3', 'Third response')],
+        },
+      ]);
+
+      cleanup = render(() => MessageList(), container!);
+      await Promise.resolve();
+
+      const labels = container!.querySelectorAll(
+        '.model-change-indicator:not(.assistant-dialog-summary) .model-change-label'
+      );
+      expect(labels).toHaveLength(2);
+      for (const label of labels) {
+        expect(label.textContent).not.toContain('⚡');
+        for (const selector of ['.model-change-normal', '.model-change-narrow']) {
+          const version = label.querySelector(selector);
+          expect(version?.querySelectorAll('.model-speed-icon')).toHaveLength(count);
+          expect(version?.querySelector('.model-speed-icons-ultrafast') !== null).toBe(
+            speed === 'Ultrafast'
+          );
+        }
+      }
+
+      labels[0]?.dispatchEvent(new MouseEvent('mouseenter'));
+      await vi.advanceTimersByTimeAsync(300);
+      const tooltip = document.querySelector('[role="tooltip"] .model-change-tooltip');
+      expect(tooltip).not.toBeNull();
+      expect(tooltip?.textContent).not.toContain('⚡');
+      expect(tooltip?.querySelectorAll('.model-speed-icon')).toHaveLength(count);
+    }
+  );
+
   it('does not treat manual compaction as a reasoning-level change', async () => {
     setState('activeSessionId', 'session-1');
     setState('providers', [

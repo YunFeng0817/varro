@@ -572,57 +572,65 @@ describe('MessagePart', () => {
     );
   });
 
-  it('shows model and variant labels when subagent reasoning changes models', () => {
-    setState('providers', [
-      {
-        id: 'openai',
-        name: 'OpenAI',
-        source: 'api',
-        models: {
-          'gpt-4o': {
-            id: 'gpt-4o',
-            name: 'GPT-4o',
-            capabilities: { toolcall: true },
-            cost: { input: 0, output: 0 },
-          },
-          'gpt-5': {
-            id: 'gpt-5',
-            name: 'GPT-5',
-            capabilities: { toolcall: true, reasoning: true },
-            cost: { input: 0, output: 0 },
-            variants: {
-              'high-reasoning': {},
+  it.each([
+    { speed: '', count: 0 },
+    { speed: ' Fast', count: 1 },
+    { speed: ' Ultrafast', count: 2 },
+  ])(
+    'shows model$speed and variant labels when subagent reasoning changes models',
+    ({ speed, count }) => {
+      setState('providers', [
+        {
+          id: 'openai',
+          name: 'OpenAI',
+          source: 'api',
+          models: {
+            'gpt-4o': {
+              id: 'gpt-4o',
+              name: 'GPT-4o',
+              capabilities: { toolcall: true },
+              cost: { input: 0, output: 0 },
+            },
+            'gpt-5': {
+              id: 'gpt-5',
+              name: `GPT-5${speed}`,
+              capabilities: { toolcall: true, reasoning: true },
+              cost: { input: 0, output: 0 },
+              variants: {
+                'high-reasoning': {},
+              },
             },
           },
         },
-      },
-    ]);
+      ]);
 
-    const parent = assistantMessage('parent-1', {
-      providerID: 'openai',
-      modelID: 'gpt-4o',
-    });
-    const child = assistantMessage('child-1', {
-      parentID: 'parent-1',
-      providerID: 'openai',
-      modelID: 'gpt-5',
-      mode: 'subagent',
-      variant: 'high-reasoning',
-    });
+      const parent = assistantMessage('parent-1', {
+        providerID: 'openai',
+        modelID: 'gpt-4o',
+      });
+      const child = assistantMessage('child-1', {
+        parentID: 'parent-1',
+        providerID: 'openai',
+        modelID: 'gpt-5',
+        mode: 'subagent',
+        variant: 'high-reasoning',
+      });
 
-    setState('messages', [
-      { info: parent, parts: [] },
-      { info: child, parts: [] },
-    ]);
+      setState('messages', [
+        { info: parent, parts: [] },
+        { info: child, parts: [] },
+      ]);
 
-    renderPart(reasoningPart('**Planning**\n\nStep one', { messageID: child.id }), {
-      messageInfo: child,
-    });
+      renderPart(reasoningPart('**Planning**\n\nStep one', { messageID: child.id }), {
+        messageInfo: child,
+      });
 
-    expect(container?.querySelector('.thinking-label-text')?.textContent).toBe(
-      'Planning · GPT-5 · High Reasoning'
-    );
-  });
+      const label = container?.querySelector('.thinking-label-text');
+      expect(label?.textContent?.replace(/\s+/g, ' ')).toBe('Planning · GPT-5 · High Reasoning');
+      expect(label?.querySelectorAll('.model-speed-icon')).toHaveLength(count);
+      expect(label?.textContent).not.toContain('⚡');
+    }
+  );
 
   it('shows a No thinking detail when a subagent drops an unsupported variant', () => {
     setState('providers', [

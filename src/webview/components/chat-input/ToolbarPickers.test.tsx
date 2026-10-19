@@ -1390,6 +1390,7 @@ describe('ToolbarPickers', () => {
           ?.style.getPropertyValue('--ui-icon-mask')
       ).toBe(toCssUrl(flashSolidIcon));
       expect(container?.querySelectorAll('.model-speed-icon')).toHaveLength(1);
+      expect(container?.querySelector('.model-speed-icons-ultrafast')).toBeNull();
 
       button?.dispatchEvent(new MouseEvent('mouseenter'));
       await vi.advanceTimersByTimeAsync(1_500);
@@ -1405,7 +1406,7 @@ describe('ToolbarPickers', () => {
   );
 
   it.each(['GPT-6 Astra Ultrafast', 'Claude Opus 5 Ultrafast'])(
-    'renders %s with three solid flash icons and the original fast warning styling',
+    'renders %s with two clustered flash icons and the original fast warning styling',
     async (modelName) => {
       vi.useFakeTimers();
       cleanup = render(
@@ -1427,7 +1428,12 @@ describe('ToolbarPickers', () => {
       expect(container?.querySelector('.model-name-text')?.textContent).toBe(
         modelName.replace('Ultrafast', '')
       );
-      expect(container?.querySelectorAll('.model-speed-icon')).toHaveLength(3);
+      expect(container?.querySelectorAll('.model-speed-icon')).toHaveLength(2);
+      expect(
+        container
+          ?.querySelector('.model-speed-icons')
+          ?.classList.contains('model-speed-icons-ultrafast')
+      ).toBe(true);
       expect(container?.querySelector('.model-speed-label')).toBeNull();
       expect(
         container
@@ -1442,7 +1448,7 @@ describe('ToolbarPickers', () => {
     }
   );
 
-  it('groups three ultrafast solid flash icons under one cost tooltip in model lists', async () => {
+  it('groups two clustered ultrafast flash icons under one cost tooltip in model lists', async () => {
     vi.useFakeTimers();
     cleanup = render(() => <FormattedModelName name="GPT-6 Astra Ultrafast" />, container!);
     const symbols = container?.querySelectorAll(
@@ -1450,7 +1456,8 @@ describe('ToolbarPickers', () => {
     );
     expect(symbols).toHaveLength(1);
     expect(symbols?.[0]?.classList.contains('model-speed-icons')).toBe(true);
-    expect(symbols?.[0]?.querySelectorAll('.model-speed-icon')).toHaveLength(3);
+    expect(symbols?.[0]?.classList.contains('model-speed-icons-ultrafast')).toBe(true);
+    expect(symbols?.[0]?.querySelectorAll('.model-speed-icon')).toHaveLength(2);
     expect(
       container
         ?.querySelector<HTMLElement>('.model-speed-icon')

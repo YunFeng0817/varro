@@ -749,7 +749,7 @@ describe('ModelsPanel', () => {
       '.models-model-name [aria-label="Fast mode may consume usage limits faster and cost more."]'
     );
     expect(fastSymbol?.querySelectorAll('.model-speed-icon')).toHaveLength(
-      speed === 'Ultrafast' ? 3 : 1
+      speed === 'Ultrafast' ? 2 : 1
     );
     expect(fastSymbol?.nextElementSibling?.classList.contains('model-speed-label')).toBe(true);
     expect(fastSymbol?.nextElementSibling?.textContent).toBe(speed);
