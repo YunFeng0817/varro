@@ -1,7 +1,7 @@
 {
   "name": "varro",
   "displayName": "Varro: OpenCode Workbench",
-  "version": "0.33.10",
+  "version": "0.33.11",
   "description": "OpenCode agent workbench with project-aware chat, parallel sessions, plan and change review, model and permission controls, commit messages, and usage insights.",
   "categories": [
     "AI",
@@ -121,11 +121,6 @@
     "vite-plugin-solid": "2.11.14",
     "vitest": "5.0.5",
     "ws": "8.22.0"
-  },
-  "allowScripts": {
-    "@vscode/vsce-sign@2.1.0": true,
-    "esbuild@0.28.2": true,
-    "fsevents@2.3.3": true
   },
   "overrides": {
     "mermaid": {
@@ -271,7 +266,7 @@
       {
         "command": "varro.chat.addProblemsToContext",
         "title": "Varro: Add to Context",
-        "enablement": "config.varro.chat.enableProblemsContext"
+        "enablement": "config.varro.chat.autoAttachProblems"
       },
       {
         "command": "varro.chat.addSelectionToContext",
@@ -564,7 +559,12 @@
           "default": false,
           "description": "Show the interactive tiled histogram at the top of empty chats. Animates while hovered."
         },
-        "varro.chat.enableProblemsContext": {
+        "varro.chat.autoAttachActiveFile": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically attach the active file or editor selection to chat. Disable to hide the automatic file chip and exclude this context from prompts, including queued messages. Manually attached files are unaffected."
+        },
+        "varro.chat.autoAttachProblems": {
           "type": "boolean",
           "default": true,
           "description": "Enable VS Code Problems context in chat. Disable to hide the Problems attachment chip and exclude diagnostics from prompts, including queued messages."
@@ -710,6 +710,11 @@
   "volta": {
     "node": "24.22.0",
     "npm": "12.2.1"
+  },
+  "allowScripts": {
+    "@vscode/vsce-sign@2.1.0": true,
+    "esbuild@0.28.2": true,
+    "fsevents@2.3.3": true
   },
   "capabilities": {
     "virtualWorkspaces": {

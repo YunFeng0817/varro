@@ -110,6 +110,21 @@ describe('side-question prompt compatibility and context', () => {
     expect(sideQuestionView()?.context).toBe(context);
   });
 
+  it('omits automatic file and Problems context when their settings are disabled', () => {
+    setState('autoAttachActiveFile', false);
+    setState('autoAttachProblems', false);
+    setState('editorContext', {
+      workspacePath: '/repo',
+      activeFile: { path: '/repo/file.ts', relativePath: 'file.ts', language: 'typescript' },
+      selection: null,
+      diagnostics: [
+        { path: '/repo/file.ts', severity: 'error', line: 1, message: 'Automatic error' },
+      ],
+    });
+    expect(openSideQuestion('Why?')).toBe(true);
+    expect(sideQuestionView()?.context ?? '').toBe('');
+  });
+
   it('includes pasted text instead of sending an unreadable data URL', () => {
     setState('droppedFiles', [
       {
@@ -126,7 +141,7 @@ describe('side-question prompt compatibility and context', () => {
   });
 
   it('includes explicitly attached diagnostics instead of losing inline problem context', () => {
-    setState('enableProblemsContext', true);
+    setState('autoAttachProblems', true);
     setState('attachedDiagnostics', {
       inline: true,
       total: 1,
@@ -145,7 +160,7 @@ describe('side-question prompt compatibility and context', () => {
   });
 
   it('blocks a disabled problems marker rather than stripping it from the prompt', () => {
-    setState('enableProblemsContext', false);
+    setState('autoAttachProblems', false);
     setInputText('/btw [Problems] Explain');
     expect(sideQuestionUnavailableReason()).toContain('Enable problems context');
     expect(openSideQuestion('[Problems] Explain')).toBe(false);

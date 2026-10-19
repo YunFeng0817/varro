@@ -1084,7 +1084,7 @@ describe('SessionSendOperations', () => {
     async ({ enabled, integrationEnabled }) => {
       appStore.setState('activeSessionId', 'session-1');
       appStore.setState('issuesEnabled', !enabled);
-      appStore.setState('enableProblemsContext', integrationEnabled);
+      appStore.setState('autoAttachProblems', integrationEnabled);
       const sendAsync = vi.fn<SendAsync>(async () => {});
       const operations = createOperations(sendAsync);
       await operations.sendMessage('queued problem question', {
@@ -1169,6 +1169,49 @@ describe('SessionSendOperations', () => {
       ],
     });
   });
+
+  it.each(['recorded', 'legacy', 'manual'] as const)(
+    'respects auto-attachment opt-outs when sending a queued %s file',
+    async (kind) => {
+      appStore.setState('activeSessionId', 'session-1');
+      appStore.setState('autoAttachActiveFile', false);
+      appStore.setState('autoAttachProblems', false);
+      const sendAsync = vi.fn<SendAsync>(async () => {});
+      const operations = createOperations(sendAsync);
+      await operations.sendMessage('Review', {
+        queuedAttachments: {
+          droppedFiles: [
+            {
+              path: '/repo/app.ts',
+              relativePath: 'app.ts',
+              type: 'file',
+              attachmentSequence: kind === 'manual' ? 1 : undefined,
+              lineRanges: [{ startLine: 2, endLine: 3 }],
+            },
+          ],
+        },
+        queuedContext: {
+          currentDocumentEnabled: true,
+          autoAttachedFilePath: kind === 'recorded' ? '/repo/app.ts' : undefined,
+          issuesEnabled: true,
+          editorContext: {
+            workspacePath: '/repo',
+            activeFile: { path: '/repo/app.ts', relativePath: 'app.ts', language: 'typescript' },
+            selection: { startLine: 2, endLine: 3 },
+            diagnostics: [
+              { path: '/repo/app.ts', line: 2, severity: 'error', message: 'Automatic error' },
+            ],
+          },
+        },
+        preserveComposer: true,
+      });
+      expect(sendAsync).toHaveBeenCalledOnce();
+      expect(sendAsync.mock.calls[0]![1].parts).toEqual([
+        { type: 'text', text: 'Review' },
+        ...(kind === 'manual' ? [{ type: 'text', text: '[Selection from app.ts lines 2-3]' }] : []),
+      ]);
+    }
+  );
 
   it('scopes a queued dispatch to its original workspace', async () => {
     appStore.setState('activeSessionId', 'session-2');

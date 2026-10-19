@@ -388,7 +388,8 @@ afterEach(() => {
   setState('attachedDiagnostics', null);
   setState('inlineProblems', []);
   setState('issuesEnabled', true);
-  setState('enableProblemsContext', true);
+  setState('autoAttachProblems', true);
+  setState('autoAttachActiveFile', true);
   setState('promptCompletionModel', '');
   setState('debugShowQuotaWarning', false);
   setState('editorContext', {
@@ -5249,6 +5250,24 @@ describe('ChatInput', () => {
     );
   });
 
+  it('does not generate a queued file attachment when active-file auto-attachment is disabled', async () => {
+    setState('autoAttachActiveFile', false);
+    setInputText('Review');
+    setIsLoading(true);
+    setState('activeSessionId', 'session-1');
+    setState('editorContext', {
+      workspacePath: '/repo',
+      activeFile: { path: '/repo/app.ts', relativePath: 'app.ts', language: 'typescript' },
+      selection: { startLine: 2, endLine: 3 },
+      diagnostics: [],
+    });
+    cleanup = render(() => ChatInput(), container!);
+    container!.querySelector<HTMLButtonElement>('[aria-label="Add to queue (Enter)"]')!.click();
+    await flushAsyncWork();
+    expect(state.queuedMessages[0]?.droppedFiles).toEqual([]);
+    expect(state.queuedMessages[0]?.queuedContext?.autoAttachedFilePath).toBeUndefined();
+  });
+
   it('queues under the composer session when navigation races slash-command detection', async () => {
     setIsLoading(true);
     setState('activeSessionId', 'session-1');
@@ -9798,13 +9817,32 @@ describe('ChatInput', () => {
     expect(container?.querySelector('.rich-composer')?.textContent).not.toContain(
       'Private diagnostic detail'
     );
-    setState('enableProblemsContext', false);
+    setState('autoAttachProblems', false);
     await flushAsyncWork();
     expect(problemChip()).toBeUndefined();
     expect(state.issuesEnabled).toBe(true);
-    setState('enableProblemsContext', true);
+    setState('autoAttachProblems', true);
     await flushAsyncWork();
     expect(problemChip().getAttribute('aria-pressed')).toBe('true');
+  });
+
+  it('hides automatic file chips without hiding explicitly attached files', async () => {
+    setState('editorContext', {
+      workspacePath: '/repo',
+      activeFile: { path: '/repo/app.ts', relativePath: 'app.ts', language: 'typescript' },
+      selection: null,
+      diagnostics: [],
+    });
+    cleanup = render(() => ChatInput(), container!);
+    const attachmentText = () =>
+      container!.querySelector('.chat-attachments-container')?.textContent ?? '';
+    expect(attachmentText()).toContain('app.ts');
+    setState('autoAttachActiveFile', false);
+    await flushAsyncWork();
+    expect(attachmentText()).not.toContain('app.ts');
+    setState('droppedFiles', [{ path: '/repo/app.ts', relativePath: 'app.ts', type: 'file' }]);
+    await flushAsyncWork();
+    expect(attachmentText()).toContain('app.ts');
   });
 
   it('accumulates bulb-menu problems as attachments without changing the draft', async () => {

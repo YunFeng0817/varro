@@ -84,7 +84,8 @@ function createState(overrides?: {
   editorContext?: EditorContext;
   inlineProblems?: InlineProblemAttachment[];
   issuesEnabled?: boolean;
-  enableProblemsContext?: boolean;
+  autoAttachProblems?: boolean;
+  autoAttachActiveFile?: boolean;
   issuesAttachment?: { count: number; text: string; inline?: boolean } | null;
   terminalSelection?: { text: string; terminalName: string } | null;
   droppedFiles?: DroppedFile[];
@@ -124,6 +125,37 @@ function createState(overrides?: {
 }
 
 describe('session-send helpers', () => {
+  it.each([false, true])(
+    'ignores automatic active-file context while preserving manual files, with unsaved buffer %s',
+    (unsaved) => {
+      const composer = createState({
+        autoAttachActiveFile: false,
+        editorContext: createEditorContext({
+          activeFile: { path: '/repo/app.ts', relativePath: 'app.ts', language: 'typescript' },
+          selection: { startLine: 3, endLine: 5 },
+          editorText: unsaved
+            ? {
+                kind: 'dirty-buffer',
+                path: '/repo/app.ts',
+                relativePath: 'app.ts',
+                language: 'typescript',
+                range: { startLine: 1, endLine: 5 },
+                text: 'private unsaved text',
+                truncated: false,
+              }
+            : undefined,
+        }),
+      });
+      const send = () => buildSessionSendBody(composer, 'session-1', 'Review', () => true);
+      expect(send()?.body.parts).toEqual([{ type: 'text', text: 'Review' }]);
+      composer.droppedFiles = [{ path: '/repo/app.ts', relativePath: 'app.ts', type: 'file' }];
+      expect(send()?.body.parts).toEqual([
+        { type: 'text', text: 'Review' },
+        { type: 'text', text: '[Attached file: app.ts]' },
+      ]);
+    }
+  );
+
   it('keeps action text and routing intact while omitting skill references and all automatic context', () => {
     const composer = createState({
       terminalSelection: { text: 'Draft output', terminalName: 'zsh' },
@@ -291,13 +323,13 @@ describe('session-send helpers', () => {
       { type: 'text', text: '[Attached diagnostics: 1 of 1]\nERROR a.ts:1 - Captured error' },
     ]);
     expect(send('Explain')?.body.parts).toEqual([{ type: 'text', text: 'Explain' }]);
-    composer.enableProblemsContext = false;
+    composer.autoAttachProblems = false;
     expect(send('Explain [Problems]')?.body.parts).toEqual([{ type: 'text', text: 'Explain ' }]);
   });
   it('excludes explicit problem attachments when the integration is disabled', () => {
     const result = buildSessionSendBody(
       createState({
-        enableProblemsContext: false,
+        autoAttachProblems: false,
         attachedDiagnostics: {
           total: 1,
           diagnostics: [

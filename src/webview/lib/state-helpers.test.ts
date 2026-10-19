@@ -327,6 +327,7 @@ describe('state helpers', () => {
           terminalSelection: null,
           queuedContext: {
             currentDocumentEnabled: true,
+            autoAttachedFilePath: '/repo/src/app.ts',
             issuesEnabled: false,
             editorContext: {
               workspacePath: '/repo',
@@ -379,6 +380,7 @@ describe('state helpers', () => {
       ]);
       expect(stateModule.state.queuedMessages[0]?.queuedContext).toEqual({
         currentDocumentEnabled: true,
+        autoAttachedFilePath: '/repo/src/app.ts',
         issuesEnabled: false,
         editorContext: {
           workspacePath: '/repo',

@@ -46,7 +46,8 @@ describe('readExtensionConfigState', () => {
       showEmptyStateHistogram: false,
       debugShowQuotaWarning: false,
       debugResetWarningDays: 5,
-      enableProblemsContext: true,
+      autoAttachProblems: true,
+      autoAttachActiveFile: true,
       chatFontSize: 13,
       chatEditorFontSize: 12,
       chatFontFamily: 'default',
@@ -98,8 +99,13 @@ describe('readExtensionConfigState', () => {
   });
 
   it('reads the Problems context opt-out', () => {
-    mocks.values.set('varro.chat.enableProblemsContext', false);
-    expect(readExtensionConfigState().enableProblemsContext).toBe(false);
+    mocks.values.set('varro.chat.autoAttachProblems', false);
+    expect(readExtensionConfigState().autoAttachProblems).toBe(false);
+  });
+
+  it('reads the active-file auto-attachment opt-out', () => {
+    mocks.values.set('varro.chat.autoAttachActiveFile', false);
+    expect(readExtensionConfigState().autoAttachActiveFile).toBe(false);
   });
 
   it('prefers the Varro chat font size override', () => {

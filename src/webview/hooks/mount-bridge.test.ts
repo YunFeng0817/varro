@@ -912,7 +912,8 @@ describe('mount bridge helpers', () => {
         showEmptyStateHistogram: true,
         remoteImages: 'ask',
         debugShowQuotaWarning: true,
-        enableProblemsContext: false,
+        autoAttachProblems: false,
+        autoAttachActiveFile: false,
         desktopSessionPaneSide: 'right',
         defaultPermissionMode: 'full',
         chatFontSize: 16,
@@ -937,7 +938,8 @@ describe('mount bridge helpers', () => {
     expect(setShowTurnTimer).toHaveBeenCalledWith(true);
     expect(setShowEmptyStateHistogram).toHaveBeenCalledWith(true);
     expect(setState).toHaveBeenCalledWith('debugShowQuotaWarning', true);
-    expect(setState).toHaveBeenCalledWith('enableProblemsContext', false);
+    expect(setState).toHaveBeenCalledWith('autoAttachProblems', false);
+    expect(setState).toHaveBeenCalledWith('autoAttachActiveFile', false);
     expect(document.documentElement.style.getPropertyValue('--varro-chat-font-size')).toBe('16px');
     expect(document.documentElement.style.getPropertyValue('--varro-chat-editor-font-size')).toBe(
       '15px'
