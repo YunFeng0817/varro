@@ -123,6 +123,7 @@ beforeEach(() => {
   setState('activeSessionId', null);
   setState('editorContext', {
     workspacePath: null,
+    workspaceFolders: [],
     activeFile: null,
     selection: null,
     diagnostics: [],
@@ -1439,6 +1440,163 @@ describe('MarkdownRenderer', () => {
         data: { type: 'vscode/open-result', payload: { requestId, status: 'opened' } },
       })
     );
+  });
+
+  it.each([
+    ['/other/dap/dashboard.sql#L68', '/other/dap/dashboard.sql', 68],
+    ['./src/query.py#L91', '/repo/src/query.py', 91],
+    ['./src/query.py#L91-L105', '/repo/src/query.py', 91],
+    ['./src/query.py#L91-105', '/repo/src/query.py', 91],
+    ['C:/work/query.py#L91', 'C:/work/query.py', 91],
+    ['file:///other/dashboard.sql#L68', '/other/dashboard.sql', 68],
+  ])('opens the file and line in Markdown target %s', (href, path, line) => {
+    const send = vi.fn();
+    window.__sendToExtension = send;
+    setState('editorContext', {
+      workspacePath: '/repo',
+      workspaceFolders: [
+        { name: 'repo', path: '/repo' },
+        { name: 'other', path: '/other' },
+      ],
+      activeFile: null,
+      selection: null,
+      diagnostics: [],
+    });
+    cleanup = render(
+      () => MarkdownRenderer({ content: `[Open query](${href})`, cacheByContent: true }),
+      container!
+    );
+
+    const link = container?.querySelector<HTMLAnchorElement>('a.file-path-link');
+    expect(link?.dataset.file).toBe(JSON.stringify({ path, line }));
+    if (!path.startsWith('C:')) expect(link?.getAttribute('href')).toBe(`${path}:${line}`);
+    expect(JSON.parse(link?.getAttribute('data-vscode-context') ?? '{}')).toMatchObject({
+      varroFilePath: path,
+      webviewSection: 'varroFileLink',
+    });
+    dispatchAnchorClick(link);
+    expect(send).toHaveBeenCalledWith({
+      type: 'vscode/open',
+      payload: { path, line, kind: 'file', requestId: expect.any(Number) },
+    });
+    const requestId = send.mock.calls[0]![0].payload.requestId;
+    window.dispatchEvent(
+      new MessageEvent('message', {
+        data: { type: 'vscode/open-result', payload: { requestId, status: 'opened' } },
+      })
+    );
+  });
+
+  it.each([false, true])(
+    'keeps multi-root citation targets instead of resolving code labels with cacheByContent=%s',
+    async (cacheByContent) => {
+      const primary = '/projects/wmg2-dsc/amplify';
+      const sibling = '/projects/df-data-pipelines';
+      const citations = [
+        {
+          label: 'dap/SwDmdDeliveryDaily/sql/dsp_optimization_dashboard.sql',
+          path: `${sibling}/dap/SwDmdDeliveryDaily/sql/dsp_optimization_dashboard.sql`,
+          line: 68,
+        },
+        {
+          label: 'sw_dmd_delivery_daily_meta.sql:32',
+          path: `${sibling}/dap/SwDmdDeliveryDaily/elt_config/sw_dmd_delivery_daily_meta.sql`,
+          line: 32,
+        },
+        {
+          label: 'amplify/dwh/model/dashboard/query.py:91',
+          path: `${primary}/dwh/model/dashboard/query.py`,
+          line: 91,
+        },
+      ];
+      const send = vi.fn();
+      window.__sendToExtension = send;
+      setState('editorContext', {
+        workspacePath: primary,
+        workspaceFolders: [
+          { name: 'amplify', path: primary },
+          { name: 'df-data-pipelines', path: sibling },
+        ],
+      });
+      cleanup = render(
+        () =>
+          MarkdownRenderer({
+            content: citations
+              .map(({ label, path, line }) => `[\`${label}\`](${path}#L${line})`)
+              .join('\n\n'),
+            cacheByContent,
+          }),
+        container!
+      );
+
+      const links = container!.querySelectorAll<HTMLAnchorElement>('a.file-path-link');
+      expect(links).toHaveLength(citations.length);
+      for (const [index, { path, line }] of citations.entries()) {
+        const link = links[index]!;
+        expect(link.dataset.file).toBe(JSON.stringify({ path, line }));
+        expect(link.getAttribute('href')).toBe(`${path}:${line}`);
+        expect(JSON.parse(link.getAttribute('data-vscode-context') ?? '{}')).toMatchObject({
+          varroFilePath: path,
+        });
+        link.dispatchEvent(new MouseEvent('mouseenter'));
+        await vi.waitFor(() =>
+          expect(document.querySelector('[role="tooltip"]')?.textContent).toBe(
+            `${path} (line ${line})`
+          )
+        );
+        link.dispatchEvent(new MouseEvent('mouseleave'));
+        dispatchAnchorClick(link);
+        expect(send).toHaveBeenLastCalledWith({
+          type: 'vscode/open',
+          payload: { path, line, kind: 'file', requestId: expect.any(Number) },
+        });
+        const requestId = send.mock.lastCall![0].payload.requestId;
+        window.dispatchEvent(
+          new MessageEvent('message', {
+            data: { type: 'vscode/open-result', payload: { requestId, status: 'opened' } },
+          })
+        );
+      }
+    }
+  );
+
+  it('opens line fragments on raw HTML file anchors', () => {
+    const send = vi.fn();
+    window.__sendToExtension = send;
+    cleanup = render(
+      () => MarkdownRenderer({ content: '<a href="/other/query.py#L91-L105">Open query</a>' }),
+      container!
+    );
+
+    dispatchAnchorClick(container?.querySelector<HTMLAnchorElement>('a'));
+    expect(send).toHaveBeenCalledWith({
+      type: 'vscode/open',
+      payload: { path: '/other/query.py', line: 91, kind: 'file', requestId: expect.any(Number) },
+    });
+    const requestId = send.mock.calls[0]![0].payload.requestId;
+    window.dispatchEvent(
+      new MessageEvent('message', {
+        data: { type: 'vscode/open-result', payload: { requestId, status: 'opened' } },
+      })
+    );
+  });
+
+  it.each([
+    '/repo/query.py#section',
+    '/repo/query.py#L0',
+    '/repo/query.py#L91-other',
+    '/repo/query.py?view=source#L91',
+    '//example.test/query.py#L91',
+    '#L91',
+  ])('does not treat unsupported fragment target %s as a file', (href) => {
+    const send = vi.fn();
+    window.__sendToExtension = send;
+    cleanup = render(() => MarkdownRenderer({ content: `[Open query](${href})` }), container!);
+
+    const link = container?.querySelector<HTMLAnchorElement>('a');
+    expect(link?.hasAttribute('href')).toBe(false);
+    dispatchAnchorClick(link);
+    expect(send).not.toHaveBeenCalled();
   });
 
   it('links file references with parenthesized line numbers', () => {
