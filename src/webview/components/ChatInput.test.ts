@@ -47,6 +47,7 @@ import {
   manualWorkspaceSelection,
   setManualWorkspaceSelection,
   setError,
+  error as sendError,
   setSessionUsageLimit,
 } from '../lib/state';
 import { handleWorkspaceSelectionFailure } from '../lib/workspace-selection';
@@ -7262,6 +7263,58 @@ describe('ChatInput', () => {
     ]);
   });
 
+  it.each(['response', 'event'] as const)(
+    'does not reinsert an accepted steer into the queue during %s acknowledgement',
+    async (acknowledgement) => {
+      setupMatchingActiveTurn();
+      setIsLoading(true);
+      setState('activeSessionId', 'session-1');
+      setState('queuedMessages', [
+        { id: 'q1', sessionId: 'session-1', text: 'Change direction' },
+        { id: 'q2', sessionId: 'session-1', text: 'Later follow-up' },
+      ]);
+      let resolveSend: ((sent: boolean) => void) | undefined;
+      sendMessageMock.mockImplementationOnce(
+        () => new Promise<boolean>((resolve) => (resolveSend = resolve))
+      );
+      cleanup = render(() => ChatInput(), container!);
+      container?.querySelector<HTMLButtonElement>('.chat-queue-action')?.click();
+      await flushAsyncWork();
+      expect(resolveSend).toBeDefined();
+      expect(container?.querySelector('[data-steered-message-id="q1"]')).not.toBeNull();
+
+      const reinserted: string[] = [];
+      const observer = new MutationObserver((records) => {
+        for (const record of records) {
+          for (const node of record.addedNodes) {
+            if (!(node instanceof Element)) continue;
+            if (node.matches('[data-queued-message-id="q1"]')) reinserted.push('q1');
+            if (node.querySelector('[data-queued-message-id="q1"]')) reinserted.push('q1');
+          }
+        }
+      });
+      observer.observe(container!, { childList: true, subtree: true });
+      try {
+        if (acknowledgement === 'event') {
+          emitServerEvent('session.next.prompt.admitted', {
+            sessionID: 'session-1',
+            delivery: 'steer',
+            prompt: { text: 'Change direction' },
+          });
+          await flushAsyncWork();
+        }
+        resolveSend?.(true);
+        await flushAsyncWork();
+
+        expect(reinserted).toEqual([]);
+        expect(state.queuedMessages.map((item) => item.id)).toEqual(['q2']);
+        expect(sendMessageMock).toHaveBeenCalledTimes(1);
+      } finally {
+        observer.disconnect();
+      }
+    }
+  );
+
   it('removes a pending queued steer when the backend admits it', async () => {
     setupMatchingActiveTurn();
     setIsLoading(true);
@@ -7339,6 +7392,191 @@ describe('ChatInput', () => {
     });
     expect(state.queuedMessages.map((item) => item.id)).toEqual(['q1', 'q2']);
     expect(container?.querySelector('[aria-label="Retry send as Steer"]')).not.toBeNull();
+  });
+
+  it.each(['steer', 'queue'] as const)(
+    'retries a queued %s through the session directory instead of the selected workspace folder',
+    async (mode) => {
+      vi.useFakeTimers();
+      setupMatchingActiveTurn();
+      setIsLoading(mode === 'steer');
+      setState('activeSessionId', 'session-1');
+      setState('sessions', [
+        session('session-1', 1, { directory: '/workspace-root', workspaceScope: 'workspace' }),
+      ]);
+      setState('editorContext', 'workspacePath', '/selected-folder');
+      const queuedContext = {
+        editorContext: {
+          workspacePath: '/selected-folder',
+          workspaceDirectory: '/workspace-root',
+          activeFile: null,
+          selection: null,
+          diagnostics: [],
+        },
+        currentDocumentEnabled: false,
+      };
+      setState('queuedMessages', [
+        {
+          id: 'q1',
+          sessionId: 'session-1',
+          messageId: 'msg_original',
+          text: 'Retry in the owning workspace',
+          queuedContext,
+        },
+      ]);
+      queuedMessageWasAdmittedMock.mockResolvedValue(false);
+      sendMessageMock.mockResolvedValue(true);
+      cleanup = render(() => ChatInput(), container!);
+
+      if (mode === 'steer') {
+        container?.querySelector<HTMLButtonElement>('.chat-queue-action')?.click();
+      } else {
+        await vi.advanceTimersByTimeAsync(300);
+      }
+      await flushAsyncWork();
+
+      expect(queuedMessageWasAdmittedMock).toHaveBeenCalledWith(
+        'session-1',
+        'msg_original',
+        '/workspace-root',
+        { itemId: 'q1', lease: expect.any(Number) }
+      );
+      expect(sendMessageMock).toHaveBeenCalledWith(
+        'Retry in the owning workspace',
+        expect.objectContaining({
+          messageId: 'msg_original',
+          targetSessionId: 'session-1',
+          workspaceDirectory: '/workspace-root',
+          queuedContext,
+        })
+      );
+      expect(state.queuedMessages).toEqual([]);
+    }
+  );
+
+  it('shows a steering retry history error and retries without changing the message identity', async () => {
+    setupMatchingActiveTurn();
+    setIsLoading(true);
+    setState('activeSessionId', 'session-1');
+    setState('queuedMessages', [
+      { id: 'q1', sessionId: 'session-1', messageId: 'msg_original', text: 'Retry me' },
+    ]);
+    queuedMessageWasAdmittedMock.mockRejectedValueOnce(new Error('404 Session not found'));
+    queuedMessageWasAdmittedMock.mockResolvedValueOnce(false);
+    sendMessageMock.mockResolvedValue(true);
+    cleanup = render(() => ChatInput(), container!);
+
+    container?.querySelector<HTMLButtonElement>('.chat-queue-action')?.click();
+    await flushAsyncWork();
+
+    expect(sendError()).toContain('404 Session not found');
+    expect(state.queuedMessages[0]?.messageId).toBe('msg_original');
+    expect(sendMessageMock).not.toHaveBeenCalled();
+    const retry = container?.querySelector<HTMLButtonElement>('[aria-label="Retry send as Steer"]');
+    expect(retry).not.toBeNull();
+    retry?.click();
+    await flushAsyncWork();
+
+    expect(sendMessageMock).toHaveBeenCalledWith(
+      'Retry me',
+      expect.objectContaining({ messageId: 'msg_original' })
+    );
+    expect(sendError()).toBeNull();
+    expect(state.queuedMessages).toEqual([]);
+  });
+
+  it('shows feedback when a steering dispatch claim is denied', async () => {
+    setupMatchingActiveTurn();
+    setIsLoading(true);
+    setState('activeSessionId', 'session-1');
+    setState('queuedMessages', [{ id: 'q1', sessionId: 'session-1', text: 'Retry me' }]);
+    defaultBridgeSend = (message) => {
+      if (message.type !== 'queued-messages/claim') return;
+      queueMicrotask(() => applyQueuedMessageClaimResult({ ...message.payload, granted: false }));
+    };
+    fixture<{ __sendToExtension?: (message: WebviewMessage) => void }>(window).__sendToExtension =
+      defaultBridgeSend;
+    cleanup = render(() => ChatInput(), container!);
+
+    container?.querySelector<HTMLButtonElement>('.chat-queue-action')?.click();
+    await flushAsyncWork();
+
+    expect(sendError()).toContain('dispatch');
+    expect(state.queuedMessages).toHaveLength(1);
+    expect(sendMessageMock).not.toHaveBeenCalled();
+    expect(container?.querySelector('[aria-label="Retry send as Steer"]')).not.toBeNull();
+  });
+
+  it('shows feedback when a steering dispatch claim times out', async () => {
+    vi.useFakeTimers();
+    setupMatchingActiveTurn();
+    setIsLoading(true);
+    setState('activeSessionId', 'session-1');
+    setState('queuedMessages', [{ id: 'q1', sessionId: 'session-1', text: 'Retry me' }]);
+    defaultBridgeSend = () => {};
+    fixture<{ __sendToExtension?: (message: WebviewMessage) => void }>(window).__sendToExtension =
+      defaultBridgeSend;
+    cleanup = render(() => ChatInput(), container!);
+
+    container?.querySelector<HTMLButtonElement>('.chat-queue-action')?.click();
+    await vi.advanceTimersByTimeAsync(5_000);
+    await flushAsyncWork();
+
+    expect(sendError()).toContain('dispatch');
+    expect(state.queuedMessages).toHaveLength(1);
+    expect(sendMessageMock).not.toHaveBeenCalled();
+    expect(container?.querySelector('[aria-label="Retry send as Steer"]')).not.toBeNull();
+  });
+
+  it.each(['throws', 'returns false', 'reports error'] as const)(
+    'shows steering send feedback when the send %s',
+    async (result) => {
+      setupMatchingActiveTurn();
+      setIsLoading(true);
+      setState('activeSessionId', 'session-1');
+      setState('queuedMessages', [{ id: 'q1', sessionId: 'session-1', text: 'Retry me' }]);
+      sendMessageMock.mockImplementationOnce(async () => {
+        if (result === 'throws') throw new Error('Backend unavailable');
+        if (result === 'reports error') setError('Backend unavailable');
+        return false;
+      });
+      cleanup = render(() => ChatInput(), container!);
+
+      container?.querySelector<HTMLButtonElement>('.chat-queue-action')?.click();
+      await flushAsyncWork();
+
+      expect(sendError()).toContain(
+        result === 'returns false' ? 'Could not send steering message' : 'Backend unavailable'
+      );
+      expect(state.queuedMessages).toHaveLength(1);
+      expect(container?.querySelector('[aria-label="Retry send as Steer"]')).not.toBeNull();
+    }
+  );
+
+  it('does not show a late steering history error in another session', async () => {
+    setupMatchingActiveTurn();
+    setIsLoading(true);
+    setState('activeSessionId', 'session-1');
+    setState('queuedMessages', [
+      { id: 'q1', sessionId: 'session-1', messageId: 'msg_original', text: 'Retry me' },
+    ]);
+    let rejectHistory: ((error: Error) => void) | undefined;
+    queuedMessageWasAdmittedMock.mockImplementationOnce(
+      () => new Promise((_resolve, reject) => (rejectHistory = reject))
+    );
+    cleanup = render(() => ChatInput(), container!);
+
+    container?.querySelector<HTMLButtonElement>('.chat-queue-action')?.click();
+    await flushAsyncWork();
+    expect(rejectHistory).toBeDefined();
+    setState('activeSessionId', 'session-2');
+    setError('Keep the current session error');
+    rejectHistory?.(new Error('404 Session not found'));
+    await flushAsyncWork();
+
+    expect(sendError()).toBe('Keep the current session error');
+    expect(state.queuedMessages[0]?.messageId).toBe('msg_original');
+    expect(sendMessageMock).not.toHaveBeenCalled();
   });
 
   it('accepts restored inline-edit images before their preview finishes decoding', async () => {
@@ -7958,6 +8196,7 @@ describe('ChatInput', () => {
     await flushAsyncWork();
 
     expect(sendMessageMock).toHaveBeenCalledWith('Wait for the answer', {
+      workspaceDirectory: '/repo',
       messageId: expect.stringMatching(/^msg_/),
       agent: undefined,
       queuedAttachments: {

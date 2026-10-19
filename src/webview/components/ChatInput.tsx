@@ -348,6 +348,7 @@ import {
   acceptQueuedSteer,
   failedSteerQueuedMessageIds,
   getPromptEventText,
+  getQueuedMessageWorkspaceDirectory,
   sendWithQueuedModelSnapshot,
   sendQueuedAsSteer,
   canSteerQueuedMessage,
@@ -3729,11 +3730,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     setDispatchingQueuedMessageId(item.id);
     const priorAttemptId = item.messageId;
     const messageId = priorAttemptId ?? createOpenCodeMessageID();
-    const capturedWorkspaceDirectory = item.queuedContext?.editorContext.workspacePath;
-    const workspaceDirectory =
-      capturedWorkspaceDirectory === undefined
-        ? state.sessions.find((session) => session.id === item.sessionId)?.directory
-        : capturedWorkspaceDirectory || undefined;
+    const workspaceDirectory = getQueuedMessageWorkspaceDirectory(item);
     const currentWorkspaceDirectory = state.editorContext.workspacePath;
     const isForeignWorkspace =
       !!workspaceDirectory &&
