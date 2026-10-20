@@ -135,7 +135,6 @@ describe('V2 generated transcript rendering', () => {
         status: 'completed',
         reason: 'auto',
         summary: '## Objective\n\nGenerated context',
-        recent: '',
       },
       'session-1'
     );

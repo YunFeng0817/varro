@@ -28,6 +28,12 @@ for (const version of versions) {
   cancellation.signal.throwIfAborted();
   const packageName = version.startsWith('2.') ? '@opencode/cli' : 'opencode-ai';
   const prefix = join(run, version);
+  // npm 12 requires explicit trust for the pinned CLI's binary-install script.
+  await mkdir(prefix, { recursive: true });
+  await writeFile(
+    join(prefix, 'package.json'),
+    JSON.stringify({ private: true, allowScripts: { [`${packageName}@${version}`]: true } })
+  );
   const install = crossSpawn.sync(
     'npm',
     ['install', '--prefix', prefix, `${packageName}@${version}`],

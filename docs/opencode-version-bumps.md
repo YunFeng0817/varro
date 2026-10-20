@@ -21,4 +21,9 @@ V2 publishes `@opencode/cli` and `@opencode/client`. Keep the v1 SDK and support
 
 Run `npm run test:compatibility:adapters` after changing either adapter or the v2 dependency. It checks the actual published binaries and records observed versions. Use the served OpenAPI document and released package contracts when upstream `dev` or the documentation differs from the release. The v2.0.5 startup endpoint is `/api/status`; the newer documentation's `/api/info` is not available in that release.
 
+The runner's per-version manifest allows only that pinned CLI's install script,
+which npm 12 requires to replace the executable placeholder. Missing platform
+packages still block verification. Do not substitute an older binary under the
+target version or count another architecture as native-platform coverage.
+
 The optional real-editor startup check is `VARRO_SANDBOX_V2_COMMAND=/absolute/path/to/opencode node scripts/vscode-sandbox/run.mjs v2-first-run`. Update its expected version when changing the tested v2 release.

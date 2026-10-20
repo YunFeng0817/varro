@@ -376,7 +376,6 @@ describe('V2 generated transcript records', () => {
               status,
               reason: 'auto',
               summary: '## Objective\n\nGenerated instructions',
-              recent: '',
             };
       const adapter = new OpenCodeV2Adapter(async (_method, path) => ({
         data: path.endsWith('/inbox') ? [] : [record],

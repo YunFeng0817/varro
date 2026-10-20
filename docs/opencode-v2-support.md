@@ -25,7 +25,7 @@ update does not block later deletion. Cancelled updates check their signal befor
 reading, and before replacing the annotation file, so cancellation while queued or preparing a write
 does not commit that update.
 
-`npm run test:compatibility:adapters` installs published binaries into isolated directories and tests the production adapters. The current tested versions are v1 `1.19.3` and v2 `2.0.32`, alongside the v1 `1.16.0` and v2 `2.0.5` support floors. Release-specific results are recorded below. The checks cover managed startup, credential recovery in a second window, restart, multi-window recovery after process exit, bootstrap, workspace path encoding, v2 configuration precedence, session updates, deterministic streamed model responses, actual fixture-only tool execution, message pagination, tail editing, helper generation, fork/revert, deletion, and native v2 permissions/forms. The generated report is `artifacts/opencode-adapters/verified.json`.
+`npm run test:compatibility:adapters` installs published binaries into isolated directories and tests the production adapters. The current tested versions are v1 `1.19.3` and v2 `2.1.1`, alongside the v1 `1.16.0` and v2 `2.0.5` support floors. Release-specific results are recorded below. The checks cover managed startup, credential recovery in a second window, restart, multi-window recovery after process exit, bootstrap, workspace path encoding, v2 configuration precedence, session updates, deterministic streamed model responses, actual fixture-only tool execution, message pagination, tail editing, helper generation, fork/revert, deletion, and native v2 permissions/forms. The generated report is `artifacts/opencode-adapters/verified.json`.
 
 Fresh VS Code sandbox windows passed `v2-first-run` and the existing `healthy-first-run` scenario. These editor checks verify activation, ownership, health, and event-stream connection. `test:compatibility:ui` additionally exercises the actual composer, successful replies, pre-turn failures, HTTP 401 handling, recovery through a working provider, and reopening history. Full visual streaming performance remains a separate verification task.
 
@@ -83,6 +83,88 @@ resolve to `literal/directory`. V2 location queries retain their normal URL enco
 The released-server adapter tests cover exact workspace resolution for Japanese text, emoji,
 and literal percent escapes. Unit tests also cover header construction with embedded newlines
 and preservation of Windows separators and casing.
+
+### 2.1.1 compatibility review
+
+Reviewed v2.0.32 to v2.1.1, `843a6c51` through `133b1ebf`, including the
+intentional 2.1 HTTP, event, and generated-client contract changes. Tool lifecycle
+events now project `native` replay data into Varro's existing call/result fields,
+with the pre-2.1 `state` and `resultState` fallback retained. Regression tests
+cover called, successful, and failed tools on both shapes.
+
+Text/reasoning and assistant replay fields also become `native`, but Varro does
+not consume those opaque fields. Compaction no longer requires `recent`; the
+server owns kept-message references and native replacement windows. Updated typed
+fixtures retain the existing compaction divider and status checks. The removed
+transitional `session.compacted` event was not consumed by the v2 adapter.
+
+Key credentials drop `configuration` in favor of `metadata`. Varro already sends
+typed answers through the unchanged integration connection endpoints, rather than
+writing key credentials directly. Session archive filtering, saved-permission
+editing, Gemini Live voice, and experimental todos add optional functionality;
+this bump does not add those controls. Consumed request paths, SSE envelopes,
+inbox operations, permission/form replies, and managed `serve` flags remain
+compatible.
+
+Server-owned changes improve compaction context and cache reuse, shell completion
+ordering, retry handling, provider stream decoding, skill discovery, filesystem
+access failures, and provider reasoning variants. Catalog refreshes and SDK plugin
+updates are broadcast globally. Windows persistent terminals and app, desktop,
+TUI, Console, documentation, and build-tooling changes need no further adaptation.
+
+The tested v2 client is `2.1.1`; v1 remains `1.19.3`. Support floors remain
+v2 `2.0.5` and v1 `1.16.0`. The unchanged v1 SDK does not require a new Docker
+support-range run. Historical version observations remain unchanged, and the
+optional editor sandbox reads its expected version from the selected binary.
+
+All 10,378 unit tests and 270 script tests passed, with 48 and three skips
+respectively. The final focused rerun passed all 346 adapter, transcript, inbox,
+streaming-tool, and message-rendering tests. `npm run lint`, `npm run fmt`,
+`npm run fmt:check`, `npm run lint:check`, `npm run typecheck`,
+`npm run typecheck:suggestions`, and `npm run build` passed. All five shared
+compatibility-summary tests passed after the final published-server reruns.
+
+The adapter runner now writes an isolated manifest allowing only the exact CLI
+version's install script. npm 12 otherwise leaves the CLI's non-executable
+placeholder installed, producing `spawn ENOEXEC` before any contract check.
+No global npm trust settings change.
+
+The native matrix could not install `@opencode/cli-darwin-arm64@2.1.1`, which
+was absent from npm on October 20, 2026 despite the CLI and client release being
+published. A separate exact-version macOS x64 binary ran under Rosetta and
+passed all 43 applicable checks, with three family/platform skips. The isolated
+VS Code `v2-first-run` scenario also passed against that binary. This verifies
+released-server behavior, not native ARM64 installation or execution. Retry the
+native matrix once upstream publishes the missing package. The installation
+failure stops the runner before it writes a new `verified.json`; use this run's
+logs rather than the earlier report.
+
+Across the completed per-version runs, all 145 applicable checks passed, with
+39 family/platform skips:
+
+| Published server | Passed | Skipped | Issues found | All cases complete |
+| --- | ---: | ---: | --- | --- |
+| v1.16.0 | 30 | 16 | None in tested cases | Yes, applicable automated cases |
+| v1.19.3 | 31 | 15 | None in tested cases | Yes, applicable automated cases |
+| v2.0.5 | 41 | 5 | Initial recovery assertion failed; focused and full reruns passed | Yes, applicable automated cases on rerun |
+| v2.1.1, macOS x64 under Rosetta | 43 | 3 | None in tested cases | Yes, applicable automated cases |
+| v2.1.1, native macOS ARM64 | Not run | Not run | Missing published platform package | No |
+
+The initial v2.0.5 `credential-port-replacement` check expected an attach-only
+restart rejection but received a successful connection URL. The single-case
+rerun and the complete 41-check floor rerun passed without a product change.
+If it recurs, record the attached server's status and pending preparation at the
+restart boundary to distinguish reconnection from lifecycle ownership. Initial
+evidence is `artifacts/ai-test-data/startup-ThkEWE/`; rerun logs are
+`artifacts/opencode-2.1.1-floor-recovery-rerun.log` and
+`artifacts/opencode-2.1.1-floor-adapters-rerun.log`.
+
+Evidence is `artifacts/opencode-2.1.1-all-tests.log`,
+`artifacts/opencode-2.1.1-script-tests.log`,
+`artifacts/opencode-2.1.1-adapters-final.log`,
+`artifacts/opencode-2.1.1-x64-adapters.log`, and
+`artifacts/opencode-2.1.1-editor-startup.log`. Full visual streaming and live
+provider sign-in checks were not run for this bump.
 
 ### 2.0.32 and 1.19.3 compatibility review
 

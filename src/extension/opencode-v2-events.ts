@@ -201,8 +201,10 @@ export function projectV2Event(value: unknown, context: V2MessageContext = {}): 
       ...properties,
       callID: data.id,
       structured: data.metadata,
-      provider: data.state,
-      result: data.resultState,
+      // V2.1 renamed call/result replay data; older supported servers retain separate fields.
+      provider: event.type === 'session.tool.called' ? (data.native ?? data.state) : data.state,
+      result:
+        event.type === 'session.tool.called' ? data.resultState : (data.native ?? data.resultState),
       name: isString(data.name) ? v1Action(data.name) : undefined,
       output: v2ToolOutput(data.content),
     });

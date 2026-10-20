@@ -1748,13 +1748,15 @@ describe('v2 transcript and permission projection', () => {
     time: { created: 10, completed: 20 },
     agent: 'build',
     model: { id: 'model', providerID: 'provider' },
+    native: { responseID: 'provider-response' },
     content: [
-      { type: 'text', text: 'Hello' },
-      { type: 'reasoning', text: 'Thinking' },
+      { type: 'text', text: 'Hello', native: { signature: 'text-signature' } },
+      { type: 'reasoning', text: 'Thinking', native: { signature: 'reasoning-signature' } },
       {
         type: 'tool',
         id: 'tool_call',
         name: 'shell',
+        native: { status: 'provider-replay', signature: 'tool-signature' },
         state: {
           status: 'completed',
           input: { command: 'pwd' },
@@ -1768,6 +1770,41 @@ describe('v2 transcript and permission projection', () => {
       },
     ],
   };
+
+  it.each(['called', 'success', 'failed'] as const)(
+    'projects both pre-2.1 and native tool %s replay data',
+    (phase) => {
+      const replay = { signature: 'opaque-provider-data' };
+      for (const field of ['native', phase === 'called' ? 'state' : 'resultState']) {
+        const event = parseServerEvent(
+          projectV2Event({
+            id: `evt_tool_${phase}`,
+            created: 10,
+            type: `session.tool.${phase}`,
+            data: {
+              sessionID: 'ses_one',
+              assistantMessageID: message.id,
+              id: 'tool_call',
+              name: 'shell',
+              input: { command: 'pwd' },
+              [field]: replay,
+              metadata: { title: 'Working directory' },
+              content: [{ type: 'text', text: '/workspace' }],
+              error: phase === 'failed' ? { message: 'Tool failed' } : undefined,
+            },
+          })[0]
+        );
+        expect(event?.type).toBe(`session.next.tool.${phase}`);
+        expect(event?.properties).toMatchObject({
+          callID: 'tool_call',
+          name: 'bash',
+          [phase === 'called' ? 'provider' : 'result']: replay,
+          structured: { title: 'Working directory' },
+          output: '/workspace',
+        });
+      }
+    }
+  );
 
   it('uses the same part identities for history and incremental events', () => {
     const history = projectV2Message(message, 'ses_one');
