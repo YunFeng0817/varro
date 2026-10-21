@@ -22,6 +22,7 @@ import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { asRecord, isBoolean, isNumber, isString, type UnknownRecord } from '../shared/type-utils';
+import { compareVersions, extractVersion } from './server-utils';
 import { withStartupDeadline } from '../shared/startup';
 import { parseSkillAttachment } from '../shared/skill-reference';
 import { isNativeFormAnswer, parseNativeForm } from '../shared/native-form';
@@ -252,6 +253,7 @@ export class OpenCodeV2Adapter {
   private readonly foregroundChildProgress = new Map<string, string>();
   private taskControlsGeneration = 0;
   private apiCapabilities: Promise<ReturnType<typeof getOpenCodeApiCapabilities>> | undefined;
+  private serverVersion: string | undefined;
   private readonly oauth = new Map<
     string,
     { integrationID: string; attemptID: string; providerID: string; directory?: string }
@@ -336,14 +338,25 @@ export class OpenCodeV2Adapter {
       this.permissions.delete(data.requestID);
     if (type === 'form.created') {
       const form = asRecord(data.form);
-      if (form && isString(form.id) && isString(form.sessionID) && Array.isArray(form.fields))
+      if (
+        form &&
+        isString(form.id) &&
+        isString(form.sessionID) &&
+        form.sessionID !== 'global' &&
+        Array.isArray(form.fields)
+      )
         this.forms.set(form.id, form as FormInfo);
     }
     if ((type === 'form.replied' || type === 'form.cancelled') && isString(data.id))
       this.forms.delete(data.id);
   }
 
+  setServerVersion(version: string | undefined): void {
+    this.serverVersion = version ? (extractVersion(version) ?? undefined) : undefined;
+  }
+
   reset(): void {
+    this.serverVersion = undefined;
     this.apiCapabilities = undefined;
     for (const controller of this.backgroundJudgments.values()) controller.abort();
     this.backgroundJudgments.clear();
@@ -641,8 +654,11 @@ export class OpenCodeV2Adapter {
     }
     if (route === '/question' && method === 'GET') {
       const forms = await data<FormInfo[]>('GET', query('/api/form', true));
-      for (const form of forms) this.forms.set(form.id, form);
-      return forms.map(projectV2Form);
+      // MCP elicitation uses a location-owned "global" sentinel, not a session.
+      // Leave those forms pending for a client with location-scoped form UI.
+      const sessionForms = forms.filter((form) => form.sessionID !== 'global');
+      for (const form of sessionForms) this.forms.set(form.id, form);
+      return sessionForms.map(projectV2Form);
     }
     const approval = route.match(/^\/(permission|question)\/([^/]+)\/(reply|reject)$/);
     if (approval) {
@@ -1864,6 +1880,15 @@ export class OpenCodeV2Adapter {
         const model = asRecord(definition);
         if (!model) continue;
         const existing = target.models[modelID];
+        // Recent OpenCode/Go catalogs filter models server-side, including free-model exclusions.
+        // Keep the old-server/custom-provider fallback without undoing those exclusions.
+        if (
+          !existing &&
+          (id === 'opencode' || id === 'opencode-go') &&
+          this.serverVersion &&
+          compareVersions(this.serverVersion, '2.1.2') >= 0
+        )
+          continue;
         target.models[modelID] = {
           id: modelID,
           providerID: id,

@@ -475,6 +475,12 @@ directory instance that can own a visible session. If any required directory or 
 reject the snapshot rather than using partial omissions as proof that a request resolved. Keep
 permission and question reconciliation independent.
 
+OpenCode V2 also lists location-owned MCP forms with `sessionID: 'global'`. This sentinel is not a
+session and must never enter session-question snapshots, events, or attention state. The V2 adapter
+excludes it before workspace session resolution, without answering or cancelling the form. These
+forms remain pending for an OpenCode client with location-scoped form UI. Real session forms retain
+the complete-resolution requirement above, including failures for unknown owning sessions.
+
 ## Mode Changes
 
 Mode updates use the host-owned `/varro/session/{id}/permission-mode` endpoint. The host serializes

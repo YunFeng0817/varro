@@ -148,15 +148,18 @@ export function projectV2Event(value: unknown, context: V2MessageContext = {}): 
   if (event.type === 'permission.replied') return emit('permission.replied');
   if (event.type === 'form.created') {
     const form = asRecord(data.form);
-    return form && Array.isArray(form.fields)
+    // Location-owned MCP forms must not enter session question/attention state.
+    return form && form.sessionID !== 'global' && Array.isArray(form.fields)
       ? emit('question.asked', projectV2Form(form as FormInfo))
       : [];
   }
-  if (event.type === 'form.replied' || event.type === 'form.cancelled')
+  if (event.type === 'form.replied' || event.type === 'form.cancelled') {
+    if (data.sessionID === 'global') return [];
     return emit(event.type === 'form.replied' ? 'question.replied' : 'question.rejected', {
       sessionID: data.sessionID,
       requestID: data.id,
     });
+  }
   if (event.type === 'session.inbox.enqueued')
     return emit('session.next.prompt.admitted', { ...properties, messageID: data.inboxID });
   if (event.type === 'session.inbox.delivered')

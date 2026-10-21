@@ -277,6 +277,7 @@ describe.skipIf(!binary)('released OpenCode adapter contract', () => {
       OPENCODE_DISABLE_AUTOUPDATE: 'true',
     };
     if (/^(?:opencode\s+v?)?2\./.test(version)) {
+      env.OPENCODE_DISABLE_FREE_MODELS = 'true';
       env.OPENCODE_CONFIG_CONTENT = JSON.stringify({
         providers: { openai: { settings: { chunkTimeout: 300000 } } },
       });
@@ -799,6 +800,56 @@ describe.skipIf(!binary)('released OpenCode adapter contract', () => {
     expect(configured?.providers).not.toEqual(
       expect.arrayContaining([expect.objectContaining({ id: 'blocked-fixture' })])
     );
+  });
+
+  it('does not restore free models hidden by the native v2 catalog', async (context) => {
+    const health = await transport.readHealthInfo();
+    if (transport.version !== 2 || compareVersions(health.version ?? '0', '2.1.2') < 0)
+      return context.skip();
+    const directory = join(root, 'native-free-models');
+    await mkdir(directory);
+    await writeFile(
+      join(directory, 'opencode.json'),
+      JSON.stringify({
+        providers: Object.fromEntries(
+          ['opencode', 'opencode-go'].map((id) => [
+            id,
+            {
+              package: '@opencode/ai/providers/openai-compatible',
+              settings: { baseURL: 'http://127.0.0.1:1/v1', apiKey: 'fixture-only' },
+              models: {
+                'free-fixture': { cost: { input: 0, output: 0 } },
+              },
+            },
+          ])
+        ),
+      })
+    );
+    const native = asRecord(
+      await transport.request(
+        'GET',
+        `/api/model?location[directory]=${encodeURIComponent(directory)}`
+      )
+    );
+    expect(native?.data).toEqual(expect.any(Array));
+    expect(native?.data).toEqual(
+      expect.arrayContaining([expect.objectContaining({ providerID: 'fixture', id: 'fixture' })])
+    );
+    for (const id of ['opencode', 'opencode-go']) {
+      expect(native?.data).not.toEqual(
+        expect.arrayContaining([expect.objectContaining({ providerID: id, id: 'free-fixture' })])
+      );
+    }
+    for (const route of ['/provider', '/config/providers']) {
+      const catalog = asRecord(await transport.request('GET', route, undefined, { directory }));
+      const providers = catalog?.all ?? catalog?.providers;
+      expect(providers).toEqual(expect.any(Array));
+      if (!Array.isArray(providers)) throw new Error('Missing provider catalog');
+      for (const id of ['opencode', 'opencode-go']) {
+        const provider = providers.map(asRecord).find((entry) => entry?.id === id);
+        expect(asRecord(provider?.models) ?? {}).not.toHaveProperty('free-fixture');
+      }
+    }
   });
 
   it('creates, updates, and reads a session through the common API', async () => {

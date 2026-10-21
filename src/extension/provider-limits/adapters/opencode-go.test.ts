@@ -54,7 +54,7 @@ describe('createOpenCodeGoAdapter', () => {
     });
 
     expect(fetch).toHaveBeenCalledWith(
-      'https://opencode.ai/zen/go/v1/usage',
+      'https://opencode.ai/inference/go/v1/usage',
       expect.objectContaining({
         headers: {
           Accept: 'application/json',

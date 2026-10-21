@@ -78,10 +78,15 @@ test('empty chats show narrow random-height tiled bars with tiny gaps and no sol
   for (const width of [240, 1200, 515]) {
     await page.setViewportSize({ width, height: 800 });
     await expect
-      .poll(async () => {
-        const areaWidth = (await page.locator('.interactive-list-shell').boundingBox())!.width;
-        return Number(await canvas.getAttribute('width')) === Math.ceil(areaWidth);
-      })
+      .poll(() =>
+        canvas.evaluate((element: HTMLCanvasElement) => {
+          // Read layout and backing width together so a resize cannot mix frames.
+          const areaWidth = element
+            .closest('.interactive-list-shell')!
+            .getBoundingClientRect().width;
+          return element.width === Math.ceil(areaWidth);
+        })
+      )
       .toBe(true);
     const canvasWidth = Number(await canvas.getAttribute('width'));
     const resized = await pixels(canvas);

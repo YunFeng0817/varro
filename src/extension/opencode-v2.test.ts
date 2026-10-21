@@ -84,6 +84,24 @@ describe('native session forms', () => {
       expect.anything()
     );
   });
+  it('leaves location-owned MCP forms out of session snapshots and events without resolving them', async () => {
+    const globalForm: FormInfo = { ...form, id: 'frm_global', sessionID: 'global' };
+    const wire = vi.fn(async (_method: string) => ({ data: [globalForm, form] }));
+    const adapter = new OpenCodeV2Adapter(wire);
+
+    adapter.observe('form.created', { form: globalForm });
+    expect(await adapter.request('GET', '/question', undefined)).toEqual([projectV2Form(form)]);
+    expect(projectV2Event({ type: 'form.created', data: { form: globalForm } })).toEqual([]);
+    for (const type of ['form.replied', 'form.cancelled']) {
+      expect(
+        projectV2Event({ type, data: { id: globalForm.id, sessionID: globalForm.sessionID } })
+      ).toEqual([]);
+    }
+    await expect(adapter.request('POST', '/question/frm_global/reject', undefined)).rejects.toThrow(
+      'OpenCode question is no longer pending'
+    );
+    expect(wire.mock.calls.every((call) => call[0] === 'GET')).toBe(true);
+  });
   it.each([
     { answers: [['No']] },
     { kind: 'native-form', sessionID: 'ses_other', answer: {} },
@@ -1347,6 +1365,77 @@ describe('v2 agent icon options', () => {
 describe('v2 configured model catalogs', () => {
   const tier = { tier: { type: 'context', size: 128_000 }, input: 4, output: 16 };
   const base = { input: 2, output: 8, cache: { read: 0.5, write: 1 } };
+
+  it.each([
+    [undefined, false],
+    ['2.0.5', false],
+    ['2.1.1', false],
+    ['opencode v2.1.1', false],
+    ['2.1.2-beta.1', false],
+    ['2.1.2', true],
+    ['opencode v2.1.2', true],
+    ['2.2.0', true],
+  ] as const)(
+    'respects native OpenCode model exclusions on %s while retaining custom providers',
+    async (version, nativeExclusions) => {
+      const ids = ['opencode', 'opencode-go', 'custom'];
+      const adapter = new OpenCodeV2Adapter(async (_method, path) => {
+        if (path === '/api/provider') return { data: ids.map((id) => ({ id, name: id })) };
+        if (path === '/api/integration') return { data: [] };
+        if (path === '/api/model')
+          return {
+            data: ids.map((providerID) => ({
+              id: 'available',
+              modelID: 'available',
+              providerID,
+              name: 'Available',
+              capabilities: { tools: true, input: ['text'], output: ['text'] },
+              variants: [],
+              time: { released: 0 },
+              cost: [base],
+              enabled: true,
+              limit: { context: 32000, output: 1000 },
+            })),
+          };
+        if (path === '/api/config')
+          return [
+            {
+              info: {
+                providers: Object.fromEntries(
+                  ids.map((id) => [
+                    id,
+                    {
+                      models: {
+                        hidden: { cost: { input: 0, output: 0 } },
+                        available: { limit: { context: 64000 } },
+                      },
+                    },
+                  ])
+                ),
+              },
+            },
+          ];
+        throw new Error(`Unexpected request: ${path}`);
+      });
+      adapter.setServerVersion(version);
+      for (const route of ['/provider', '/config/providers']) {
+        const catalog = asRecord(await adapter.request('GET', route, undefined));
+        const providers = catalog?.all ?? catalog?.providers;
+        if (!Array.isArray(providers)) throw new Error('Missing provider catalog');
+        for (const id of ids) {
+          const provider = providers.map(asRecord).find((entry) => entry?.id === id);
+          const models = asRecord(provider?.models);
+          expect(models?.available).toMatchObject({ limit: { context: 64000, output: 1000 } });
+          const excluded = id !== 'custom' && nativeExclusions;
+          expect(Object.hasOwn(models ?? {}, 'hidden')).toBe(!excluded);
+        }
+      }
+      adapter.reset();
+      expect(await adapter.request('GET', '/config/providers', undefined)).toMatchObject({
+        providers: ids.map((id) => ({ id, models: { hidden: expect.any(Object) } })),
+      });
+    }
+  );
 
   it('forwards the Claude CLI limits descriptors and polls its renamed provider endpoint', async () => {
     const settings = {

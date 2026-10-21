@@ -25,7 +25,7 @@ update does not block later deletion. Cancelled updates check their signal befor
 reading, and before replacing the annotation file, so cancellation while queued or preparing a write
 does not commit that update.
 
-`npm run test:compatibility:adapters` installs published binaries into isolated directories and tests the production adapters. The current tested versions are v1 `1.19.3` and v2 `2.1.1`, alongside the v1 `1.16.0` and v2 `2.0.5` support floors. Release-specific results are recorded below. The checks cover managed startup, credential recovery in a second window, restart, multi-window recovery after process exit, bootstrap, workspace path encoding, v2 configuration precedence, session updates, deterministic streamed model responses, actual fixture-only tool execution, message pagination, tail editing, helper generation, fork/revert, deletion, and native v2 permissions/forms. The generated report is `artifacts/opencode-adapters/verified.json`.
+`npm run test:compatibility:adapters` installs published binaries into isolated directories and tests the production adapters. The current tested versions are v1 `1.19.3` and v2 `2.1.2`, alongside the v1 `1.16.0` and v2 `2.0.5` support floors. Release-specific results are recorded below. The checks cover managed startup, credential recovery in a second window, restart, multi-window recovery after process exit, bootstrap, workspace path encoding, v2 configuration precedence, session updates, deterministic streamed model responses, actual fixture-only tool execution, message pagination, tail editing, helper generation, fork/revert, deletion, and native v2 permissions/forms. The generated report is `artifacts/opencode-adapters/verified.json`.
 
 Fresh VS Code sandbox windows passed `v2-first-run` and the existing `healthy-first-run` scenario. These editor checks verify activation, ownership, health, and event-stream connection. `test:compatibility:ui` additionally exercises the actual composer, successful replies, pre-turn failures, HTTP 401 handling, recovery through a working provider, and reopening history. Full visual streaming performance remains a separate verification task.
 
@@ -83,6 +83,95 @@ resolve to `literal/directory`. V2 location queries retain their normal URL enco
 The released-server adapter tests cover exact workspace resolution for Japanese text, emoji,
 and literal percent escapes. Unit tests also cover header construction with embedded newlines
 and preservation of Windows separators and casing.
+
+### 2.1.2 compatibility review
+
+Reviewed v2.1.1 to v2.1.2, `133b1ebf` through `4b50f5cc`. Consumed local
+HTTP routes, SSE names and envelopes, session/message/inbox shapes,
+permissions/forms, and managed `serve`/upgrade arguments remain compatible.
+Structured errors add optional `retryAfterMs` and the `provider.free-limit`
+type. Varro's existing error projection preserves the message and HTTP status;
+the new "Free usage limit reached" message matches its existing usage-limit
+notice. The projection does not retain `retryAfterMs`, so a server-supplied reset
+countdown and prompt recall remain optional UI parity work.
+
+The follow-up review reproduced a model-picker bug against the published 2.1.2
+server: configuration fallback restored free OpenCode/Go models omitted by the
+native catalog with `OPENCODE_DISABLE_FREE_MODELS=true`. The adapter now treats
+that catalog's exclusions as authoritative for `opencode` and `opencode-go` on
+2.1.2 and later, using the version from validated transport health. It still
+merges overrides into returned models and retains configuration fallback for
+older servers and custom providers. The version is cleared on adapter reset.
+Unit coverage checks both catalog routes, older/current versions, custom models,
+returned-model overrides, and reset. The isolated released-server regression
+failed before the fix and passed afterward; logs are
+`artifacts/opencode-2.1.2-free-models-baseline.log` and
+`artifacts/opencode-2.1.2-free-models-fixed.log`.
+
+The release removes the legacy Console inference proxy. OpenCode Go quota polling
+now calls `https://opencode.ai/inference/go/v1/usage`, the destination used by the
+removed proxy. Its existing request/response regression checks the new URL, bearer
+authentication, usage percentages, and reset times. Unauthenticated probes of both
+URLs returned JSON 401 responses during review; authenticated live quota polling
+was not verified.
+
+Server-owned changes keep locations loaded during active sessions and background
+jobs, add `experimental.location_idle_timeout`,
+generate titles with lower reasoning variants, restore legacy Console credentials,
+and fix Code Mode job ordering. Provider decoding, realtime requests, app/TUI
+free-limit dialogs, Electron, Console, and release tooling need no further adaptation.
+
+The tested v2 client is `2.1.2`; v1 remains `1.19.3`. Support floors remain
+v2 `2.0.5` and v1 `1.16.0`. The unchanged v1 SDK does not require a new Docker
+support-range run. The optional editor sandbox reads its expected version from
+the selected binary.
+
+All 305 focused Go quota, provider-limit, transport, v2 adapter, transcript, and
+inbox tests passed. `npm run lint`, `npm run fmt`, `npm run lint:check`,
+`npm run typecheck`, `npm run typecheck:suggestions`, and `npm run build` passed.
+The first combined lint/format command reported an output-parser error; running
+lint with retained output and formatting separately succeeded. Evidence is
+`artifacts/opencode-2.1.2-focused-tests.log`,
+`artifacts/opencode-2.1.2-lint.log`, `artifacts/opencode-2.1.2-lint-check.log`,
+and `artifacts/opencode-2.1.2-build.log`.
+
+The initial published-server adapter matrix passed all 148 applicable checks, with 44
+family/platform skips and no leaked processes. V2.1.2 installed and ran as a
+native macOS ARM64 binary. All five shared compatibility-summary tests passed
+after the matrix completed.
+
+Follow-up alignment validation passed 322 focused tests, the 924-test startup
+checklist, and all 15 startup/MCP/reload/busy Playwright cases. `npm run lint`,
+`npm run fmt`, `npm run lint:check`, `npm run typecheck`,
+`npm run typecheck:suggestions`, and `npm run build` passed. Retained logs use the
+`artifacts/opencode-2.1.2-alignment-` prefix. The startup and focused runs overlap
+in transport coverage; their counts are not a count of unique tests.
+
+| Published server | Passed | Skipped | Issues found | All cases complete |
+| --- | ---: | ---: | --- | --- |
+| v1.16.0 | 29 | 19 | One ownership-unavailable SSE startup failure; isolated rerun passed | Yes, applicable automated cases |
+| v1.19.3 | 30 | 18 | One ownership-unavailable SSE startup failure; isolated rerun passed | Yes, applicable automated cases |
+| v2.0.5 | 42 | 7 | None in tested cases | Yes, applicable automated cases |
+| v2.1.2 | 46 | 3 | None in tested cases | Yes, applicable automated cases |
+
+The table records the follow-up matrix, which exited with code 1: 147 passed,
+two failed, and 47 skipped, with no leaked processes. Both V2 runs passed,
+including the new free-model regression on 2.1.2. Both V1 failures occurred
+during repeated ownership-unavailable reconnection after successful HTTP health
+and session reads; each passed one isolated rerun. Their cause remains unresolved.
+Recommended follow-up is to retain the attached window's status/error and SSE
+admission diagnostics at the failing assertion, then reproduce repeated V1
+credential-only reconnection. Current failure snapshots retain the stopped owner
+status rather than the attached window's error.
+
+Evidence is `artifacts/opencode-2.1.2-alignment-adapters.log`,
+`artifacts/opencode-adapters/verified.json`, and
+`artifacts/opencode-2.1.2-alignment-v1-{floor,current}-recheck.log`. Original failure
+evidence is under `artifacts/ai-test-data/startup-PY9R01` and `startup-NGYDyp`.
+All five shared compatibility-summary tests passed after the follow-up matrix.
+The initial successful matrix remains in `artifacts/opencode-2.1.2-adapters.log`.
+Real-editor, visual streaming, and live provider sign-in checks were not run for
+this bump.
 
 ### 2.1.1 compatibility review
 

@@ -518,6 +518,7 @@ export class OpenCodeTransport {
               health = { healthy: false };
             } else {
               this.apiVersion = family;
+              this.v2.setServerVersion(family === 2 ? health.version : undefined);
               this.healthPath = path;
               this.healthFailure = undefined;
             }

@@ -12,7 +12,7 @@ import {
   VARRO_USER_AGENT,
 } from '../adapter-utils';
 
-const OPENCODE_GO_USAGE_ENDPOINT = 'https://opencode.ai/zen/go/v1/usage';
+const OPENCODE_GO_USAGE_ENDPOINT = 'https://opencode.ai/inference/go/v1/usage';
 const OPENCODE_OAUTH_DUMMY_KEY = 'opencode-oauth-dummy-key';
 
 export function createOpenCodeGoAdapter(): ProviderLimitAdapter {

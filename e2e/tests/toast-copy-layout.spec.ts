@@ -27,6 +27,10 @@ for (const width of [280, 320]) {
       'Use vision model'
     );
     await expect(feedback).toHaveCSS('position', 'absolute');
+    // Measure the final gap, not the toast's translated entrance position.
+    await feedback.evaluate(async (element) => {
+      await Promise.all(element.getAnimations().map((animation) => animation.finished));
+    });
     const feedbackBox = await feedback.boundingBox();
     const composerBox = await composer.boundingBox();
     expect(feedbackBox).not.toBeNull();

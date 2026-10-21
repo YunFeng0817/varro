@@ -52,6 +52,7 @@ import { SharedThumbnailClient } from './image-thumbnail-shared-client';
 import { RemoteImages } from './remote-images';
 import * as workspaceProblems from './workspace-problems';
 import { OpenCodeResponseTooLargeError } from './open-code-transport';
+import { OpenCodeV2Adapter } from './opencode-v2-adapter';
 import { HiddenSessionManager } from './hidden-session-manager';
 import { PromptCompletionService } from './prompt-completion-service';
 import { QueuedMessageStore } from './queued-message-store';
@@ -261,6 +262,47 @@ async function requestSanitizedMessagePage(messages: unknown[]) {
 }
 
 describe('native-form proxy boundary', () => {
+  it('loads pending session questions when OpenCode also has a global MCP form', async () => {
+    const fields = [{ key: 'enabled', type: 'boolean' }];
+    const wire = vi.fn(async (method: string, path: string) => {
+      if (method === 'GET' && new URL(path, 'http://localhost').pathname === '/api/form') {
+        return {
+          data: [
+            { id: 'frm_global', sessionID: 'global', title: 'MCP input', fields },
+            { id: 'frm_child', sessionID: 'ses_child', title: 'Session input', fields },
+          ],
+        };
+      }
+      throw new Error(`Unexpected request: ${method} ${path}`);
+    });
+    const adapter = new OpenCodeV2Adapter(wire);
+    const { proxy, callbacks } = createProxy({
+      server: {
+        ...createCallbacks().server,
+        apiVersion: 2,
+        request: adapter.request.bind(adapter),
+      } as never,
+      sessionState: {
+        ...createCallbacks().sessionState,
+        getSessionWorkspaceMatch: vi.fn((id: string) => (id === 'ses_child' ? true : undefined)),
+      } as never,
+    });
+
+    await proxy.handleRequest(makePayload(3, 'GET', '/question'));
+
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 3,
+      data: [expect.objectContaining({ id: 'frm_child', sessionID: 'ses_child' })],
+    });
+    expect(callbacks.sessionState.reconcilePendingAttention).toHaveBeenCalledWith(
+      'question',
+      [expect.objectContaining({ id: 'frm_child', sessionID: 'ses_child' })],
+      expect.anything()
+    );
+    expect(wire).toHaveBeenCalledTimes(1);
+    proxy.dispose();
+  });
+
   it('does not forward a native reply to a V1 server', async () => {
     const { proxy, callbacks } = createProxy();
     await proxy.handleRequest(
@@ -6292,33 +6334,36 @@ describe('RestProxy handleRequest', () => {
     });
   });
 
-  it('rejects an incomplete pending snapshot when an unknown session cannot be resolved', async () => {
-    const permission = { id: 'permission-1', sessionID: 'unknown-child' };
-    const serverRequest = vi.fn(async (_method: string, path: string) => {
-      if (path === '/permission') return [permission];
-      if (path === '/session') return [];
-      if (path === '/session/unknown-child?directory=%2Frepo') {
-        throw new Error('404 Session not found');
-      }
-      throw new Error(`Unexpected path: ${path}`);
-    });
-    const { proxy, callbacks } = createProxy({
-      server: { ...createCallbacks().server, request: serverRequest } as never,
-      sessionState: {
-        ...createCallbacks().sessionState,
-        getSessionWorkspaceMatch: vi.fn(() => undefined),
-      } as never,
-    });
+  it.each(['/permission', '/question'])(
+    'rejects an incomplete %s snapshot when an unknown session cannot be resolved',
+    async (requestPath) => {
+      const permission = { id: 'permission-1', sessionID: 'unknown-child' };
+      const serverRequest = vi.fn(async (_method: string, path: string) => {
+        if (path === requestPath) return [permission];
+        if (path === '/session') return [];
+        if (path === '/session/unknown-child?directory=%2Frepo') {
+          throw new Error('404 Session not found');
+        }
+        throw new Error(`Unexpected path: ${path}`);
+      });
+      const { proxy, callbacks } = createProxy({
+        server: { ...createCallbacks().server, request: serverRequest } as never,
+        sessionState: {
+          ...createCallbacks().sessionState,
+          getSessionWorkspaceMatch: vi.fn(() => undefined),
+        } as never,
+      });
 
-    await proxy.handleRequest(makePayload(223, 'GET', '/permission'));
+      await proxy.handleRequest(makePayload(223, 'GET', requestPath));
 
-    expect(callbacks.sessionState.reconcilePendingAttention).not.toHaveBeenCalled();
-    expect(callbacks.sessionState.finishPendingAttentionReconciliation).toHaveBeenCalled();
-    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
-      id: 223,
-      error: 'Could not resolve pending request session unknown-child',
-    });
-  });
+      expect(callbacks.sessionState.reconcilePendingAttention).not.toHaveBeenCalled();
+      expect(callbacks.sessionState.finishPendingAttentionReconciliation).toHaveBeenCalled();
+      expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+        id: 223,
+        error: 'Could not resolve pending request session unknown-child',
+      });
+    }
+  );
 
   it('bounds concurrent lookups for unknown permission sessions', async () => {
     const lookupGate = deferred<void>();
