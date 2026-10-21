@@ -189,6 +189,15 @@ type ScenarioState = {
   showFileDiffs?: boolean;
 };
 
+export type HarnessComposerState = {
+  initialized: boolean;
+  messagesLoading: boolean;
+  workspaceCatalogReloadPending: boolean;
+  pendingWorkspaceSelectionPath: string | null;
+  activeSessionId: string | null;
+  inputText: string;
+};
+
 type HarnessWindow = Window & {
   varroBackgroundProcessFixture?: {
     sessionID: string;
@@ -223,6 +232,7 @@ type HarnessWindow = Window & {
     getSessionMessages?: (sessionId: string) => MessageEntry[];
     getPendingPermissions?: () => Array<Record<string, unknown>>;
     getStartupState?: () => { initialized: boolean; loading: boolean };
+    getComposerState?: () => HarnessComposerState;
     replayServerEvent?: (event: unknown, projectedMessage?: MessageEntry) => void;
   };
 };
@@ -6969,10 +6979,22 @@ function setUpHarness() {
 const scenarioState = setUpHarness();
 
 await import('../../src/webview/index');
-const { connectionInitialized, state: appState } = await import('../../src/webview/lib/app-state');
+const {
+  connectionInitialized,
+  inputText,
+  state: appState,
+} = await import('../../src/webview/lib/app-state');
 (window as HarnessWindow).__varroE2E!.getStartupState = () => ({
   initialized: connectionInitialized(),
   loading: appState.messagesLoading,
+});
+(window as HarnessWindow).__varroE2E!.getComposerState = () => ({
+  initialized: connectionInitialized(),
+  messagesLoading: appState.messagesLoading,
+  workspaceCatalogReloadPending: appState.workspaceCatalogReloadPending,
+  pendingWorkspaceSelectionPath: appState.pendingWorkspaceSelectionPath,
+  activeSessionId: appState.activeSessionId,
+  inputText: inputText(),
 });
 
 if (new URLSearchParams(window.location.search).get('expandedActivity') === '1') {

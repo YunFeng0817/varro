@@ -1,5 +1,26 @@
+import { writeFile } from 'node:fs/promises';
 import { expect, test } from '@playwright/test';
+import type { HarnessComposerState } from '../harness/main';
 import { waitForHarnessStartup } from './helpers';
+
+test.afterEach(async ({ page }, testInfo) => {
+  if (testInfo.status === testInfo.expectedStatus || page.isClosed()) return;
+  const diagnostics = await page.evaluate(() => {
+    // SAFETY: This read-only state belongs to the isolated E2E harness.
+    const harness = (
+      window as typeof window & {
+        __varroE2E?: { getComposerState?: () => HarnessComposerState };
+      }
+    ).__varroE2E;
+    return {
+      composer: harness?.getComposerState?.(),
+      editorText: document.querySelector('.rich-composer')?.textContent,
+    };
+  });
+  const path = testInfo.outputPath('composer-state.json');
+  await writeFile(path, JSON.stringify(diagnostics, null, 2), 'utf8');
+  await testInfo.attach('composer-state', { path, contentType: 'application/json' });
+});
 
 for (const scenario of ['large-transcript', 'blank', 'busy-stop-send']) {
   const action =
