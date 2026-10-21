@@ -431,6 +431,11 @@ Direct input acquires ownership only when it can affect the transcript:
 - Ignore transcript-scrolling keys from inputs, textareas, selects, and editable composer content.
 - Mouse pointer ownership begins from the scrollbar gutter or another explicit transcript interaction;
   touch owns the scroll surface.
+- Native panning emits `pointercancel` while the finger is still down. Retain touch ownership until
+  `touchend` or `touchcancel`, and use passive touch movement to release bottom-follow on upward outer
+  intent before the native scroll event. Nested scrollers and horizontal swipes do not detach follow.
+  A tap retains follow; upward reading stays detached through momentum and later streamed output.
+  `scroll-touch.spec.ts` covers native cancellation, a held swipe, detached streaming, and return to latest.
 - Nested wheel input still cancels sticky settling because the user has interacted with the
   destination, even when it does not own the outer transcript.
 

@@ -51,6 +51,82 @@ installMessageListTestEnvironment({
 });
 
 describe('MessageList auto-scroll', () => {
+  it.each(['touchend', 'touchcancel'])(
+    'yields to a native touch pan through pointer cancellation and %s',
+    async (endEvent) => {
+      const animationFrames = installQueuedAnimationFrameMocks();
+      let height = 1200;
+      vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+        this: HTMLElement
+      ) {
+        return new DOMRect(
+          0,
+          0,
+          500,
+          this.classList.contains('interactive-list-track') ? height : 400
+        );
+      });
+      setState('activeSessionId', 'session-1');
+      replaceMessages([
+        { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt')] },
+        { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Response')] },
+      ]);
+      cleanup = render(() => MessageList(), container!);
+      const list = container!.querySelector<HTMLDivElement>('.interactive-list')!;
+      Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
+      Object.defineProperty(list, 'scrollHeight', { configurable: true, get: () => height });
+      for (let frame = 0; frame < 4; frame += 1) {
+        await Promise.resolve();
+        animationFrames.flush();
+      }
+      expect(list.scrollTop).toBe(800);
+      const pointer = (type: string) => {
+        const event = new MouseEvent(type, { bubbles: true, button: 0 });
+        Object.defineProperty(event, 'pointerType', { value: 'touch' });
+        list.dispatchEvent(event);
+      };
+      const touch = (type: string, y?: number, target: HTMLElement = list) => {
+        const event = new Event(type, { bubbles: true, cancelable: true });
+        Object.defineProperty(event, 'touches', {
+          value: y === undefined ? [] : [{ identifier: 1, clientX: 100, clientY: y }],
+        });
+        target.dispatchEvent(event);
+        expect(event.defaultPrevented).toBe(false);
+      };
+      pointer('pointerdown');
+      touch('touchstart', 100);
+      pointer('pointercancel');
+      expect(list.hasAttribute('data-pointer-scroll-owned')).toBe(true);
+      // The first movement can arrive long after pointerdown and its input-intent timeout.
+      vi.advanceTimersByTime(2000);
+      touch('touchmove', 104);
+      list.scrollTop = 796;
+      list.dispatchEvent(new Event('scroll'));
+      startLoading();
+      height += 200;
+      await Promise.resolve();
+      animationFrames.flush();
+      expect(list.scrollTop).toBe(796);
+      touch(endEvent);
+      expect(list.hasAttribute('data-pointer-scroll-owned')).toBe(false);
+      expect(list.style.overflowAnchor).toBe('');
+      // Native momentum and subsequent streaming must not reattach the reader.
+      list.scrollTop = 500;
+      list.dispatchEvent(new Event('scroll'));
+      height += 200;
+      for (let frame = 0; frame < 8; frame += 1) {
+        await Promise.resolve();
+        animationFrames.flush();
+        expect(list.scrollTop).toBe(500);
+      }
+      requestMessageListScrollToBottom();
+      await Promise.resolve();
+      settleBottomFollow(animationFrames, list);
+      expect(list.scrollTop).toBe(height - 400);
+      animationFrames.restore();
+    }
+  );
+
   it.each([
     { working: true, detached: false },
     { working: false, detached: false },
