@@ -257,7 +257,12 @@ ID and owning session against the server before changing rules.
   the permission object; never serialize pattern maps for those names or broaden a non-wildcard
   standing scope to make it fit.
 - Varro shows only server-memory entries linked to a successful `always` reply it observed. Native
-  saved IDs preserve that link when another client edits the action/resource scope. OpenCode's
+   saved IDs preserve that link when another client edits the action/resource scope. Confirmed native
+   IDs are stored in workspace state, scoped by server address, API version, and project, so host reloads
+   retain the management link. Capture these IDs after successful approval even when the Permissions
+   screen is closed. Reconcile restored IDs against the native list and discard removed entries; a
+   new ID with the same scope is not proof of user approval. Legacy process-only observations are not
+   persisted. OpenCode's
   saved-permission endpoint can also return internal allowances that the user did not add; those do not
   belong in the user-managed layer. Legacy OpenCode permission replies keep `always` rules in an
   internal instance-local array with no list or removal endpoint. Varro mirrors those replies from

@@ -56,6 +56,8 @@ import { HiddenSessionManager } from './hidden-session-manager';
 import { PromptCompletionService } from './prompt-completion-service';
 import { QueuedMessageStore } from './queued-message-store';
 import { SessionStateManager } from './session-state-manager';
+import { ServerMemoryPermissionStore } from './server-memory-permission-store';
+import { fixture as testFixture } from '../webview/test-fixtures';
 import type { OpenCodeServerMemoryPermission } from '../shared/opencode-types';
 import type { Persistence } from '../shared/persistence';
 import type { RecycleBinEntry } from '../shared/protocol';
@@ -188,11 +190,11 @@ function createCallbacks(overrides: Partial<RestProxyCallbacks> = {}): RestProxy
     removeSessionImages: vi.fn(() => Promise.resolve()),
     rememberServerMemoryPermissions: vi.fn((rules) => {
       for (const rule of rules) {
-        serverMemoryPermissions.set(`${rule.projectID}\0${rule.permission}\0${rule.pattern}`, rule);
+        serverMemoryPermissions.set(`${rule.projectID}\0${rule.id}`, rule);
       }
     }),
     forgetServerMemoryPermission: vi.fn((rule) => {
-      serverMemoryPermissions.delete(`${rule.projectID}\0${rule.permission}\0${rule.pattern}`);
+      serverMemoryPermissions.delete(`${rule.projectID}\0${rule.id}`);
     }),
     getServerMemoryPermissions: vi.fn((projectID) =>
       [...serverMemoryPermissions.values()].filter((rule) => rule.projectID === projectID)
@@ -3232,8 +3234,9 @@ describe('RestProxy handleRequest', () => {
 
   describe('saved-permission editing', () => {
     type SavedPermissionApiFixture = { paths: Record<string, unknown> };
-    function fixture() {
+    function fixture(overrides: Partial<RestProxyCallbacks> = {}) {
       const state = {
+        pending: true,
         saved: [
           { id: 'saved-1', projectID: 'project-1', action: 'shell', resource: 'git status *' },
         ],
@@ -3257,6 +3260,21 @@ describe('RestProxy handleRequest', () => {
         failure: '',
       };
       const request = vi.fn(async (method: string, path: string, body?: unknown) => {
+        if (method === 'GET' && path === '/permission')
+          return state.pending
+            ? [
+                {
+                  id: 'perm-1',
+                  sessionID: 'session-1',
+                  permission: 'bash',
+                  always: ['git status *'],
+                },
+              ]
+            : [];
+        if (method === 'POST' && path === '/permission/perm-1/reply') {
+          state.pending = false;
+          return true;
+        }
         if (path === '/session/session-1')
           return { id: 'session-1', projectID: 'project-1', directory: '/repo' };
         if (path === '/project/current') return { id: 'project-1' };
@@ -3269,13 +3287,18 @@ describe('RestProxy handleRequest', () => {
           state.saved[0] = { ...state.saved[0]!, ...input };
           return { data: state.saved[0] };
         }
+        if (method === 'DELETE' && path === '/api/permission/saved/saved-1') {
+          state.saved = state.saved.filter((rule) => rule.id !== 'saved-1');
+          return true;
+        }
         throw new Error(`Unexpected ${method} ${path}`);
       });
       const result = createProxy({
         server: { ...createCallbacks().server, apiVersion: 2, request } as never,
         updatePermissionRulesForSession: vi.fn().mockResolvedValue([]),
+        ...overrides,
       });
-      result.callbacks.rememberServerMemoryPermissions([
+      void result.callbacks.rememberServerMemoryPermissions([
         {
           id: 'legacy:perm-1:0',
           projectID: 'project-1',
@@ -3286,6 +3309,100 @@ describe('RestProxy handleRequest', () => {
       ]);
       return { ...result, state, request };
     }
+
+    it('keeps approved native rules editable and retractable after host recreation without opening settings first', async () => {
+      let stored: unknown;
+      const persistence = testFixture<Persistence>({
+        get: () => structuredClone(stored),
+        set: (_key: string, value: unknown) => {
+          stored = structuredClone(value);
+        },
+        remove: vi.fn(),
+      });
+      let store = new ServerMemoryPermissionStore(persistence);
+      const observers = {
+        rememberServerMemoryPermissions: (rules: readonly OpenCodeServerMemoryPermission[]) =>
+          store.remember('server', rules),
+        forgetServerMemoryPermission: (rule: OpenCodeServerMemoryPermission) =>
+          store.forget('server', rule),
+        getServerMemoryPermissions: (projectID: string) => store.get('server', projectID),
+      };
+      const { proxy, callbacks, state, request } = fixture(observers);
+      store = new ServerMemoryPermissionStore(persistence);
+      expect(store.get('server', 'project-1')).toEqual([]);
+      state.saved.push({
+        id: 'internal-1',
+        projectID: 'project-1',
+        action: 'shell',
+        resource: 'internal *',
+      });
+      await proxy.handleRequest(
+        makePayload(870, 'POST', '/permission/perm-1/reply', { reply: 'always' })
+      );
+      expect(callbacks.postApiResponse).toHaveBeenLastCalledWith(1, { id: 870, data: true });
+      store = new ServerMemoryPermissionStore(persistence);
+      expect(store.get('server', 'project-1')).toEqual([
+        expect.objectContaining({ id: 'saved-1' }),
+      ]);
+      // A request remains pending while the saved layer is managed.
+      state.pending = true;
+      state.saved[0]!.resource = 'git status --short';
+      const reloaded = createProxy({ server: callbacks.server, ...observers });
+      const path = '/varro/permission/server-memory?directory=%2Frepo';
+      await reloaded.proxy.handleRequest(makePayload(871, 'GET', path));
+      expect(reloaded.callbacks.postApiResponse).toHaveBeenLastCalledWith(1, {
+        id: 871,
+        data: {
+          supported: true,
+          rules: [
+            expect.objectContaining({
+              id: 'saved-1',
+              pattern: 'git status --short',
+              editable: true,
+            }),
+          ],
+        },
+      });
+      await reloaded.proxy.handleRequest(
+        makePayload(872, 'PATCH', path, { id: 'saved-1', permission: 'read', pattern: 'README.md' })
+      );
+      expect(reloaded.callbacks.postApiResponse).toHaveBeenLastCalledWith(1, {
+        id: 872,
+        data: {
+          supported: true,
+          rules: [
+            expect.objectContaining({
+              id: 'saved-1',
+              permission: 'read',
+              pattern: 'README.md',
+              editable: true,
+            }),
+          ],
+        },
+      });
+      await reloaded.proxy.handleRequest(makePayload(873, 'DELETE', path, { id: 'saved-1' }));
+      expect(reloaded.callbacks.postApiResponse).toHaveBeenLastCalledWith(1, {
+        id: 873,
+        data: { supported: true, rules: [] },
+      });
+      expect(new ServerMemoryPermissionStore(persistence).get('server', 'project-1')).toEqual([]);
+      expect(state.pending).toBe(true);
+      expect(request.mock.calls.filter(([method]) => method === 'POST')).toHaveLength(1);
+      expect(state.saved.map((rule) => rule.id)).toEqual(['internal-1']);
+    });
+
+    it('does not adopt an unobserved replacement with the same scope as a removed native ID', async () => {
+      const { proxy, callbacks, state } = fixture();
+      const path = '/varro/permission/server-memory?directory=%2Frepo';
+      await proxy.handleRequest(makePayload(870, 'GET', path));
+      state.saved[0]!.id = 'internal-replacement';
+      await proxy.handleRequest(makePayload(871, 'GET', path));
+      expect(callbacks.postApiResponse).toHaveBeenLastCalledWith(1, {
+        id: 871,
+        data: { supported: true, rules: [] },
+      });
+      expect(callbacks.getServerMemoryPermissions('project-1')).toEqual([]);
+    });
 
     it.each([undefined, 'session-1'])(
       'edits only the saved layer and retains visibility: session=%s',

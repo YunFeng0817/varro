@@ -10,12 +10,7 @@ import {
   readSessionModelMetadata,
 } from '../shared/session-selection-metadata';
 import type { SessionSelectionMetadata } from '../shared/session-selection-metadata';
-import type {
-  OpenCodeModelRouting,
-  OpenCodeServerMemoryPermission,
-  PermissionRule,
-  Session,
-} from '../shared/opencode-types';
+import type { OpenCodeModelRouting, PermissionRule, Session } from '../shared/opencode-types';
 import {
   getSafeDefaultPermissionRules,
   getSessionPermissionRulesForMode,
@@ -103,6 +98,7 @@ import { FileSearchService } from './file-search-service';
 import { GeneratedDependencyTreeGuard } from './generated-dependency-tree-guard';
 import { HiddenSessionManager } from './hidden-session-manager';
 import { HostPersistence } from './host-persistence';
+import { ServerMemoryPermissionStore } from './server-memory-permission-store';
 import { SessionTransferCatalog } from './session-transfer-catalog';
 import { StreamingTextCache } from './streaming-text-cache';
 import { readLocalSessionSummary } from './local-session-summary';
@@ -294,7 +290,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private readonly generatedDependencyTreeGuard: GeneratedDependencyTreeGuard;
   private readonly workspaceSessionStatusCoordinator = new WorkspaceSessionStatusCoordinator();
   private readonly endpoints = new Set<WebviewEndpoint>();
-  private readonly serverMemoryPermissions = new Map<string, OpenCodeServerMemoryPermission>();
+  private readonly serverMemoryPermissions: ServerMemoryPermissionStore;
   private readonly editorPanels = new Map<string, EditorEndpoint>();
   private lastFocusedContextViewId: string | null = null;
   private readonly permissionModeQueues = new Map<string, Promise<unknown>>();
@@ -371,6 +367,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         ? (extensionPackageJson as { version: string }).version
         : 'unknown';
     const persistence = new HostPersistence(workspaceState);
+    this.serverMemoryPermissions = new ServerMemoryPermissionStore(persistence);
     this.sessionTransferCatalog = new SessionTransferCatalog(persistence);
     this.streamingText = new StreamingTextCache(persistence);
     const globalPersistence = new HostPersistence(globalState);
@@ -871,21 +868,12 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       cleanupExpiredRecycleBin: () => this.cleanupExpiredRecycleBin(),
       removeSessionImages: (sessionIds) =>
         this.droppedFilesService.removeSessionOwnedFiles(sessionIds),
-      rememberServerMemoryPermissions: (rules) => {
-        for (const rule of rules) {
-          this.serverMemoryPermissions.set(
-            `${rule.projectID}\0${rule.permission}\0${rule.pattern}`,
-            rule
-          );
-        }
-      },
-      forgetServerMemoryPermission: (rule) => {
-        this.serverMemoryPermissions.delete(
-          `${rule.projectID}\0${rule.permission}\0${rule.pattern}`
-        );
-      },
+      rememberServerMemoryPermissions: (rules) =>
+        this.serverMemoryPermissions.remember(`${server.apiVersion}:${server.url}`, rules),
+      forgetServerMemoryPermission: (rule) =>
+        this.serverMemoryPermissions.forget(`${server.apiVersion}:${server.url}`, rule),
       getServerMemoryPermissions: (projectID) =>
-        [...this.serverMemoryPermissions.values()].filter((rule) => rule.projectID === projectID),
+        this.serverMemoryPermissions.get(`${server.apiVersion}:${server.url}`, projectID),
       postApiResponse: (requestGeneration, payload) =>
         webviewSession.postApiResponse(payload, requestGeneration),
       isPermissionAutomationLeaseCurrent: (lease, request) => {

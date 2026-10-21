@@ -383,8 +383,10 @@ export interface RestProxyCallbacks {
   refreshOpenCodeGlobalConfig?(): Promise<void>;
   cleanupExpiredRecycleBin(): Promise<void>;
   removeSessionImages(sessionIds: Iterable<string>): Promise<void>;
-  rememberServerMemoryPermissions(rules: readonly OpenCodeServerMemoryPermission[]): void;
-  forgetServerMemoryPermission(rule: OpenCodeServerMemoryPermission): void;
+  rememberServerMemoryPermissions(
+    rules: readonly OpenCodeServerMemoryPermission[]
+  ): void | Promise<void>;
+  forgetServerMemoryPermission(rule: OpenCodeServerMemoryPermission): void | Promise<void>;
   getServerMemoryPermissions(projectID: string): readonly OpenCodeServerMemoryPermission[];
   postApiResponse(requestGeneration: number, payload: ApiResponsePayload): void;
   isPermissionAutomationLeaseCurrent(
@@ -1810,7 +1812,10 @@ export class RestProxy {
         }
         throw err;
       }
-      this.callbacks.rememberServerMemoryPermissions(legacyServerMemoryRules);
+      await this.openCodeConfig.rememberApprovedServerMemoryPermissions(
+        legacyServerMemoryRules,
+        explicitWorkspaceDirectory ?? this.getCurrentWorkspaceResolutionRoot() ?? undefined
+      );
       if (
         method === 'GET' &&
         directSessionID &&

@@ -647,111 +647,7 @@ export class OpenCodeConfigService {
           : project?.id
         : '';
     if (typeof projectID !== 'string' || !projectID) throw new Error('Project is unavailable');
-    const list = async (): Promise<OpenCodeServerMemoryPermissions> => {
-      const legacyRules = [...this.callbacks.getServerMemoryPermissions(projectID)];
-      try {
-        const response = await this.requestServer(
-          'GET',
-          `/api/permission/saved?projectID=${encodeURIComponent(projectID)}`,
-          undefined,
-          { directory }
-        );
-        const record = asRecord(response);
-        const values = Array.isArray(response) ? response : record?.data;
-        if (!Array.isArray(values)) {
-          return {
-            supported: false,
-            rules: [],
-            reason: 'The OpenCode server returned an unsupported saved-permission response.',
-          };
-        }
-        let editable = false;
-        if (this.callbacks.server.apiVersion === 2) {
-          try {
-            editable = getOpenCodeApiCapabilities(
-              await this.requestServer('GET', '/openapi.json', undefined, { directory })
-            ).savedPermissionEditing;
-          } catch (cause) {
-            // Optional editing discovery must not disable existing list/remove support.
-            logger.warn(
-              `Could not discover saved-permission editing: ${cause instanceof Error ? cause.message : String(cause)}`
-            );
-          }
-        }
-        const savedRules = values.flatMap((value) => {
-          const saved = asRecord(value);
-          if (
-            typeof saved?.id !== 'string' ||
-            typeof saved.projectID !== 'string' ||
-            saved.projectID !== projectID ||
-            typeof saved.action !== 'string' ||
-            typeof saved.resource !== 'string'
-          ) {
-            return [];
-          }
-          const rule: OpenCodeServerMemoryPermission = {
-            id: saved.id,
-            projectID: saved.projectID,
-            permission:
-              this.callbacks.server.apiVersion === 2 ? v1Action(saved.action) : saved.action,
-            pattern: saved.resource,
-          };
-          if (editable) rule.editable = true;
-          return [rule];
-        });
-        const observedScopes = new Set(
-          legacyRules.map((rule) => `${rule.permission}\0${rule.pattern}`)
-        );
-        const observedIDs = new Set(legacyRules.map((rule) => rule.id));
-        const observedSavedRules = savedRules.filter(
-          (rule) =>
-            observedIDs.has(rule.id) || observedScopes.has(`${rule.permission}\0${rule.pattern}`)
-        );
-        const savedScopes = new Set(
-          observedSavedRules.map((rule) => `${rule.permission}\0${rule.pattern}`)
-        );
-        if (this.callbacks.server.apiVersion === 2) {
-          // Follow native IDs across other clients' edits, not stale mirrored scopes.
-          for (const rule of legacyRules) {
-            if (
-              !rule.id.startsWith('legacy:') ||
-              savedScopes.has(`${rule.permission}\0${rule.pattern}`)
-            )
-              this.callbacks.forgetServerMemoryPermission(rule);
-          }
-          this.callbacks.rememberServerMemoryPermissions(observedSavedRules);
-        }
-        return {
-          supported: true,
-          rules: [
-            ...observedSavedRules,
-            ...legacyRules.filter(
-              (rule) =>
-                (this.callbacks.server.apiVersion !== 2 || rule.id.startsWith('legacy:')) &&
-                !savedScopes.has(`${rule.permission}\0${rule.pattern}`)
-            ),
-          ],
-        };
-      } catch (cause) {
-        if (legacyRules.length > 0)
-          return {
-            supported: true,
-            rules: legacyRules.map((rule) => {
-              const fallback = { ...rule };
-              delete fallback.editable;
-              return fallback;
-            }),
-          };
-        return {
-          supported: false,
-          rules: [],
-          reason:
-            cause instanceof Error
-              ? `Saved permissions are unavailable: ${cause.message}`
-              : 'Saved permissions are unavailable on this OpenCode server.',
-        };
-      }
-    };
+    const list = () => this.listServerMemoryPermissions(projectID, directory);
 
     const current = await list();
     if (!mutation) return current;
@@ -789,8 +685,7 @@ export class OpenCodeConfigService {
         updated.resource !== mutation.pattern
       )
         throw new Error('Could not verify the saved-permission update. Refresh before retrying.');
-      this.callbacks.forgetServerMemoryPermission(savedRule);
-      this.callbacks.rememberServerMemoryPermissions([
+      await this.callbacks.rememberServerMemoryPermissions([
         {
           id: savedRule.id,
           projectID,
@@ -800,9 +695,134 @@ export class OpenCodeConfigService {
       ]);
     } else {
       await this.requestServer('DELETE', path, undefined, { directory });
-      this.callbacks.forgetServerMemoryPermission(savedRule);
+      await this.callbacks.forgetServerMemoryPermission(savedRule);
     }
     return list();
+  }
+
+  private async listServerMemoryPermissions(
+    projectID: string,
+    directory?: string
+  ): Promise<OpenCodeServerMemoryPermissions> {
+    const legacyRules = [...this.callbacks.getServerMemoryPermissions(projectID)];
+    try {
+      const response = await this.requestServer(
+        'GET',
+        `/api/permission/saved?projectID=${encodeURIComponent(projectID)}`,
+        undefined,
+        { directory }
+      );
+      const record = asRecord(response);
+      const values = Array.isArray(response) ? response : record?.data;
+      if (!Array.isArray(values)) {
+        return {
+          supported: false,
+          rules: [],
+          reason: 'The OpenCode server returned an unsupported saved-permission response.',
+        };
+      }
+      let editable = false;
+      if (this.callbacks.server.apiVersion === 2) {
+        try {
+          editable = getOpenCodeApiCapabilities(
+            await this.requestServer('GET', '/openapi.json', undefined, { directory })
+          ).savedPermissionEditing;
+        } catch (cause) {
+          // Optional editing discovery must not disable existing list/remove support.
+          logger.warn(
+            `Could not discover saved-permission editing: ${cause instanceof Error ? cause.message : String(cause)}`
+          );
+        }
+      }
+      const savedRules = values.flatMap((value) => {
+        const saved = asRecord(value);
+        if (
+          typeof saved?.id !== 'string' ||
+          typeof saved.projectID !== 'string' ||
+          saved.projectID !== projectID ||
+          typeof saved.action !== 'string' ||
+          typeof saved.resource !== 'string'
+        ) {
+          return [];
+        }
+        const rule: OpenCodeServerMemoryPermission = {
+          id: saved.id,
+          projectID: saved.projectID,
+          permission:
+            this.callbacks.server.apiVersion === 2 ? v1Action(saved.action) : saved.action,
+          pattern: saved.resource,
+        };
+        if (editable) rule.editable = true;
+        return [rule];
+      });
+      const observedScopes = new Set(
+        legacyRules
+          .filter((rule) => rule.id.startsWith('legacy:'))
+          .map((rule) => `${rule.permission}\0${rule.pattern}`)
+      );
+      const observedIDs = new Set(legacyRules.map((rule) => rule.id));
+      const observedSavedRules = savedRules.filter(
+        (rule) =>
+          observedIDs.has(rule.id) || observedScopes.has(`${rule.permission}\0${rule.pattern}`)
+      );
+      const savedScopes = new Set(
+        observedSavedRules.map((rule) => `${rule.permission}\0${rule.pattern}`)
+      );
+      if (this.callbacks.server.apiVersion === 2) {
+        // Follow native IDs across other clients' edits, not stale mirrored scopes.
+        const savedIDs = new Set(observedSavedRules.map((rule) => rule.id));
+        for (const rule of legacyRules) {
+          if (
+            rule.id.startsWith('legacy:')
+              ? savedScopes.has(`${rule.permission}\0${rule.pattern}`)
+              : !savedIDs.has(rule.id)
+          )
+            await this.callbacks.forgetServerMemoryPermission(rule);
+        }
+        await this.callbacks.rememberServerMemoryPermissions(observedSavedRules);
+      }
+      return {
+        supported: true,
+        rules: [
+          ...observedSavedRules,
+          ...legacyRules.filter(
+            (rule) =>
+              (this.callbacks.server.apiVersion !== 2 || rule.id.startsWith('legacy:')) &&
+              !savedScopes.has(`${rule.permission}\0${rule.pattern}`)
+          ),
+        ],
+      };
+    } catch (cause) {
+      if (legacyRules.length > 0)
+        return {
+          supported: true,
+          rules: legacyRules.map((rule) => {
+            const fallback = { ...rule };
+            delete fallback.editable;
+            return fallback;
+          }),
+        };
+      return {
+        supported: false,
+        rules: [],
+        reason:
+          cause instanceof Error
+            ? `Saved permissions are unavailable: ${cause.message}`
+            : 'Saved permissions are unavailable on this OpenCode server.',
+      };
+    }
+  }
+
+  async rememberApprovedServerMemoryPermissions(
+    rules: readonly OpenCodeServerMemoryPermission[],
+    directory?: string
+  ): Promise<void> {
+    await this.callbacks.rememberServerMemoryPermissions(rules);
+    if (this.callbacks.server.apiVersion !== 2) return;
+    // Resolve native IDs immediately after acknowledgement, even if the settings panel stays closed.
+    for (const projectID of new Set(rules.map((rule) => rule.projectID))) {
+      await this.listServerMemoryPermissions(projectID, directory);
+    }
   }
 
   async prepareLegacyServerMemoryRules(
