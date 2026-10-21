@@ -310,6 +310,8 @@ async function runScenario(scenario, vscodeExecutable) {
         fileLinkTarget,
         `${Array.from({ length: 1_500 }, (_, index) => `// line ${String(index + 1)}`).join('\n')}\n`
       );
+      await writeFile(path.join(workspace, 'MarkdownRenderer.tsx'), '// unrelated project file\n');
+      await writeFile(path.join(workspace, 'DefinitelyMissing.ts'), '// unrelated namesake\n');
     }
     const port = await reservePort();
     const fakeCommand =

@@ -1385,7 +1385,7 @@ describe('ContextProvider', () => {
       await provider.openPath('/repo/MarkdownRenderer.tsx', { kind: 'file', line: 1447 });
 
       expect(vscodeMock.workspace.findFiles).toHaveBeenCalledWith(
-        '**/MarkdownRenderer.tsx',
+        new vscodeMock.RelativePattern({ fsPath: '/repo' }, '**/MarkdownRenderer.tsx'),
         null,
         2
       );
@@ -1415,6 +1415,73 @@ describe('ContextProvider', () => {
 
       expect(vscodeMock.workspace.openTextDocument).not.toHaveBeenCalled();
       expect(vscodeMock.window.showTextDocument).not.toHaveBeenCalled();
+    } finally {
+      provider.dispose();
+    }
+  });
+
+  it('does not open an unrelated workspace match for a missing absolute file', async () => {
+    const provider = new ContextProvider(vi.fn());
+    const unrelatedUri = { fsPath: '/other/src/Shared.ts' };
+    vscodeMock.workspace.workspaceFolders = [{ name: 'other', uri: { fsPath: '/other' } }];
+    vscodeMock.workspace.fs.stat.mockImplementation(async (uri: { fsPath: string }) => {
+      if (uri.fsPath === '/repo/Shared.ts') throw new Error('File not found');
+      return { type: 0 };
+    });
+    vscodeMock.workspace.findFiles.mockImplementation(async (pattern: unknown) =>
+      pattern instanceof vscodeMock.RelativePattern ? [] : [unrelatedUri]
+    );
+    vscodeMock.workspace.openTextDocument.mockResolvedValue({ uri: unrelatedUri });
+    vscodeMock.window.showTextDocument.mockResolvedValue({});
+    fsState.directories.set('/repo', []);
+
+    try {
+      await expect(provider.openPath('/repo/Shared.ts', { kind: 'file' })).resolves.toBe(
+        'unavailable'
+      );
+      expect(vscodeMock.workspace.openTextDocument).not.toHaveBeenCalled();
+    } finally {
+      provider.dispose();
+    }
+  });
+
+  it('does not search the whole filesystem for a missing root-level file', async () => {
+    const provider = new ContextProvider(vi.fn());
+    vscodeMock.workspace.fs.stat.mockRejectedValue(new Error('File not found'));
+
+    try {
+      await expect(provider.openPath('/Missing.ts', { kind: 'file' })).resolves.toBe('unavailable');
+      expect(vscodeMock.workspace.findFiles).not.toHaveBeenCalled();
+      expect(vscodeMock.workspace.fs.readDirectory).not.toHaveBeenCalled();
+    } finally {
+      provider.dispose();
+    }
+  });
+
+  it.each([undefined, '/repo'])('keeps basename lookup with workspace scope %s', async (scope) => {
+    const provider = new ContextProvider(vi.fn());
+    const folder = { name: 'repo', uri: { fsPath: '/repo' } };
+    const matchedUri = { fsPath: '/repo/src/Shared.ts' };
+    vscodeMock.workspace.workspaceFolders = [folder];
+    vscodeMock.workspace.getWorkspaceFolder.mockReturnValue(folder);
+    vscodeMock.workspace.fs.stat.mockImplementation(async (uri: { fsPath: string }) => {
+      if (uri.fsPath === '/repo/Shared.ts') throw new Error('File not found');
+      return { type: 0 };
+    });
+    vscodeMock.workspace.findFiles.mockResolvedValue([matchedUri]);
+    vscodeMock.workspace.openTextDocument.mockResolvedValue({ uri: matchedUri });
+    vscodeMock.window.showTextDocument.mockResolvedValue({});
+
+    try {
+      await expect(provider.openPath('Shared.ts', { workspaceDirectory: scope })).resolves.toBe(
+        'opened'
+      );
+      expect(vscodeMock.workspace.findFiles).toHaveBeenCalledWith(
+        scope ? new vscodeMock.RelativePattern(folder.uri, '**/Shared.ts') : '**/Shared.ts',
+        null,
+        2
+      );
+      expect(vscodeMock.workspace.openTextDocument).toHaveBeenCalledWith(matchedUri);
     } finally {
       provider.dispose();
     }

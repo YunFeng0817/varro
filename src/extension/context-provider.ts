@@ -831,19 +831,23 @@ export class ContextProvider implements vscode.Disposable {
             !isAbsolute(input) && options?.workspaceDirectory
               ? this.getOpenWorkspaceFolder(options.workspaceDirectory)
               : undefined;
+          const parentDirectory = missingAbsolute ? dirname(input) : '';
+          const searchRoot = missingAbsolute
+            ? parentDirectory !== parse(parentDirectory).root
+              ? vscode.Uri.file(parentDirectory)
+              : undefined
+            : workspaceFolder?.uri;
+          // An absolute reference must not resolve to a namesake in another project.
+          // A filesystem-root reference also has no bounded project to search.
+          if (missingAbsolute && !searchRoot) return 'unavailable';
           const matches = await vscode.workspace.findFiles(
-            workspaceFolder
-              ? new vscode.RelativePattern(workspaceFolder, `**/${filename}`)
+            searchRoot
+              ? new vscode.RelativePattern(searchRoot, `**/${filename}`)
               : `**/${filename}`,
             null,
             2
           );
-          const parentDirectory = missingAbsolute ? dirname(input) : '';
-          const searchRoots = workspaceFolder
-            ? [workspaceFolder.uri]
-            : parentDirectory && parentDirectory !== parse(parentDirectory).root
-              ? [vscode.Uri.file(parentDirectory)]
-              : undefined;
+          const searchRoots = searchRoot ? [searchRoot] : undefined;
           let uri =
             matches.length === 1
               ? matches[0]
