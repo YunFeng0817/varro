@@ -269,6 +269,9 @@ describe('webview message validation', () => {
     );
     expect(isAllowedApiRequest('GET', '/varro/permission/server-memory')).toBe(true);
     expect(isAllowedApiRequest('DELETE', '/varro/permission/server-memory')).toBe(true);
+    expect(isAllowedApiRequest('PATCH', '/varro/permission/server-memory')).toBe(true);
+    expect(isAllowedApiRequest('PATCH', '/api/permission/saved/saved-1')).toBe(false);
+    expect(isAllowedApiRequest('POST', '/varro/permission/server-memory')).toBe(false);
     expect(isAllowedApiRequest('POST', '/varro/permission/judge')).toBe(true);
     expect(isAllowedApiRequest('POST', '/varro/permission/project-allow?directory=%2Frepo-a')).toBe(
       true

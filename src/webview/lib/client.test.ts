@@ -84,6 +84,43 @@ afterEach(() => {
 });
 
 describe('client', () => {
+  it('routes saved-permission edits through the scoped host-owned endpoint', async () => {
+    const { client } = await loadClient();
+    await client.varro.updateServerMemoryPermission(
+      'session-1',
+      'saved-1',
+      {
+        permission: 'bash',
+        pattern: 'git diff *',
+      },
+      { directory: '/repo one' }
+    );
+    expect(bridgeMocks.apiCall).toHaveBeenCalledWith(
+      'PATCH',
+      '/varro/permission/server-memory?directory=%2Frepo+one',
+      {
+        sessionId: 'session-1',
+        id: 'saved-1',
+        permission: 'bash',
+        pattern: 'git diff *',
+      }
+    );
+  });
+
+  it('keeps archive changes in the common session update contract', async () => {
+    const { client } = await loadClient();
+    await client.session.update(
+      'session one',
+      { time: { archived: null } },
+      { directory: '/repo' }
+    );
+    expect(bridgeMocks.apiCall).toHaveBeenCalledWith(
+      'PATCH',
+      '/session/session%20one?directory=%2Frepo',
+      { time: { archived: null } }
+    );
+  });
+
   it('encodes and scopes service choices and stops to a specific session process', async () => {
     const { client } = await loadClient();
     const controller = new AbortController();

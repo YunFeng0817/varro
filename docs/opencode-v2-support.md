@@ -10,7 +10,7 @@ V2 is recommended for new installations; v1 remains supported. See the [usage gu
 - `open-code-process.ts` retains credentials in the private ownership lease for window handoff and reads registered local service credentials. CLI update lookup and recovery commands select the matching package family.
 - `open-code-transport.ts` authenticates health, REST, and SSE requests and selects the adapter from validated server responses.
 - `opencode-v2-adapter.ts`, `opencode-v2-projection.ts`, and `opencode-v2-events.ts` translate requests, transcript records, catalogs, permissions, forms, and events into the existing Varro contracts.
-- `opencode-v2-session-state.ts` persists Varro-owned metadata and timestamp overrides across the supported v2 range. Native metadata updates are available from 2.0.15, but Varro still uses local annotations under the user's XDG state directory in `varro/opencode-v2/`.
+- `opencode-v2-session-state.ts` persists Varro-owned metadata and legacy timestamp overrides under the user's XDG state directory in `varro/opencode-v2/`. Native metadata updates are available from 2.0.15, but Varro still uses local metadata annotations. Archive changes use the native API when the server advertises its archive field; older servers retain local archive annotations.
 - Native v2 agent and permission configuration keys are preserved when Varro edits a file already using them. V1-format files retain their format.
 
 Session-info statistics try the local SQLite database before fetching API histories.
@@ -85,6 +85,51 @@ and literal percent escapes. Unit tests also cover header construction with embe
 and preservation of Windows separators and casing.
 
 ### 2.1.1 compatibility review
+
+#### Optional archive and saved-permission support
+
+Varro checks the connected server's OpenAPI request schemas rather than raising
+the support floor. Archive writes map the common `time.archived` timestamp or
+`null` restore into native `PATCH /api/session/{sessionID}` with `archived: true`
+or `false`. The server owns the confirmed timestamp. Native `session.archived`
+and `session.unarchived` events trigger a guarded session-header refresh without
+starting transcript activity. Older V2 servers keep the local annotation path;
+V1 transport behavior is unchanged.
+
+On capable servers, native archive state, including an absent timestamp after
+restore, takes precedence over an old local archive annotation. Legacy files
+remain intact for older servers. Merely reading history never migrates archives
+or patches production sessions; explicitly archiving a session publishes its
+state to the server. The session list's age-based **Archive** section and the
+Recycle Bin keep their existing meanings. The legacy include-archived list query
+is not forwarded as native `archived=true`, which means archived-only and would
+otherwise omit active sessions from usage reports.
+
+The Permissions screen offers saved-allowance editing only when the server
+advertises `PATCH /api/permission/saved/{id}` with action/resource fields.
+Edits remain project-checked, apply only to user-managed saved allowances, and
+leave session/project rules untouched. Native IDs keep edited scopes visible
+across refreshes and edits from other clients. Unsupported servers retain their
+existing list/remove behavior, and legacy restart-only allowances cannot be edited.
+Conflicts and failed edits preserve the UI draft. No saved-permission event is
+assumed; the screen refreshes on opening and after successful mutations.
+
+Focused coverage lives in `opencode-api-capabilities.test.ts`,
+`opencode-v2-archive.test.ts`, the REST proxy and permission-panel tests, and the
+released-server archive/edit cases in `opencode-v2.integration.test.ts`.
+
+Follow-up verification passed 1,060 focused tests, 13 permission E2E checks, and
+all 148 applicable released-server adapter/startup checks across V1.16.0,
+V1.19.3, V2.0.5, and V2.1.1, with 44 family/platform skips. V2.1.1 ran as a
+native macOS ARM64 binary. The new archive fallback passed on V2.0.5, and native
+archive/restore events and saved-permission editing passed on V2.1.1. Evidence is
+`artifacts/archive-permissions-adapters-rerun.log` and
+`artifacts/opencode-adapters/verified.json`. The first attempt hit its outer
+two-minute command timeout; its two detached fixture servers were removed through
+installation-scoped process cleanup before the longer rerun. Build, lint,
+formatting, typecheck, suggestion checks, and compatibility-summary tests passed.
+
+#### Release review
 
 Reviewed v2.0.32 to v2.1.1, `843a6c51` through `133b1ebf`, including the
 intentional 2.1 HTTP, event, and generated-client contract changes. Tool lifecycle

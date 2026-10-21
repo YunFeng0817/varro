@@ -50,6 +50,7 @@ import type {
 import type { OpenCodeRequestOptions } from './open-code-transport';
 import { OpenCodeResponseTooLargeError } from './opencode-response-error';
 import { OpenCodeV2SessionState } from './opencode-v2-session-state';
+import { getOpenCodeApiCapabilities } from './opencode-api-capabilities';
 import { OpenCodeV2BackgroundWork } from './opencode-v2-background-work';
 import { BACKGROUND_OUTPUT_CHUNK_BYTES } from '../shared/background-process';
 import type { BackgroundProcess, BackgroundProcessOutput } from '../shared/background-process';
@@ -250,6 +251,7 @@ export class OpenCodeV2Adapter {
   private readonly submissions = new Map<string, Promise<unknown>>();
   private readonly foregroundChildProgress = new Map<string, string>();
   private taskControlsGeneration = 0;
+  private apiCapabilities: Promise<ReturnType<typeof getOpenCodeApiCapabilities>> | undefined;
   private readonly oauth = new Map<
     string,
     { integrationID: string; attemptID: string; providerID: string; directory?: string }
@@ -280,6 +282,7 @@ export class OpenCodeV2Adapter {
     created?: unknown,
     sequence?: unknown
   ): void {
+    if (type === 'server.connected') this.apiCapabilities = undefined;
     this.generationTiming.observe(type, data, created, sequence);
     if ((type === 'shell.exited' || type === 'shell.deleted') && isString(data.id))
       this.cancelBackgroundReview(data.id);
@@ -341,6 +344,7 @@ export class OpenCodeV2Adapter {
   }
 
   reset(): void {
+    this.apiCapabilities = undefined;
     for (const controller of this.backgroundJudgments.values()) controller.abort();
     this.backgroundJudgments.clear();
     for (const timer of this.backgroundReviewTimers.values()) clearTimeout(timer);
@@ -601,11 +605,15 @@ export class OpenCodeV2Adapter {
         const value = url.searchParams.get(key);
         if (value) target.searchParams.set(key, value);
       }
+      // Legacy archived=true includes both states. Native true means archived-only,
+      // so do not forward it: usage reports and global history need both states.
       if (route === '/session' && directory) target.searchParams.set('directory', directory);
       if (url.searchParams.get('roots') === 'true') target.searchParams.set('parentID', 'null');
       const result = (await raw('GET', target.pathname + target.search)) as SessionsResponse;
       if (!Array.isArray(result?.data)) throw new Error('Invalid OpenCode v2 session list');
-      const sessions = await Promise.all(result.data.map((session) => this.session(session)));
+      const sessions = await Promise.all(
+        result.data.map((session) => this.session(session, options))
+      );
       return options.captureNextCursor
         ? { data: sessions, nextCursor: result.cursor?.next ?? undefined }
         : sessions;
@@ -621,7 +629,7 @@ export class OpenCodeV2Adapter {
         location: directory ? { directory } : undefined,
       });
       if (input.parentID) await this.annotations.update(session.id, { parentID: input.parentID });
-      return this.session(session);
+      return this.session(session, options);
     }
     if (route === '/permission' && method === 'GET') {
       const requests = await data<PermissionRequest[]>(
@@ -1006,24 +1014,43 @@ export class OpenCodeV2Adapter {
         }
       };
       if (!action) {
-        if (method === 'GET') return this.session(await data<SessionInfo>('GET', endpoint));
+        if (method === 'GET')
+          return this.session(await data<SessionInfo>('GET', endpoint), options);
         if (method === 'DELETE') {
           await raw('DELETE', endpoint);
           await this.annotations.remove(sessionID);
           return true;
         }
         if (method === 'PATCH') {
-          if (input.title !== undefined || input.permission !== undefined)
-            await raw('PATCH', endpoint, {
+          const time = asRecord(input.time);
+          const changesArchive = Boolean(time && Object.hasOwn(time, 'archived'));
+          if (
+            changesArchive &&
+            time?.archived !== null &&
+            time?.archived !== undefined &&
+            (!isNumber(time?.archived) || !Number.isFinite(time.archived))
+          )
+            throw new Error('Invalid session archive timestamp');
+          const nativeArchive =
+            changesArchive && (await this.capabilities(options)).sessionArchiving;
+          if (input.title !== undefined || input.permission !== undefined || nativeArchive) {
+            const nativePatch: UnknownRecord = {
               title: input.title,
               permissions: input.permission !== undefined ? v2Rules(input.permission) : undefined,
-            });
+            };
+            if (nativeArchive) nativePatch.archived = isNumber(time?.archived);
+            await raw('PATCH', endpoint, nativePatch);
+          }
           const patch: UnknownRecord = {};
           if (input.metadata !== undefined) patch.metadata = input.metadata;
-          if (input.time !== undefined) patch.time = input.time;
+          if (time) {
+            const localTime = { ...time };
+            if (nativeArchive) delete localTime.archived;
+            if (Object.keys(localTime).length) patch.time = localTime;
+          }
           if (Object.keys(patch).length)
             await this.annotations.update(sessionID, patch, options.signal);
-          return this.session(await data<SessionInfo>('GET', endpoint));
+          return this.session(await data<SessionInfo>('GET', endpoint), options);
         }
       }
       if (action === 'children') {
@@ -1031,7 +1058,7 @@ export class OpenCodeV2Adapter {
           'GET',
           `/api/session?parentID=${encodeURIComponent(sessionID)}&limit=1000`
         )) as SessionsResponse;
-        return Promise.all(result.data.map((session) => this.session(session)));
+        return Promise.all(result.data.map((session) => this.session(session, options)));
       }
       if (action === 'message' && method === 'GET') {
         const target = new URL(`${endpoint}/message`, 'http://localhost');
@@ -1424,15 +1451,16 @@ export class OpenCodeV2Adapter {
       }
       if (action === 'fork')
         return this.session(
-          await data<SessionInfo>('POST', `${endpoint}/fork`, { before: input.messageID })
+          await data<SessionInfo>('POST', `${endpoint}/fork`, { before: input.messageID }),
+          options
         );
       if (action === 'revert') {
         await raw('POST', `${endpoint}/revert/stage`, { messageID: input.messageID, files: true });
-        return this.session(await data<SessionInfo>('GET', endpoint));
+        return this.session(await data<SessionInfo>('GET', endpoint), options);
       }
       if (action === 'unrevert') {
         await raw('DELETE', `${endpoint}/revert`);
-        return this.session(await data<SessionInfo>('GET', endpoint));
+        return this.session(await data<SessionInfo>('GET', endpoint), options);
       }
       if (action === 'diff')
         return data(
@@ -1698,13 +1726,41 @@ export class OpenCodeV2Adapter {
     );
   }
 
-  private async session(value: SessionInfo): Promise<UnknownRecord> {
+  private async capabilities(options: OpenCodeRequestOptions) {
+    this.apiCapabilities ??= this.request('GET', '/openapi.json', undefined, options)
+      .then((spec) => {
+        if (!asRecord(asRecord(spec)?.paths))
+          throw new Error('Invalid OpenCode API capability response');
+        return getOpenCodeApiCapabilities(spec);
+      })
+      .catch((error: unknown) => {
+        if (isNotFoundError(error)) return getOpenCodeApiCapabilities(undefined);
+        this.apiCapabilities = undefined;
+        throw error;
+      });
+    return this.apiCapabilities;
+  }
+
+  private async session(
+    value: SessionInfo,
+    options: OpenCodeRequestOptions = {}
+  ): Promise<UnknownRecord> {
     const projected = projectV2Session(value);
     const annotations = await this.annotations.read(value.id);
+    const time = { ...value.time, ...asRecord(annotations.time) };
+    if (
+      Object.hasOwn(asRecord(annotations.time) ?? {}, 'archived') &&
+      (await this.capabilities(options)).sessionArchiving
+    ) {
+      // Absence is authoritative too: another client may have restored the session.
+      // Retain legacy annotations on disk, but never let them mask native state.
+      delete time.archived;
+      if (value.time.archived !== undefined) time.archived = value.time.archived;
+    }
     const session: UnknownRecord = {
       ...projected,
       ...annotations,
-      time: { ...value.time, ...asRecord(annotations.time) },
+      time,
     };
     if (value.parentID) session.parentID = value.parentID;
     return session;

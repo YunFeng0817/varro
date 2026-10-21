@@ -739,6 +739,12 @@ The judge uses `varro.chat.autoApproveModel` first, then OpenCode's `small_model
 
 `Full access` updates the session permission rules and auto-approves pending permission prompts for that session. Select it only when the session can operate without confirmation.
 
+In the Permissions screen, **Server memory** lists saved allowances from approvals
+Varro observed. On V2.1+ servers with editing support, use the pencil button to
+change an allowance's permission name or resource pattern, then save or cancel.
+This does not change project or session rules. Older servers keep their existing
+removal controls; legacy allowances marked **Restart to clear** cannot be edited.
+
 ## Generate Commit Messages
 
 Varro integrates commit-message generation directly into VS Code Source Control.

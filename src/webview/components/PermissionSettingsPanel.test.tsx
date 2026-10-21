@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   saveSessionRules: vi.fn(),
   loadServerMemory: vi.fn(),
   removeServerMemory: vi.fn(),
+  updateServerMemory: vi.fn(),
 }));
 
 /* oxlint-disable anti-slop/no-module-mocking -- This test exercises the panel against the typed client boundary. */
@@ -29,6 +30,7 @@ vi.mock('../lib/client', () => ({
       saveOpenCodePermissionConfig: mocks.save,
       serverMemoryPermissions: mocks.loadServerMemory,
       removeServerMemoryPermission: mocks.removeServerMemory,
+      updateServerMemoryPermission: mocks.updateServerMemory,
     },
   },
 }));
@@ -174,6 +176,155 @@ describe('PermissionSettingsPanel', () => {
     expect(container.textContent).toContain('opencode *');
     expect(container.textContent).toContain('Restart to clear');
     expect(container.querySelector('[aria-label="Retract server allowance"]')).toBeNull();
+    expect(container.querySelector('[aria-label="Edit server allowance"]')).toBeNull();
+  });
+
+  it('hides saved-rule editing on servers without that capability', async () => {
+    mocks.loadServerMemory.mockResolvedValue({
+      supported: true,
+      rules: [
+        { id: 'saved-1', projectID: 'project-1', permission: 'bash', pattern: 'git status *' },
+      ],
+    });
+    cleanup = render(() => <PermissionSettingsPanel />, container);
+    await flush();
+    expect(container.querySelector('[aria-label="Edit server allowance"]')).toBeNull();
+    expect(container.querySelector('[aria-label="Retract server allowance"]')).not.toBeNull();
+  });
+
+  it('edits saved action/resource patterns without changing the project or session layers', async () => {
+    const rule = {
+      id: 'saved-1',
+      projectID: 'project-1',
+      permission: 'bash',
+      pattern: 'git status *',
+      editable: true,
+    };
+    mocks.loadServerMemory.mockResolvedValue({ supported: true, rules: [rule] });
+    mocks.updateServerMemory.mockResolvedValue({
+      supported: true,
+      rules: [{ ...rule, pattern: 'git diff *' }],
+    });
+    cleanup = render(() => <PermissionSettingsPanel />, container);
+    await flush();
+    container.querySelector<HTMLButtonElement>('[aria-label="Edit server allowance"]')!.click();
+    const input = container.querySelector<HTMLInputElement>(
+      '[aria-label="Saved resource pattern"]'
+    )!;
+    input.value = 'git diff *';
+    input.dispatchEvent(new InputEvent('input', { bubbles: true }));
+    container.querySelector<HTMLButtonElement>('[aria-label="Save server allowance"]')!.click();
+    await flush();
+    expect(mocks.updateServerMemory).toHaveBeenCalledWith(
+      null,
+      'saved-1',
+      { permission: 'bash', pattern: 'git diff *' },
+      { directory: undefined }
+    );
+    expect(container.textContent).toContain('git diff *');
+    expect(container.querySelector('[aria-label="Saved resource pattern"]')).toBeNull();
+    expect(mocks.save).not.toHaveBeenCalled();
+    expect(mocks.saveSessionRules).not.toHaveBeenCalled();
+  });
+
+  it('keeps a failed saved-rule draft and lets the user retry or cancel', async () => {
+    mocks.loadServerMemory.mockResolvedValue({
+      supported: true,
+      rules: [
+        {
+          id: 'saved-1',
+          projectID: 'project-1',
+          permission: 'bash',
+          pattern: 'git status *',
+          editable: true,
+        },
+      ],
+    });
+    mocks.updateServerMemory.mockRejectedValue(new Error('409 duplicate saved allowance'));
+    cleanup = render(() => <PermissionSettingsPanel />, container);
+    await flush();
+    container.querySelector<HTMLButtonElement>('[aria-label="Edit server allowance"]')!.click();
+    const input = container.querySelector<HTMLInputElement>(
+      '[aria-label="Saved resource pattern"]'
+    )!;
+    input.value = 'git diff *';
+    input.dispatchEvent(new InputEvent('input', { bubbles: true }));
+    container.querySelector<HTMLButtonElement>('[aria-label="Save server allowance"]')!.click();
+    await flush();
+    expect(
+      container.querySelector<HTMLInputElement>('[aria-label="Saved resource pattern"]')?.value
+    ).toBe('git diff *');
+    expect(container.textContent).toContain('409 duplicate saved allowance');
+    expect(
+      container.querySelector<HTMLButtonElement>('[aria-label="Save server allowance"]')?.disabled
+    ).toBe(false);
+    container
+      .querySelector<HTMLButtonElement>('[aria-label="Cancel server allowance edit"]')!
+      .click();
+    expect(container.textContent).toContain('git status *');
+    expect(container.querySelector('[aria-label="Saved resource pattern"]')).toBeNull();
+  });
+
+  it('disables duplicate saved-rule submissions and ignores a save after the session changes', async () => {
+    mocks.loadServerMemory.mockResolvedValue({
+      supported: true,
+      rules: [
+        {
+          id: 'saved-1',
+          projectID: 'project-1',
+          permission: 'bash',
+          pattern: 'git status *',
+          editable: true,
+        },
+      ],
+    });
+    let resolveSave: ((value: { supported: true; rules: [] }) => void) | undefined;
+    mocks.updateServerMemory.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveSave = resolve;
+        })
+    );
+    cleanup = render(() => <PermissionSettingsPanel />, container);
+    await flush();
+    container.querySelector<HTMLButtonElement>('[aria-label="Edit server allowance"]')!.click();
+    container.querySelector<HTMLButtonElement>('[aria-label="Save server allowance"]')!.click();
+    expect(
+      container.querySelector<HTMLButtonElement>('[aria-label="Save server allowance"]')?.disabled
+    ).toBe(true);
+    expect(
+      container.querySelector<HTMLButtonElement>('[aria-label="Cancel server allowance edit"]')
+        ?.disabled
+    ).toBe(true);
+    expect(mocks.updateServerMemory).toHaveBeenCalledOnce();
+    mocks.loadServerMemory.mockResolvedValue({
+      supported: true,
+      rules: [
+        {
+          id: 'saved-2',
+          projectID: 'project-2',
+          permission: 'read',
+          pattern: 'new workspace',
+          editable: true,
+        },
+      ],
+    });
+    setState('sessions', [
+      {
+        id: 'session-2',
+        projectID: 'project-2',
+        directory: '/other',
+        title: 'Other session',
+        version: '2',
+        time: { created: 1, updated: 1 },
+      },
+    ]);
+    setState('activeSessionId', 'session-2');
+    await flush();
+    resolveSave?.({ supported: true, rules: [] });
+    await flush();
+    expect(container.textContent).toContain('new workspace');
+    expect(container.textContent).not.toContain('git status *');
   });
 
   it('shows and independently retracts current-session and server-memory rules', async () => {

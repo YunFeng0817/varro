@@ -3230,6 +3230,230 @@ describe('RestProxy handleRequest', () => {
     });
   });
 
+  describe('saved-permission editing', () => {
+    type SavedPermissionApiFixture = { paths: Record<string, unknown> };
+    function fixture() {
+      const state = {
+        saved: [
+          { id: 'saved-1', projectID: 'project-1', action: 'shell', resource: 'git status *' },
+        ],
+        spec: {
+          paths: {
+            '/api/permission/saved/{id}': {
+              patch: {
+                requestBody: {
+                  content: {
+                    'application/json': {
+                      schema: {
+                        properties: { action: { type: 'string' }, resource: { type: 'string' } },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        } as SavedPermissionApiFixture,
+        failure: '',
+      };
+      const request = vi.fn(async (method: string, path: string, body?: unknown) => {
+        if (path === '/session/session-1')
+          return { id: 'session-1', projectID: 'project-1', directory: '/repo' };
+        if (path === '/project/current') return { id: 'project-1' };
+        if (path === '/openapi.json') return state.spec;
+        if (method === 'GET' && path === '/api/permission/saved?projectID=project-1')
+          return { data: state.saved };
+        if (method === 'PATCH' && path === '/api/permission/saved/saved-1') {
+          if (state.failure) throw new Error(state.failure);
+          const input = body as { action: string; resource: string };
+          state.saved[0] = { ...state.saved[0]!, ...input };
+          return { data: state.saved[0] };
+        }
+        throw new Error(`Unexpected ${method} ${path}`);
+      });
+      const result = createProxy({
+        server: { ...createCallbacks().server, apiVersion: 2, request } as never,
+        updatePermissionRulesForSession: vi.fn().mockResolvedValue([]),
+      });
+      result.callbacks.rememberServerMemoryPermissions([
+        {
+          id: 'legacy:perm-1:0',
+          projectID: 'project-1',
+          permission: 'bash',
+          pattern: 'git status *',
+          retractable: false,
+        },
+      ]);
+      return { ...result, state, request };
+    }
+
+    it.each([undefined, 'session-1'])(
+      'edits only the saved layer and retains visibility: session=%s',
+      async (sessionId) => {
+        const { proxy, callbacks, request } = fixture();
+        await proxy.handleRequest(
+          makePayload(860, 'PATCH', '/varro/permission/server-memory?directory=%2Frepo', {
+            sessionId,
+            id: 'saved-1',
+            permission: 'bash',
+            pattern: 'git diff *',
+          })
+        );
+        expect(request).toHaveBeenCalledWith(
+          'PATCH',
+          '/api/permission/saved/saved-1',
+          {
+            action: 'shell',
+            resource: 'git diff *',
+          },
+          expect.objectContaining({ directory: '/repo' })
+        );
+        expect(callbacks.postApiResponse).toHaveBeenLastCalledWith(1, {
+          id: 860,
+          data: {
+            supported: true,
+            rules: [
+              {
+                id: 'saved-1',
+                projectID: 'project-1',
+                permission: 'bash',
+                pattern: 'git diff *',
+                editable: true,
+              },
+            ],
+          },
+        });
+        expect(callbacks.getServerMemoryPermissions('project-1')).toEqual([
+          expect.objectContaining({ id: 'saved-1', permission: 'bash', pattern: 'git diff *' }),
+        ]);
+        expect(callbacks.updatePermissionRulesForSession).not.toHaveBeenCalled();
+        expect(request.mock.calls.filter(([method]) => method === 'PATCH')).toHaveLength(1);
+      }
+    );
+
+    it('tracks external edits by native ID and drops externally removed native rules', async () => {
+      const { proxy, callbacks, state } = fixture();
+      const path = '/varro/permission/server-memory?directory=%2Frepo';
+      await proxy.handleRequest(makePayload(860, 'GET', path));
+      state.saved[0]!.resource = 'git diff *';
+      await proxy.handleRequest(makePayload(861, 'GET', path));
+      expect(callbacks.postApiResponse).toHaveBeenLastCalledWith(1, {
+        id: 861,
+        data: {
+          supported: true,
+          rules: [expect.objectContaining({ id: 'saved-1', pattern: 'git diff *' })],
+        },
+      });
+      state.saved = [];
+      await proxy.handleRequest(makePayload(862, 'GET', path));
+      expect(callbacks.postApiResponse).toHaveBeenLastCalledWith(1, {
+        id: 862,
+        data: { supported: true, rules: [] },
+      });
+      expect(callbacks.getServerMemoryPermissions('project-1')).toEqual([]);
+    });
+
+    it('keeps list/remove support but rejects edits when PATCH is absent', async () => {
+      const { proxy, callbacks, state, request } = fixture();
+      state.spec = { paths: {} };
+      await proxy.handleRequest(
+        makePayload(860, 'PATCH', '/varro/permission/server-memory?directory=%2Frepo', {
+          id: 'saved-1',
+          permission: 'bash',
+          pattern: 'git diff *',
+        })
+      );
+      expect(callbacks.postApiResponse).toHaveBeenLastCalledWith(1, {
+        id: 860,
+        error: 'Saved-permission editing is unavailable on this OpenCode server',
+      });
+      expect(request.mock.calls.some(([method]) => method === 'PATCH')).toBe(false);
+    });
+
+    it('does not reuse a cached editable flag when the current saved snapshot is unavailable', async () => {
+      const { proxy, callbacks, request } = fixture();
+      const path = '/varro/permission/server-memory?directory=%2Frepo';
+      await proxy.handleRequest(makePayload(860, 'GET', path));
+      const original = request.getMockImplementation()!;
+      request.mockImplementation(async (method, route, body) => {
+        if (route === '/api/permission/saved?projectID=project-1')
+          throw new Error('network failed');
+        return original(method, route, body);
+      });
+      await proxy.handleRequest(
+        makePayload(861, 'PATCH', path, { id: 'saved-1', permission: 'bash', pattern: '*' })
+      );
+      expect(callbacks.postApiResponse).toHaveBeenLastCalledWith(1, {
+        id: 861,
+        error: 'Saved-permission editing is unavailable on this OpenCode server',
+      });
+      expect(request.mock.calls.some(([method]) => method === 'PATCH')).toBe(false);
+    });
+
+    it.each(['internal-1', 'other-project', 'legacy:perm-1:0'])(
+      'rejects edits to unmanaged or legacy rule %s',
+      async (id) => {
+        const { proxy, callbacks, state, request } = fixture();
+        state.saved.push(
+          { id: 'internal-1', projectID: 'project-1', action: 'shell', resource: 'internal *' },
+          { id: 'other-project', projectID: 'project-2', action: 'shell', resource: 'git status *' }
+        );
+        await proxy.handleRequest(
+          makePayload(860, 'PATCH', '/varro/permission/server-memory?directory=%2Frepo', {
+            id,
+            permission: 'bash',
+            pattern: '*',
+          })
+        );
+        expect(callbacks.postApiResponse).toHaveBeenLastCalledWith(1, {
+          id: 860,
+          error: expect.any(String),
+        });
+        expect(request.mock.calls.some(([method]) => method === 'PATCH')).toBe(false);
+      }
+    );
+
+    it.each([
+      '409 duplicate saved allowance',
+      '404 Saved permission not found',
+      '401 Unauthorized',
+      'network failed',
+    ])('preserves the old scope after a failed edit: %s', async (failure) => {
+      const { proxy, callbacks, state } = fixture();
+      state.failure = failure;
+      await proxy.handleRequest(
+        makePayload(860, 'PATCH', '/varro/permission/server-memory?directory=%2Frepo', {
+          id: 'saved-1',
+          permission: 'bash',
+          pattern: 'git diff *',
+        })
+      );
+      expect(callbacks.postApiResponse).toHaveBeenLastCalledWith(1, { id: 860, error: failure });
+      expect(callbacks.getServerMemoryPermissions('project-1')).toEqual([
+        expect.objectContaining({ permission: 'bash', pattern: 'git status *' }),
+      ]);
+    });
+
+    it.each([
+      { permission: '', pattern: '*' },
+      { permission: 'bash', pattern: '   ' },
+      { permission: 'x'.repeat(201), pattern: '*' },
+    ])('rejects invalid saved-rule input: %j', async (rule) => {
+      const { proxy, callbacks, request } = fixture();
+      await proxy.handleRequest(
+        makePayload(860, 'PATCH', '/varro/permission/server-memory?directory=%2Frepo', {
+          id: 'saved-1',
+          ...rule,
+        })
+      );
+      expect(callbacks.postApiResponse).toHaveBeenLastCalledWith(1, {
+        id: 860,
+        error: 'Every saved rule needs a permission name and pattern',
+      });
+      expect(request).not.toHaveBeenCalled();
+    });
+  });
+
   it('rejects project permission persistence without a matching pending request', async () => {
     const serverRequest = vi.fn((method: string, path: string) =>
       Promise.resolve(method === 'GET' && path === '/permission' ? [] : undefined)

@@ -264,7 +264,8 @@ type SessionPermissionRulesRequest =
 
 type ServerMemoryPermissionRequest =
   | { kind: 'list'; sessionID?: string }
-  | { kind: 'remove'; sessionID?: string; id: string };
+  | { kind: 'remove'; sessionID?: string; id: string }
+  | { kind: 'update'; sessionID?: string; id: string; permission: string; pattern: string };
 
 type SessionSummaryCacheEntry = {
   pending: boolean;
@@ -1313,7 +1314,7 @@ export class RestProxy {
         const data = await this.openCodeConfig.readServerMemoryPermissions(
           serverMemoryRequest.sessionID,
           directory ?? undefined,
-          serverMemoryRequest.kind === 'remove' ? serverMemoryRequest.id : undefined
+          serverMemoryRequest.kind === 'list' ? undefined : serverMemoryRequest
         );
         this.callbacks.postApiResponse(requestGeneration, { id: payload.id, data });
         return;
@@ -4427,11 +4428,25 @@ export class RestProxy {
       const sessionID = url.searchParams.get('sessionId')?.trim() ?? '';
       return sessionID ? { kind: 'list', sessionID } : { kind: 'list' };
     }
-    if (method !== 'DELETE') return null;
+    if (method !== 'DELETE' && method !== 'PATCH') return null;
     const record = asRecord(body);
     const sessionID = typeof record?.sessionId === 'string' ? record.sessionId.trim() : '';
     const id = typeof record?.id === 'string' ? record.id.trim() : '';
     if (!id) throw new Error('Saved permission ID is required');
+    if (method === 'PATCH') {
+      const permission = record?.permission;
+      const pattern = record?.pattern;
+      if (
+        typeof permission !== 'string' ||
+        !permission.trim() ||
+        permission.length > 200 ||
+        typeof pattern !== 'string' ||
+        !pattern.trim() ||
+        pattern.length > 2000
+      )
+        throw new Error('Every saved rule needs a permission name and pattern');
+      return { kind: 'update', sessionID: sessionID || undefined, id, permission, pattern };
+    }
     return sessionID ? { kind: 'remove', sessionID, id } : { kind: 'remove', id };
   }
 

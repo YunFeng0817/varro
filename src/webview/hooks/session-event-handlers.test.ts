@@ -1943,6 +1943,56 @@ describe('registerSessionEventHandlers', () => {
     expect(stopLoading).not.toHaveBeenCalled();
   });
 
+  it.each(['session.archived', 'session.unarchived'] as const)(
+    'refreshes full session state without transcript work for %s',
+    async (type) => {
+      const handlers = installHandlers();
+      const syncSession = vi.fn().mockResolvedValue(undefined);
+      const syncSessionMessages = vi.fn().mockResolvedValue(undefined);
+      const setSessionStatusEntry = vi.fn();
+      registerSessionEventHandlers(
+        createDefaultDeps({ syncSession, syncSessionMessages, setSessionStatusEntry })
+      );
+      handlers.get(type)?.({ properties: { sessionID: 'session-1' } });
+      expect(syncSession).toHaveBeenCalledWith('session-1', { shouldApply: expect.any(Function) });
+      expect(syncSessionMessages).not.toHaveBeenCalled();
+      expect(setSessionStatusEntry).not.toHaveBeenCalled();
+    }
+  );
+
+  it('does not apply an older archive snapshot after restore, deletion, or disposal', () => {
+    const handlers = installHandlers();
+    const guards: Array<() => boolean> = [];
+    const syncSession = vi.fn((_id: string, options?: { shouldApply(): boolean }) => {
+      guards.push(options!.shouldApply);
+      return new Promise<void>(() => {});
+    });
+    const dispose = registerSessionEventHandlers(createDefaultDeps({ syncSession }));
+    handlers.get('session.archived')?.({ properties: { sessionID: 'session-1' } });
+    expect(guards[0]!()).toBe(true);
+    handlers.get('session.unarchived')?.({ properties: { sessionID: 'session-1' } });
+    expect(guards[0]!()).toBe(false);
+    expect(guards[1]!()).toBe(true);
+    handlers.get('session.deleted')?.({
+      properties: { sessionID: 'session-1', info: { id: 'session-1' } },
+    });
+    expect(guards[1]!()).toBe(false);
+    handlers.get('session.unarchived')?.({ properties: { sessionID: 'session-2' } });
+    dispose.forEach((cleanup) => cleanup());
+    expect(guards[2]!()).toBe(false);
+  });
+
+  it('logs a failed archive refresh without changing session status', async () => {
+    const handlers = installHandlers();
+    const failure = new Error('network failed');
+    const syncSession = vi.fn().mockRejectedValue(failure);
+    const logError = vi.fn();
+    registerSessionEventHandlers(createDefaultDeps({ syncSession, logError }));
+    handlers.get('session.unarchived')?.({ properties: { sessionID: 'session-1' } });
+    await Promise.resolve();
+    expect(logError).toHaveBeenCalledWith('syncSession after archive change', failure);
+  });
+
   it('clears optional fields omitted from complete session updates', () => {
     const handlers = installHandlers();
     const upsertSession = vi.fn();

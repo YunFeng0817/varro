@@ -9,7 +9,7 @@ import {
   prepareVarroStateDirectory,
 } from './varro-state-paths';
 
-/** V2 cannot patch metadata or archive timestamps. These are Varro-owned annotations. */
+/** Varro metadata and fallback state for servers without native archive support. */
 export class OpenCodeV2SessionState {
   private readonly operations = new Map<string, Promise<unknown>>();
   private readonly legacyDirectory: string | undefined;

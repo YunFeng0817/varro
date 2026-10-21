@@ -60,6 +60,8 @@ export function projectV2Event(value: unknown, context: V2MessageContext = {}): 
     });
   if (event.type === 'session.deleted')
     return emit('session.deleted', { sessionID, info: { id: sessionID } });
+  if (event.type === 'session.archived' || event.type === 'session.unarchived')
+    return emit(event.type);
   if (event.type === 'session.status.updated') return emit('session.status');
   if (event.type === 'session.execution.started')
     return emit('session.status', {
