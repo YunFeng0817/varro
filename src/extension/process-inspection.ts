@@ -41,13 +41,7 @@ export function disposeProcessInspection(): void {
 /** Start compilation early; preparation neither reads nor authorizes a listener. */
 export async function prepareProcessInspection(): Promise<void> {
   if (process.platform !== 'win32') return;
-  try {
-    await windowsInspector.prepare();
-  } catch (error) {
-    logger.warn(
-      `Could not prepare Windows process inspection: ${error instanceof Error ? error.message : String(error)}`
-    );
-  }
+  await windowsInspector.prepare();
 }
 
 export type LocalServerAccount = {

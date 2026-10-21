@@ -239,6 +239,22 @@ describe('extension activation', () => {
     );
   });
 
+  it('logs failed helper preparation while continuing activation', async () => {
+    prepareProcessInspectionMock.mockRejectedValue(new Error('Preparation timed out'));
+    const { activate } = await import('./extension');
+    await activate({
+      extensionUri: {},
+      extension: { id: 'koltyakov.varro' },
+      workspaceState: {},
+      subscriptions: [],
+    } as never);
+    expect(loggerMock.warn).toHaveBeenCalledWith(
+      'Could not prepare Windows process inspection: Preparation timed out'
+    );
+    expect(openCodeServerMock).toHaveBeenCalledOnce();
+    expect(registerWebviewViewProviderMock).toHaveBeenCalledOnce();
+  });
+
   it('passes secret storage into OpenCodeServer without reading compaction settings', async () => {
     const { activate } = await import('./extension');
     const secrets = { get: vi.fn(), store: vi.fn(), delete: vi.fn() };

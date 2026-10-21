@@ -93,13 +93,10 @@ describe('process inspection preparation', () => {
     expect(nativePrepareMock).not.toHaveBeenCalled();
     expect(nativeReadMock).not.toHaveBeenCalled();
   });
-  it('reports an unavailable helper without turning preparation into admission failure', async () => {
+  it('rejects failed preparation so fixtures cannot continue with an unprepared helper', async () => {
     Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
     nativePrepareMock.mockRejectedValue(new Error('Preparation timed out'));
-    await expect(prepareProcessInspection()).resolves.toBeUndefined();
-    expect(logger.warn).toHaveBeenCalledWith(
-      'Could not prepare Windows process inspection: Preparation timed out'
-    );
+    await expect(prepareProcessInspection()).rejects.toThrow('Preparation timed out');
     expect(nativeReadMock).not.toHaveBeenCalled();
   });
 });

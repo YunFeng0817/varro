@@ -2,10 +2,12 @@ import type { ChildProcess } from 'node:child_process';
 import { setTimeout as delay } from 'node:timers/promises';
 import {
   findListeningPids,
+  isProcessAlive,
   isProcessOrDescendant,
   readProcessBirthIdentity,
   readProcessExecutable,
   readProcessGroupId,
+  readWindowsProcessIdentity,
   runProcess,
 } from './process-inspection';
 
@@ -49,6 +51,14 @@ export class IsolatedProcessTree {
   }
 
   private async remember(pid: number): Promise<void> {
+    if (process.platform === 'win32') {
+      // Keep birth and executable in one verified snapshot, including the CIM fallback.
+      const { birthIdentity: birth, executable } = await readWindowsProcessIdentity(pid);
+      if (!birth || !executable)
+        throw new Error(`Could not record isolated process identity for ${pid}`);
+      this.identities.set(pid, { pid, birth, executable });
+      return;
+    }
     const birth = await readProcessBirthIdentity(pid);
     const executable = await readProcessExecutable(pid);
     if (!birth || !executable || (await readProcessBirthIdentity(pid)) !== birth)
@@ -57,6 +67,13 @@ export class IsolatedProcessTree {
   }
 
   private async matches(identity: ProcessIdentity): Promise<boolean> {
+    // A confirmed exit needs no CIM fallback. In particular, repeated cleanup must
+    // not start PowerShell to inspect processes that this fixture already stopped.
+    if (!isProcessAlive(identity.pid)) return false;
+    if (process.platform === 'win32') {
+      const current = await readWindowsProcessIdentity(identity.pid);
+      return current.birthIdentity === identity.birth && current.executable === identity.executable;
+    }
     return (
       (await readProcessBirthIdentity(identity.pid)) === identity.birth &&
       (await readProcessExecutable(identity.pid)) === identity.executable &&

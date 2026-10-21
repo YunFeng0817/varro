@@ -6,11 +6,15 @@ import {
   disposeProcessInspection,
   findListeningPids,
   prepareProcessInspection,
+  readWindowsProcessIdentity,
 } from './process-inspection';
 
 // Only the editor-owned output channel is replaced; process and listener inspection stay real.
 // oxlint-disable-next-line anti-slop/no-module-mocking
-vi.mock('./logger', () => ({ logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }));
+vi.mock('./logger', () => ({
+  // oxlint-disable-next-line no-console -- Keep native inspection failures visible in CI logs.
+  logger: { info: vi.fn(), warn: console.warn, error: console.error },
+}));
 
 const serverSource = `
   const server = require('node:net').createServer();
@@ -21,7 +25,16 @@ const serverSource = `
 describe('isolated process teardown', () => {
   // Compile the Windows helper before launching fixtures, not inside an identity read.
   // Preparation grants no process evidence; capture and teardown still inspect afresh.
-  beforeAll(() => prepareProcessInspection(), 20_000);
+  beforeAll(async () => {
+    await prepareProcessInspection();
+    if (process.platform === 'win32') {
+      // Exercise the complete request/response path before creating a process to clean up.
+      // This observation is only setup evidence, never a fixture's identity.
+      const identity = await readWindowsProcessIdentity(process.pid);
+      expect(identity.birthIdentity).toMatch(/^win32:\d+$/);
+      expect(identity.executable.toLowerCase()).toBe(process.execPath.toLowerCase());
+    }
+  }, 25_000);
   afterAll(() => disposeProcessInspection());
 
   it('attempts subsequent cleanup after disposal and evidence failures', async () => {

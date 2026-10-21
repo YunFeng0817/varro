@@ -156,7 +156,12 @@ export async function activate(context: vscode.ExtensionContext) {
 
 async function activateExtension(context: vscode.ExtensionContext) {
   logger.info('Activating Varro extension');
-  void prepareProcessInspection();
+  // oxlint-disable-next-line anti-slop/no-unknown-parameters -- Promise rejection values are untrusted and narrowed for logging.
+  void prepareProcessInspection().catch((error: unknown) => {
+    logger.warn(
+      `Could not prepare Windows process inspection: ${error instanceof Error ? error.message : String(error)}`
+    );
+  });
   if (!vscode.workspace.workspaceFolders?.length) await prepareVarroScratchDirectory();
 
   const config = vscode.workspace.getConfiguration('varro');

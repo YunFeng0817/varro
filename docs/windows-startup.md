@@ -43,10 +43,16 @@ deterministic unit tests check both deadlines, rejection of all pending reads, a
 restart without cached or partial evidence. The native suite does not prove cold
 startup always fits five seconds.
 
-The teardown suite also prepares the shared process-inspection helper before launching
-fixtures and disposes it after the suite. Its twenty-second setup bound is separate
-from the unchanged identity-read and per-test deadlines. Preparation failure grants
-no identity evidence; listener capture and teardown still require fresh verified reads.
+The teardown suite prepares the shared process-inspection helper and checks a full
+request/response against its own host before launching fixtures. It disposes the helper
+after the suite. Its twenty-five-second setup bound is separate from the unchanged
+identity-read and per-test deadlines. Preparation failures reject setup; only extension
+activation catches and logs them as best-effort background work. The host observation
+grants no fixture identity evidence. Windows fixture capture and teardown use coherent
+birth/executable snapshots rather than separate reads that can mix native and CIM
+observations. Confirmed exits skip identity inspection, avoiding cold CIM fallback
+after termination and on repeated cleanup. Live PIDs still require fresh matching
+birth/executable evidence before any signal. Native fixture warnings remain in test logs.
 
 Activation starts optional helper preparation without awaiting it, overlapping PowerShell/C# startup
 with extension and webview setup. Preparation observes no PID and grants no admission evidence.
