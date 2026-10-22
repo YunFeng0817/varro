@@ -12,3 +12,10 @@
 .katex {
   color: inherit;
 }
+
+/* VS Code maintains this class when screen-reader mode changes. Defer only the
+   hidden MathML layout in ordinary editor mode; accessible mode needs the entire
+   semantic tree, including offscreen formulas. Standalone views keep it too. */
+body[data-vscode-theme-id]:not(.vscode-using-screen-reader) .katex .katex-mathml {
+  content-visibility: auto;
+}

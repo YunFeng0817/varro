@@ -365,8 +365,10 @@ test('keeps active-tray wheel input local before outer transcript movement', asy
       getScrollMetrics(page, '.interactive-list').then((metrics) => metrics.distanceFromBottom)
     )
     .toBeLessThanOrEqual(1);
-  await trayItems.locator('.tool-invocation-header').click();
-  await expect(trayItems.locator('.tool-invocation-chevron')).toHaveClass(/expanded/);
+  const header = trayItems.locator('.tool-invocation-header');
+  await header.click();
+  await expect(header).toHaveAttribute('aria-expanded', 'true');
+  await expect(trayItems.locator('.tool-invocation-detail')).toBeAttached();
   await trayItems.evaluate(async (element) => {
     // Wait for expansion sizing, then exercise an unrelated mutation in the same item.
     await new Promise<void>((resolve) =>

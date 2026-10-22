@@ -96,6 +96,7 @@ type IncompleteStreamingMarkdown = {
   pendingText: string | null;
   hidePendingText: boolean;
   showIndicator?: boolean;
+  pendingBullet?: boolean;
 };
 
 type MarkdownHydrationFlags = {
@@ -1459,6 +1460,7 @@ function renderIncompleteStreamingMarkdown(
     marker,
     pendingText: content.slice(pendingStart),
     hidePendingText: pendingStart !== visiblePendingStart,
+    pendingBullet: !!trailingBulletMarker,
     showIndicator:
       mathStart !== null ||
       inlineStart !== null ||
@@ -1611,7 +1613,15 @@ function parseIncompleteStreamingMarkdown(content: string, options: ParseMarkdow
   if (prepared.hidePendingText && prepared.showIndicator) {
     // Keep the HTML identical while only hidden source grows, so each delta
     // preserves the indicator's DOM nodes and animation progress.
-    return html.replace(
+    // A hidden leading bullet still owns list spacing. Keep its dots marker-free
+    // and use the eventual list gap before the token closes.
+    const indicatorHtml = prepared.pendingBullet
+      ? html.replace(
+          `<p>${prepared.marker}</p>`,
+          `<p class="streaming-markdown-pending-list">${prepared.marker}</p>`
+        )
+      : html;
+    return indicatorHtml.replace(
       prepared.marker,
       '<span class="streaming-markdown-pending streaming-markdown-indicator" role="img" aria-label="Streaming content"><span aria-hidden="true"></span><span aria-hidden="true"></span><span aria-hidden="true"></span></span>'
     );
@@ -2425,7 +2435,9 @@ export function MarkdownRenderer(props: MarkdownProps) {
     const firstTailBlock = tailRef?.firstElementChild;
     const tag = firstTailBlock?.classList.contains('streaming-markdown-pending-block')
       ? ''
-      : (firstTailBlock?.localName ?? '');
+      : firstTailBlock?.classList.contains('streaming-markdown-pending-list')
+        ? 'ul'
+        : (firstTailBlock?.localName ?? '');
     if (stableRef && stableRef.dataset.markdownTailTag !== tag) {
       stableRef.dataset.markdownTailTag = tag;
     }

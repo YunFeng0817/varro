@@ -75,6 +75,12 @@ any saving described here.
   rounding style pass from 8,531 elements to 91. The row spacer and outer activity guides still
   inherit the real correction. Count affected elements, not just style passes: this avoids work
   within an existing pass without reducing its count.
+- KaTeX's hidden MathML can defer offscreen layout only when VS Code supplies its accessibility
+  signal and screen-reader mode is inactive. `content-visibility: auto` reduces the retained math
+  remount's initial style work from about 8,477 to 6,576 elements and layout from 11,487 to 8,373
+  dirty objects. It also omits offscreen MathML from Chromium's accessibility tree. Always disable
+  it for `vscode-using-screen-reader` and standalone views. Real-editor mode changes must restore
+  every formula's semantics without changing row geometry or scroll position.
 
 ## Webview transport
 

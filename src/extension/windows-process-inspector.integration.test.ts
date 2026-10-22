@@ -12,7 +12,7 @@ describe.skipIf(process.platform !== 'win32')('native Windows process inspection
     // Readiness is not identity evidence; all reads retain the production deadline.
     await inspector.prepare();
     await inspector.read(process.pid);
-  }, 25_000);
+  }, 40_000);
 
   afterAll(() => inspector.dispose());
 

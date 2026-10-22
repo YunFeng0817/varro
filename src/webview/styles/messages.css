@@ -2174,7 +2174,7 @@ body:is(.vscode-light, .vscode-high-contrast-light) .chat-empty-logo {
   margin-bottom: 12px;
 }
 
-.rendered-markdown p:has(+ :is(ul, ol)),
+.rendered-markdown p:has(+ :is(ul, ol, .streaming-markdown-pending-list)),
 .rendered-markdown
   > [data-markdown-segment='stable']:is(
     [data-markdown-tail-tag='ul'],

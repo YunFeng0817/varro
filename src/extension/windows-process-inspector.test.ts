@@ -59,7 +59,8 @@ describe('Windows native process inspector', () => {
     const preparation = inspector.prepare();
     expect(inspector.prepare()).toBe(preparation);
     expect(children[0]!.stdin.read()).toBeNull();
-    await vi.advanceTimersByTimeAsync(10_000);
+    children[0]!.stdout.write('{"starting":true}\r\n');
+    await vi.advanceTimersByTimeAsync(20_000);
     expect(children[0]!.kill).not.toHaveBeenCalled();
     children[0]!.stdout.write('{"ready":');
     children[0]!.stdout.write('true}\r\n');
@@ -84,9 +85,9 @@ describe('Windows native process inspector', () => {
     vi.useFakeTimers();
     const { inspector, children } = setup();
     const rejected = expect(inspector.prepare()).rejects.toThrow(
-      'helper startup timed out after 15000ms'
+      'helper startup timed out after 30000ms during PowerShell launch'
     );
-    await vi.advanceTimersByTimeAsync(14_999);
+    await vi.advanceTimersByTimeAsync(29_999);
     expect(children[0]!.kill).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(1);
     await rejected;
@@ -120,6 +121,21 @@ describe('Windows native process inspector', () => {
     expect(children[0]!.kill).toHaveBeenCalledOnce();
   });
 
+  it('reports compilation timeout with bounded diagnostics without accepting startup as readiness', async () => {
+    vi.useFakeTimers();
+    const { inspector, children } = setup();
+    const rejected = expect(inspector.prepare()).rejects.toEqual(
+      new Error(
+        `Windows process inspection helper startup timed out after 30000ms during native bridge compilation: ${'x'.repeat(2048)}`
+      )
+    );
+    children[0]!.stdout.write('{"starting":true}\n');
+    children[0]!.stderr.write('x'.repeat(4096));
+    await vi.advanceTimersByTimeAsync(30_000);
+    await rejected;
+    expect(children[0]!.kill).toHaveBeenCalledOnce();
+  });
+
   it('does not treat readiness as identity or extend an unprepared production read', async () => {
     vi.useFakeTimers();
     const { inspector, children } = setup();
@@ -127,6 +143,7 @@ describe('Windows native process inspector', () => {
       'native process inspection timed out after 5000ms'
     );
     await vi.advanceTimersByTimeAsync(4000);
+    children[0]!.stdout.write('{"starting":true}\n');
     children[0]!.stdout.write('{"ready":true}\n');
     await vi.advanceTimersByTimeAsync(1000);
     await rejected;

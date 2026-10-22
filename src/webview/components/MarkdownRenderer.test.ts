@@ -2940,7 +2940,8 @@ describe('MarkdownRenderer', () => {
       expectStreamingIndicator(container!);
       expect(
         container?.querySelector('[data-markdown-tail-tag]')?.getAttribute('data-markdown-tail-tag')
-      ).toBe('p');
+      ).toBe('ul');
+      expect(container?.querySelector('p.streaming-markdown-pending-list')).not.toBeNull();
 
       setContent(`Two corrections:\n\n- \`Open as Editor\` is not a model-change event.`);
       await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));

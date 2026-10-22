@@ -34,7 +34,7 @@ describe('isolated process teardown', () => {
       expect(identity.birthIdentity).toMatch(/^win32:\d+$/);
       expect(identity.executable.toLowerCase()).toBe(process.execPath.toLowerCase());
     }
-  }, 25_000);
+  }, 40_000);
   afterAll(() => disposeProcessInspection());
 
   it('attempts subsequent cleanup after disposal and evidence failures', async () => {

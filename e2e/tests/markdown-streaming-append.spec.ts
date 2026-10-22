@@ -518,7 +518,40 @@ test('keeps filename links inside narrow table cells throughout streaming and co
   ]);
 });
 
+for (const fontSize of [13, 13.5]) {
+  test(`keeps pending bullet spacing when its first token completes at ${fontSize}px`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 486, height: 900 });
+    await page.goto('/e2e/harness/index.html?scenario=rapid-streaming-jitter');
+    await page.addStyleTag({ content: `.rendered-markdown { font-size: ${fontSize}px; }` });
+    const markdown = page.locator(`${ROW} .rendered-markdown`);
+    await expect(markdown).toHaveText('Starting...');
+    await appendDeltaToRapidStreaming(
+      page,
+      '\n\nAdded coverage for valid empty shell environment values.\n\n- `bun test src/main/shell-env.test.ts'
+    );
+    await expect(markdown.getByRole('img', { name: 'Streaming content' })).toBeVisible();
+    await waitForAnimationFrames(page, 12);
+    const height = await markdown.evaluate((element) => element.getBoundingClientRect().height);
+    const paragraphGap = () =>
+      markdown
+        .locator('p')
+        .nth(1)
+        .evaluate((element) => getComputedStyle(element).marginBottom);
+    const gap = await paragraphGap();
+    await appendDeltaToRapidStreaming(page, '`');
+    await expect(markdown.locator('li code')).toHaveText('bun test src/main/shell-env.test.ts');
+    expect(await paragraphGap()).toBe(gap);
+    expect(
+      await markdown.evaluate((element) => element.getBoundingClientRect().height)
+    ).toBeGreaterThanOrEqual(height);
+  });
+}
+
 test('keeps preceding content stable while a streamed HTML disclosure forms', async ({ page }) => {
+  // Character-by-character playback intentionally waits four paint frames per delta.
+  test.setTimeout(60_000);
   await page.setViewportSize({ width: 486, height: 900 });
   await page.goto('/e2e/harness/index.html?scenario=rapid-streaming-jitter');
   const markdown = page.locator(`${ROW} .rendered-markdown`);
@@ -619,6 +652,84 @@ async function completeResponse(page: Page, finalText: string) {
     { sessionID: SESSION_ID, messageID: MESSAGE_ID, text: finalText }
   );
 }
+
+test('restores offscreen formula semantics when editor screen-reader mode changes', async ({
+  page,
+}) => {
+  await page.goto('/e2e/harness/index.html?scenario=rapid-streaming-jitter');
+  await expect(page.locator(`${ROW} .rendered-markdown`)).toHaveText('Starting...');
+  const formulaCount = 54;
+  const text = Array.from(
+    { length: formulaCount },
+    (_, index) =>
+      `### Formula ${index}\n\n$$\\frac{x_${index}^2 + 1}{\\sqrt{y}} = \\sum_{i=0}^{n} i$$`
+  ).join('\n\n');
+  await completeResponse(page, text);
+  const math = page.locator(`${ROW} .katex-mathml`);
+  await expect(math).toHaveCount(formulaCount);
+  await page.evaluate(() => document.fonts.ready);
+  await waitForAnimationFrames(page, 6);
+  const cdp = await page.context().newCDPSession(page);
+  const semantics = async () => {
+    const tree: {
+      nodes: Array<{ role?: { value?: string }; name?: { value?: string }; ignored: boolean }>;
+    } = await cdp.send('Accessibility.getFullAXTree');
+    return tree.nodes
+      .filter((node) => node.role?.value?.startsWith('MathML'))
+      .map((node) => ({ role: node.role?.value, name: node.name?.value, ignored: node.ignored }));
+  };
+  const geometry = () =>
+    page.locator(ROW).evaluate((row) => {
+      const bounds = row.getBoundingClientRect();
+      return {
+        height: bounds.height,
+        text: row.textContent,
+        formulas: [...row.querySelectorAll('.katex-html, .katex-html *')].map((element) => {
+          const rect = element.getBoundingClientRect();
+          return [rect.x - bounds.x, rect.y - bounds.y, rect.width, rect.height];
+        }),
+      };
+    });
+  // Standalone views do not receive VS Code's accessibility signal.
+  await expect(math.first()).toHaveCSS('content-visibility', 'visible');
+  const original = await semantics();
+  expect(original.filter((node) => node.role === 'MathMLMath')).toHaveLength(formulaCount);
+  const originalGeometry = await geometry();
+  const expectOriginalGeometry = async () => {
+    const current = await geometry();
+    expect(current.height).toBe(originalGeometry.height);
+    expect(current.text).toBe(originalGeometry.text);
+    expect(current.formulas).toHaveLength(originalGeometry.formulas.length);
+    // Transformed SVG bounds differ by floating-point rounding after a scroll.
+    const deltas = current.formulas.flatMap((rect, index) =>
+      rect.map((value, axis) => Math.abs(value - originalGeometry.formulas[index]![axis]!))
+    );
+    expect(Math.max(...deltas)).toBeLessThan(0.001);
+  };
+  await page.evaluate(() => {
+    document.body.dataset.vscodeThemeId = 'Default Dark Modern';
+  });
+  await expect(math.first()).toHaveCSS('content-visibility', 'auto');
+  await expectOriginalGeometry();
+  for (let cycle = 0; cycle < 2; cycle += 1) {
+    await page.evaluate(() => document.body.classList.add('vscode-using-screen-reader'));
+    await expect(math.first()).toHaveCSS('content-visibility', 'visible');
+    await expect.poll(semantics).toEqual(original);
+    await expectOriginalGeometry();
+    // Fully unmount and remount the formula row with accessibility enabled.
+    await page.locator('.interactive-list').hover();
+    await page.mouse.wheel(0, -100000);
+    await expect(page.locator(ROW)).toHaveCount(0);
+    await page.mouse.wheel(0, 100000);
+    await expect(math).toHaveCount(formulaCount);
+    await expect.poll(semantics).toEqual(original);
+    await expectOriginalGeometry();
+    await page.evaluate(() => document.body.classList.remove('vscode-using-screen-reader'));
+    await expect(math.first()).toHaveCSS('content-visibility', 'auto');
+    await expectOriginalGeometry();
+  }
+  await cdp.detach();
+});
 
 for (const width of [1280, 390]) {
   test.describe(`Markdown prose append at ${width}px`, () => {

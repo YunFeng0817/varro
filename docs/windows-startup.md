@@ -33,8 +33,12 @@ The native helper integration and isolated-process teardown tests run serially i
 a Node-environment Vitest project after the parallel unit suite. This avoids making
 PowerShell startup and `Add-Type` compete with jsdom workers on Windows CI without
 relaxing the production timeout.
-Its suite fixture shares one helper and waits up to fifteen seconds for an explicit
+Its suite fixture shares one helper and waits up to thirty seconds for an explicit
 readiness message after compilation, without restarting compilation at five seconds.
+The first cold helper exceeded fifteen seconds in Windows CI while the next helper
+prepared successfully. Preparation therefore has a separate thirty-second budget;
+timeouts distinguish PowerShell launch from native bridge compilation and retain at
+most 2,048 characters of stderr diagnostics. The startup marker grants no readiness or identity.
 Preparation reads no process identity and readiness grants no account or ownership proof.
 Production reads do not wait for preparation and retain their five-second total bound,
 including cold startup. Fixture and assertion reads also retain that bound, never retry,
@@ -45,7 +49,7 @@ startup always fits five seconds.
 
 The teardown suite prepares the shared process-inspection helper and checks a full
 request/response against its own host before launching fixtures. It disposes the helper
-after the suite. Its twenty-five-second setup bound is separate from the unchanged
+after the suite. Its forty-second setup bound is separate from the unchanged
 identity-read and per-test deadlines. Preparation failures reject setup; only extension
 activation catches and logs them as best-effort background work. The host observation
 grants no fixture identity evidence. Windows fixture capture and teardown use coherent

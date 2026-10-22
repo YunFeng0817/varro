@@ -16,6 +16,8 @@ type WindowsProcessDetails = {
 const INSPECTION_SCRIPT = String.raw`
 $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)
+[Console]::Out.WriteLine('{"starting":true}')
+[Console]::Out.Flush()
 Add-Type -TypeDefinition @'
 using System;
 using System.Collections.Generic;
@@ -191,6 +193,8 @@ export class WindowsProcessInspector {
   >();
   private idleTimer: ReturnType<typeof setTimeout> | undefined;
   private ready = false;
+  private startupPhase = 'PowerShell launch';
+  private startupDiagnostics = '';
   private preparation:
     | { promise: Promise<void>; resolve: () => void; reject: (error: Error) => void }
     | undefined;
@@ -209,8 +213,12 @@ export class WindowsProcessInspector {
     let rejectPreparation!: (error: Error) => void;
     const timeout = setTimeout(() => {
       if (this.worker === worker)
-        this.stop(new Error('Windows process inspection helper startup timed out after 15000ms'));
-    }, 15_000);
+        this.stop(
+          new Error(
+            `Windows process inspection helper startup timed out after 30000ms during ${this.startupPhase}${this.startupDiagnostics ? `: ${this.startupDiagnostics}` : ''}`
+          )
+        );
+    }, 30_000);
     const promise = new Promise<void>((resolve, reject) => {
       resolvePreparation = resolve;
       rejectPreparation = reject;
@@ -274,6 +282,8 @@ export class WindowsProcessInspector {
   }
 
   private start(): ChildProcessWithoutNullStreams {
+    this.startupPhase = 'PowerShell launch';
+    this.startupDiagnostics = '';
     const worker = spawn(
       'powershell.exe',
       [
@@ -293,8 +303,13 @@ export class WindowsProcessInspector {
     worker.on('error', fail);
     worker.on('close', () => fail(new Error('Windows process inspection helper exited')));
     worker.stdin.on('error', fail);
-    worker.stderr.on('data', () => {
-      // Drain startup diagnostics; never treat stderr/partial stdout as identity.
+    worker.stderr.on('data', (chunk: Buffer) => {
+      // Retain a bounded diagnostic tail, never process identity or readiness evidence.
+      if (this.worker === worker && !this.ready) {
+        this.startupDiagnostics = (this.startupDiagnostics + chunk.toString('utf8'))
+          .slice(-2048)
+          .trim();
+      }
     });
     worker.stdout.setEncoding('utf8');
     worker.stdout.on('data', (chunk: string) => {
@@ -311,6 +326,10 @@ export class WindowsProcessInspector {
         buffer = buffer.slice(end + 1);
         try {
           const response = asRecord(JSON.parse(line));
+          if (response?.starting === true && Object.keys(response).length === 1 && !this.ready) {
+            this.startupPhase = 'native bridge compilation';
+            continue;
+          }
           if (response?.ready === true && Object.keys(response).length === 1 && !this.ready) {
             this.ready = true;
             const preparation = this.preparation;
