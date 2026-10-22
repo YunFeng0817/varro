@@ -9338,6 +9338,101 @@ describe('ChatInput', () => {
     expect(container?.querySelector('[aria-label="Stop"]')).toBeNull();
   });
 
+  it.each([false, true])(
+    'shows unfinished subagents after the parent completes (queued messages: %s)',
+    async (hasQueue) => {
+      vi.useFakeTimers();
+      const rootId = 'waiting-root';
+      setState('activeSessionId', rootId);
+      setState('sessions', [
+        session(rootId, 1),
+        session('child-1', 2, { parentID: rootId, title: 'Migrate catalog' }),
+        session('child-2', 3, { parentID: 'child-1', title: 'Validate protocol' }),
+        session('other', 4, { title: 'Unrelated work' }),
+      ]);
+      setState('sessionStatus', {
+        [rootId]: { type: 'busy' },
+        'child-1': { type: 'busy' },
+        'child-2': { type: 'retry', attempt: 1, message: 'Retrying', next: 100 },
+        other: { type: 'busy' },
+      });
+      const assistant = assistantMessageEntry({ input: 1, output: 1 });
+      assistant.info.sessionID = rootId;
+      setState('messages', [assistant]);
+      if (hasQueue) {
+        setState('queuedMessages', [
+          { id: 'waiting-queue', sessionId: rootId, text: 'Build and install' },
+        ]);
+      }
+      sendMessageMock.mockResolvedValue(true);
+      cleanup = render(() => ChatInput(), container!);
+      expect(container?.querySelector('.chat-subagent-waiting')).toBeNull();
+
+      setState('messages', [
+        {
+          ...assistant,
+          info: { ...assistant.info, time: { created: 2, completed: 3 }, finish: 'stop' },
+        },
+      ]);
+      setState('sessionStatus', rootId, { type: 'idle' });
+      await vi.advanceTimersByTimeAsync(1_000);
+
+      const waiting = container?.querySelector('.chat-subagent-waiting');
+      expect(waiting?.getAttribute('role')).toBe('status');
+      expect(waiting?.textContent).toContain('Waiting for 2 subagents');
+      expect(waiting?.textContent).toContain('Migrate catalog');
+      expect(waiting?.textContent).toContain('Validate protocol');
+      expect(waiting?.textContent).not.toContain('Unrelated work');
+      expect(container?.querySelector('[aria-label="Stop"]')).not.toBeNull();
+      expect(container?.querySelector('.rich-composer')?.getAttribute('data-placeholder')).toBe(
+        'Queue a follow-up or steer'
+      );
+      expect(sendMessageMock).not.toHaveBeenCalled();
+
+      setState('sessionStatus', 'child-1', { type: 'idle' });
+      await vi.advanceTimersByTimeAsync(300);
+      expect(waiting?.textContent).toContain('Waiting for 1 subagent');
+      expect(waiting?.textContent).not.toContain('Migrate catalog');
+      expect(waiting?.textContent).toContain('Validate protocol');
+      expect(sendMessageMock).not.toHaveBeenCalled();
+
+      setState('sessionStatus', 'child-2', { type: 'idle' });
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(container?.querySelector('.chat-subagent-waiting')).toBeNull();
+      expect(container?.querySelector('[aria-label="Stop"]')).toBeNull();
+      expect(sendMessageMock).toHaveBeenCalledTimes(hasQueue ? 1 : 0);
+      expect(state.queuedMessages).toEqual([]);
+    }
+  );
+
+  it('scopes the subagent waiting status to the composer session', async () => {
+    setState('activeSessionId', 'session-1');
+    setState('sessions', [
+      session('session-1', 1),
+      session('child-1', 2, { parentID: 'session-1', title: 'Background task' }),
+      session('session-2', 3),
+    ]);
+    setState('sessionStatus', {
+      'session-1': { type: 'idle' },
+      'child-1': { type: 'busy' },
+      'session-2': { type: 'idle' },
+    });
+    cleanup = render(() => ChatInput(), container!);
+    expect(container?.querySelector('.chat-subagent-waiting')?.textContent).toContain(
+      'Background task'
+    );
+
+    setState('activeSessionId', 'session-2');
+    await flushAsyncWork();
+    expect(container?.querySelector('.chat-subagent-waiting')).toBeNull();
+
+    setState('activeSessionId', 'session-1');
+    cleanup();
+    cleanup = render(() => ChatInput({ newSession: true }), container!);
+    expect(container?.querySelector('.chat-subagent-waiting')).toBeNull();
+    expect(container?.querySelector('[aria-label="Stop"]')).toBeNull();
+  });
+
   it('hides stale busy controls for a terminal response but keeps them for a continuation', () => {
     const terminalAssistant: AssistantMessage = {
       id: 'assistant-1',

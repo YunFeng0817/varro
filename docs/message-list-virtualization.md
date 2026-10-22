@@ -595,6 +595,11 @@ Direct input acquires ownership only when it can affect the transcript:
   through background notices and continuation loading, and mark only the settled continuation.
   Earlier completed turns keep their markers while a new turn runs. `MessageList.rendering.test.ts`
   covers busy, retry, local loading, child execution, streaming, and background handoffs.
+- A terminal parent response does not finish the turn while any descendant session is busy or retrying.
+  Suppress the trailing Worked summary, including a retained summary, until those sessions settle.
+  Keep the existing loading slot and the composer's subagent-waiting status. Show that status when
+  at least one working descendant has no running card header half-visible in the viewport. Shared
+  intersection observation accounts for scroll clipping and virtual unmounts without scanning on scroll.
 - Starting the next turn moves the previous Worked summary from the shared trailing slot into its
   assistant row. Its painted top must remain fixed across that ownership handoff; row-local spacing
   must match the spacing previously supplied by the assistant row boundary.

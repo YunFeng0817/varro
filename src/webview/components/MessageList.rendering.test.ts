@@ -4939,6 +4939,69 @@ describe('MessageList loading row', () => {
     expect(container?.querySelector('.loading-indicator')).toBeInstanceOf(HTMLDivElement);
   });
 
+  it.each(['busy', 'retry'] as const)(
+    'withholds the completed-turn summary while a nested subagent is %s',
+    async (status) => {
+      setState('activeSessionId', 'session-1');
+      setSessions([
+        session('session-1'),
+        session('child-1', { parentID: 'session-1' }),
+        session('child-2', { parentID: 'child-1' }),
+        session('unrelated'),
+      ]);
+      const completed = assistantMessage('assistant-1', {
+        time: { created: 2_000, completed: 11_000 },
+        tokens: { input: 42, output: 7, reasoning: 0, cache: { read: 0, write: 0 } },
+      });
+      completed.finish = 'stop';
+      replaceMessages([
+        {
+          info: { ...userMessage('user-1'), time: { created: 1_000 } },
+          parts: [textPart('text-user-1', 'Run the checks')],
+        },
+        {
+          info: completed,
+          parts: [textPart('text-assistant-1', 'Finishing validation with subagents.')],
+        },
+      ]);
+      setState(
+        'sessionStatus',
+        reconcile({
+          'session-1': { type: 'idle' },
+          'child-1': { type: 'busy' },
+          'child-2':
+            status === 'busy'
+              ? { type: 'busy' }
+              : { type: 'retry', attempt: 1, message: 'Retrying', next: 20_000 },
+          unrelated: { type: 'busy' },
+        })
+      );
+      cleanup = render(() => MessageList(), container!);
+      await vi.advanceTimersByTimeAsync(700);
+
+      const expectPending = () => {
+        expect(container?.querySelector('.trailing-assistant-summary-row')).toBeNull();
+        expect(container?.querySelector('[aria-label="Worked for"]')).toBeNull();
+        expect(container?.querySelector('.loading-indicator')).not.toBeNull();
+        expect(container?.textContent).toContain('Finishing validation with subagents.');
+      };
+      expectPending();
+      setState('sessionStatus', 'child-1', { type: 'idle' });
+      await vi.advanceTimersByTimeAsync(700);
+      expectPending();
+
+      setState('sessionStatus', 'child-2', { type: 'idle' });
+      await vi.advanceTimersByTimeAsync(700);
+      expect(container?.querySelector('.trailing-assistant-summary-row')).not.toBeNull();
+      expect(container?.querySelector('.loading-indicator')).toBeNull();
+
+      // A later child status must also revoke a summary that already took ownership.
+      setState('sessionStatus', 'child-2', { type: 'busy' });
+      await vi.advanceTimersByTimeAsync(700);
+      expectPending();
+    }
+  );
+
   it('keeps an explicitly terminal worked summary visible while stale busy state settles', async () => {
     setState('activeSessionId', 'session-1');
     const terminalAssistant = assistantMessage('assistant-1', {

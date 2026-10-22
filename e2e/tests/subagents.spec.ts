@@ -4,6 +4,91 @@ import { getE2EState } from './helpers';
 import type { MessageEntry } from '../../src/webview/types';
 import type { ServerEvent } from '../../src/shared/protocol';
 
+test('keeps a parent turn pending and shows the waiting block only for off-screen subagents', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 486, height: 794 });
+  await page.goto('/e2e/harness/index.html?scenario=subagent-sessions&childTaskState=running');
+  const card = page.locator('.tool-invocation-task .tool-invocation-header');
+  await expect(card).toBeVisible();
+  await page.evaluate(() => {
+    const harness = (
+      window as typeof window & {
+        __varroE2E: {
+          getSessionMessages(id: string): MessageEntry[];
+          replayServerEvent(event: ServerEvent): void;
+        };
+      }
+    ).__varroE2E;
+    const assistant = harness
+      .getSessionMessages('session-parent')
+      .find((entry) => entry.info.role === 'assistant');
+    if (!assistant || assistant.info.role !== 'assistant')
+      throw new Error('Missing parent assistant');
+    const messageID = 'parent-progress';
+    harness.replayServerEvent({
+      type: 'message.updated',
+      properties: {
+        info: {
+          ...assistant.info,
+          id: messageID,
+          finish: 'stop',
+          time: { created: Date.now(), completed: Date.now() },
+        },
+      },
+    });
+    harness.replayServerEvent({
+      type: 'message.part.updated',
+      properties: {
+        part: {
+          id: 'parent-progress-text',
+          messageID,
+          sessionID: 'session-parent',
+          type: 'text',
+          text: Array.from(
+            { length: 24 },
+            (_, index) => `Check ${index + 1} finished. Subagent validation is still running.`
+          ).join('\n\n'),
+        },
+      },
+    });
+    harness.replayServerEvent({
+      type: 'session.status',
+      properties: { sessionID: 'session-parent', status: { type: 'idle' } },
+    });
+  });
+  const waiting = page.locator('.chat-subagent-waiting');
+  await expect(waiting).toContainText('Waiting for 1 subagent');
+  await expect(waiting).toContainText('Inspect API routes');
+  await expect(card).not.toBeInViewport();
+  await expect(page.locator('.trailing-assistant-summary-row')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Stop', exact: true })).toBeVisible();
+
+  const list = page.locator('.interactive-list');
+  await list.hover();
+  await page.mouse.wheel(0, -2400);
+  await expect(card).toBeInViewport({ ratio: 0.5 });
+  await expect(waiting).toHaveCount(0);
+  await expect(page.locator('.trailing-assistant-summary-row')).toHaveCount(0);
+
+  await page.mouse.wheel(0, 2400);
+  await expect(card).not.toBeInViewport();
+  await expect(waiting).toBeVisible();
+  await page.evaluate(() => {
+    const harness = (
+      window as typeof window & {
+        __varroE2E: { replayServerEvent(event: ServerEvent): void };
+      }
+    ).__varroE2E;
+    harness.replayServerEvent({
+      type: 'session.status',
+      properties: { sessionID: 'session-child-a', status: { type: 'idle' } },
+    });
+  });
+  await expect(waiting).toHaveCount(0);
+  await expect(page.locator('.trailing-assistant-summary-row')).toBeVisible();
+});
+
 test('uses a compact actions label/value row only inside active task details', async ({ page }) => {
   await page.goto(
     '/e2e/harness/index.html?scenario=subagent-sessions&childTaskState=running&childTaskBackground=1'
