@@ -172,6 +172,51 @@ function createDeps(overrides?: {
 }
 
 describe('session-lifecycle helpers', () => {
+  it('applies persisted link visibility from an older transfer summary without regressing live metadata', () => {
+    const live = {
+      ...session('moved', '/outside', 100),
+      title: 'Live conversation',
+      transfer: { originDirectory: '/repo', available: false },
+    };
+    const saved = {
+      ...session('moved', '/outside', 5),
+      transfer: {
+        originDirectory: '/repo',
+        available: false,
+        hidden: true,
+        hiddenOrigins: ['/repo'],
+      },
+    };
+    const setup = createDeps({ activeSessionId: 'moved', sessions: [live] });
+    applySessions(setup.deps, [saved]);
+    expect(setup.current.sessions[0]).toEqual({ ...live, transfer: saved.transfer });
+    expect(setup.current.activeSessionId).toBe('moved');
+    expect(setup.deps.clearActiveSessionState).not.toHaveBeenCalled();
+  });
+
+  it('keeps an acknowledged hidden link hidden across stale snapshots and later live updates', () => {
+    const hidden = {
+      ...session('moved', '/outside', 100),
+      transfer: {
+        originDirectory: '/repo',
+        available: false,
+        hidden: true,
+        hiddenOrigins: ['/repo'],
+      },
+    };
+    const setup = createDeps({ sessions: [hidden] });
+    applySessions(setup.deps, [
+      {
+        ...session('moved', '/outside', 5),
+        transfer: { originDirectory: '/repo', available: false },
+      },
+    ]);
+    expect(setup.current.sessions[0]?.transfer).toEqual(hidden.transfer);
+    upsertSession(setup.deps, session('moved', '/outside', 110));
+    expect(setup.current.sessions[0]?.transfer).toEqual(hidden.transfer);
+    expect(setup.current.sessions[0]?.time.updated).toBe(110);
+  });
+
   it('keeps inactive transferred sessions in the originating catalog after selection changes', () => {
     const moved = {
       ...session('moved', '/outside'),

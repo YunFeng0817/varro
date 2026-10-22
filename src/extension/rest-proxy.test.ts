@@ -975,6 +975,86 @@ describe('RestProxy handleRequest', () => {
       error: '404 Session not found',
     });
   });
+  it.each([undefined, '/repo'])(
+    'hides a transferred link locally with scope %s, without mutating the server',
+    async (directory) => {
+      const hideTransferredSession = vi.fn(async () => true);
+      const { proxy, callbacks } = createProxy({ hideTransferredSession });
+      const path = '/varro/session-transfer/hide' + (directory ? '?directory=%2Frepo' : '');
+      await proxy.handleRequest(makePayload(9020, 'POST', path, { sessionID: 'moved' }));
+      expect(hideTransferredSession).toHaveBeenCalledExactlyOnceWith('moved', ['/repo']);
+      expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, { id: 9020, data: true });
+      expect(callbacks.server.request).not.toHaveBeenCalled();
+      expect(callbacks.sessionTrash.moveToTrash).not.toHaveBeenCalled();
+      expect(callbacks.hiddenSessions.hide).not.toHaveBeenCalled();
+    }
+  );
+
+  it('rejects malformed IDs, closed folders, and missing transfer links', async () => {
+    const hideTransferredSession = vi.fn(async () => false);
+    const { proxy, callbacks } = createProxy({ hideTransferredSession });
+    vi.mocked(callbacks.contextProvider.getOpenWorkspaceRoot).mockImplementation((path) =>
+      path === '/repo' ? path : null
+    );
+    await proxy.handleRequest(
+      makePayload(9021, 'POST', '/varro/session-transfer/hide', { sessionID: '' })
+    );
+    await proxy.handleRequest(
+      makePayload(9022, 'POST', '/varro/session-transfer/hide?directory=%2Foutside', {
+        sessionID: 'moved',
+      })
+    );
+    expect(hideTransferredSession).not.toHaveBeenCalled();
+    await proxy.handleRequest(
+      makePayload(9023, 'POST', '/varro/session-transfer/hide', { sessionID: 'unknown' })
+    );
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 9021,
+      error: 'Invalid session ID',
+    });
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 9022,
+      error: expect.any(String),
+    });
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 9023,
+      error: '404 Transferred session not found',
+    });
+    expect(callbacks.server.request).not.toHaveBeenCalled();
+  });
+
+  it('retains hidden transfer metadata in paginated snapshots and history reads', async () => {
+    const moved = {
+      id: 'moved',
+      projectID: 'project-1',
+      directory: '/outside',
+      title: 'Moved chat',
+      version: '2',
+      time: { created: 1, updated: 2 },
+      transfer: { originDirectory: '/repo', available: false, hidden: true },
+    };
+    const getTransferredSessions = vi.fn(
+      (_roots: readonly string[], options?: { includeHidden?: boolean }) =>
+        options?.includeHidden ? [moved] : []
+    );
+    const { proxy, callbacks } = createProxy({
+      getTransferredSessions,
+      server: {
+        ...createCallbacks().server,
+        request: vi.fn(async (_method: string, path: string) =>
+          path.startsWith('/session/moved') ? moved : []
+        ),
+      },
+    });
+    await proxy.handleRequest(makePayload(9024, 'GET', '/session?limit=20&directory=%2Frepo'));
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 9024,
+      data: { items: [moved], hasMore: false },
+    });
+    await proxy.handleRequest(makePayload(9025, 'GET', '/session/moved?directory=%2Foutside'));
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, { id: 9025, data: moved });
+    expect(proxy.isSessionCatalogEventAuthorized('moved', '/outside')).toBe(false);
+  });
   it('detects a missed transfer when a session read returns a different directory', async () => {
     const sessionTransferred = vi.fn(async () => {});
     const serverRequest = vi.fn<RestProxyCallbacks['server']['request']>(async () => ({

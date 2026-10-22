@@ -1871,6 +1871,10 @@ const API_ROUTES: ApiRoute[] = [
   route(VARRO_API_ENDPOINTS.remoteImage, methodsNoQuery('POST')),
   route(VARRO_API_ENDPOINTS.workspaceProblems, methodsNoQuery('GET')),
   route(
+    VARRO_API_ENDPOINTS.sessionTransferHide,
+    ({ method, url }) => method === 'POST' && optionalDirectoryQuery(url)
+  ),
+  route(
     VARRO_API_ENDPOINTS.sessionHistoryScope,
     ({ method, url }) =>
       (method === 'GET' || method === 'POST') &&

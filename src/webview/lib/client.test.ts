@@ -84,6 +84,16 @@ afterEach(() => {
 });
 
 describe('client', () => {
+  it('hides moved links through a host-owned endpoint scoped to the list folder', async () => {
+    const { client } = await loadClient();
+    bridgeMocks.apiCall.mockResolvedValue(true);
+    expect(await client.varro.session.hideTransfer('moved', { directory: '/old repo' })).toBe(true);
+    expect(bridgeMocks.apiCall).toHaveBeenCalledExactlyOnceWith(
+      'POST',
+      '/varro/session-transfer/hide?directory=%2Fold+repo',
+      { sessionID: 'moved' }
+    );
+  });
   it('routes saved-permission edits through the scoped host-owned endpoint', async () => {
     const { client } = await loadClient();
     await client.varro.updateServerMemoryPermission(

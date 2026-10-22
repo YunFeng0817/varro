@@ -93,6 +93,50 @@ function createPanel() {
 }
 
 describe('SidebarProvider editor panels', () => {
+  it('persists hiding a moved link and invalidates lists without changing the conversation', async () => {
+    const workspaceState = createWorkspaceState();
+    const moved = {
+      id: 'moved',
+      projectID: 'project-1',
+      directory: '/outside',
+      title: 'Moved chat',
+      version: '2',
+      time: { created: 1, updated: 2 },
+      transfer: { originDirectory: '/repo', available: false },
+    };
+    workspaceState.get.mockImplementation((key, fallback) =>
+      key === 'varro.sessionTransfers'
+        ? [{ server: 'http://127.0.0.1:4096', origins: ['/repo'], session: moved }]
+        : fallback
+    );
+    const { provider, server } = await createSidebarProviderInstance({ workspaceState });
+    const { posted } = attachTestView(provider);
+    try {
+      await provider.handleMessage({
+        type: 'api/request',
+        payload: {
+          id: 9020,
+          method: 'POST',
+          path: '/varro/session-transfer/hide?directory=%2Frepo',
+          body: { sessionID: 'moved' },
+        },
+      });
+      expect(workspaceState.update).toHaveBeenCalledWith('varro.sessionTransfers', [
+        {
+          server: server.url,
+          origins: ['/repo'],
+          hiddenOrigins: ['/repo'],
+          session: moved,
+        },
+      ]);
+      expect(posted).toContainEqual({ type: 'session/catalog-invalidated' });
+      expect(posted).toContainEqual({ type: 'api/response', payload: { id: 9020, data: true } });
+      expect(server.request).not.toHaveBeenCalled();
+    } finally {
+      await provider.dispose();
+    }
+  });
+
   it('records the original folder even when a different workspace folder is selected', async () => {
     const contextProvider = createContextProvider();
     contextProvider.context.workspacePath = '/other';

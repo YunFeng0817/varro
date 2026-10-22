@@ -447,7 +447,11 @@ export interface RestProxyCallbacks {
     directory: string,
     originDirectory?: string
   ): Promise<void>;
-  getTransferredSessions?(roots: readonly string[]): Session[];
+  getTransferredSessions?(
+    roots: readonly string[],
+    options?: { includeHidden?: boolean }
+  ): Session[];
+  hideTransferredSession?(sessionID: string, roots: readonly string[]): Promise<boolean>;
 }
 
 export class RestProxy {
@@ -823,7 +827,7 @@ export class RestProxy {
         nativeFormSessionID;
       const transfer = directSessionID
         ? this.callbacks
-            .getTransferredSessions?.(this.getOpenWorkspaceRoots())
+            .getTransferredSessions?.(this.getOpenWorkspaceRoots(), { includeHidden: true })
             .find((session) => session.id === directSessionID)
         : undefined;
       const transferRead = Boolean(
@@ -912,6 +916,7 @@ export class RestProxy {
         Boolean(activationRequest || directSessionID || attentionReplyDirectory) ||
         requestPathname === '/session' ||
         requestPathname === VARRO_API_ENDPOINTS.sessionHistoryScope ||
+        requestPathname === VARRO_API_ENDPOINTS.sessionTransferHide ||
         (method === 'GET' && requestPathname === '/session/status');
       if (
         scopedWorkspaceDirectory &&
@@ -1368,6 +1373,19 @@ export class RestProxy {
       if (this.isWorkspaceFilePickRequest(method, payload.path)) {
         const data = await this.pickWorkspaceFile();
         this.callbacks.postApiResponse(requestGeneration, { id: payload.id, data });
+        return;
+      }
+
+      if (method === 'POST' && requestPathname === VARRO_API_ENDPOINTS.sessionTransferHide) {
+        const sessionID = asRecord(payload.body)?.sessionID;
+        if (!isSafePersistedSessionId(sessionID)) throw new Error('Invalid session ID');
+        const roots = scopedWorkspaceDirectory
+          ? [scopedWorkspaceDirectory]
+          : this.getOpenWorkspaceRoots();
+        if (!(await this.callbacks.hideTransferredSession?.(sessionID, roots))) {
+          throw new Error('404 Transferred session not found');
+        }
+        this.callbacks.postApiResponse(requestGeneration, { id: payload.id, data: true });
         return;
       }
 
@@ -3404,7 +3422,7 @@ export class RestProxy {
         this.readAndRememberSessionWorkspaceScope(session)
       );
       const transfer = this.callbacks
-        .getTransferredSessions?.(this.getOpenWorkspaceRoots())
+        .getTransferredSessions?.(this.getOpenWorkspaceRoots(), { includeHidden: true })
         .find((entry) => entry.id === session.id);
       return transfer ? { ...result, transfer: transfer.transfer } : result;
     }
@@ -3415,7 +3433,9 @@ export class RestProxy {
     const url = new URL(path, 'http://localhost');
     const directory = getExplicitWorkspaceDirectory(path);
     const roots = directory ? [directory] : this.getOpenWorkspaceRoots();
-    const transfers = this.callbacks.getTransferredSessions?.(roots) ?? [];
+    // Keep hidden link metadata in snapshots so pagination and active-session
+    // refreshes cannot restore an old visible copy in the webview.
+    const transfers = this.callbacks.getTransferredSessions?.(roots, { includeHidden: true }) ?? [];
     if (!transfers.length) return data;
     const page = asRecord(data);
     const items = Array.isArray(data) ? data : Array.isArray(page?.items) ? page.items : null;

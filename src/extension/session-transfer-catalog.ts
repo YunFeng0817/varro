@@ -5,7 +5,12 @@ import { isSafePersistedSessionId } from '../shared/protocol';
 import { asRecord } from '../shared/type-utils';
 import { isSameWorkspacePath } from '../shared/workspace-path';
 
-type TransferEntry = { server: string; origins: string[]; session: Session };
+type TransferEntry = {
+  server: string;
+  origins: string[];
+  hiddenOrigins?: string[];
+  session: Session;
+};
 const STORAGE_KEY = 'varro.sessionTransfers';
 const MAX_TRANSFERS = 512;
 
@@ -23,6 +28,9 @@ export class SessionTransferCatalog {
         this.entries.set(`${entry.server}\0${session.id}`, {
           server: entry.server,
           origins: origins.slice(0, 32),
+          hiddenOrigins: Array.isArray(entry.hiddenOrigins)
+            ? entry.hiddenOrigins.filter(isDirectory).slice(0, 32)
+            : undefined,
           session,
         });
     }
@@ -50,20 +58,38 @@ export class SessionTransferCatalog {
     await this.persistence.set(STORAGE_KEY, [...this.entries.values()]);
   }
 
-  list(server: string, roots: readonly string[]): Session[] {
+  list(server: string, roots: readonly string[], options?: { includeHidden?: boolean }): Session[] {
     return [...this.entries.values()]
       .filter(
         (entry) =>
           entry.server === server &&
-          entry.origins.some((origin) => roots.some((root) => isSameWorkspacePath(origin, root)))
+          entry.origins.some(
+            (origin) =>
+              roots.some((root) => isSameWorkspacePath(origin, root)) &&
+              (options?.includeHidden ||
+                !entry.hiddenOrigins?.some((hidden) => isSameWorkspacePath(hidden, origin)))
+          )
       )
-      .map((entry) => ({
-        ...entry.session,
-        transfer: {
-          originDirectory: entry.session.transfer!.originDirectory,
-          available: roots.some((root) => isSameWorkspacePath(root, entry.session.directory)),
-        },
-      }));
+      .map((entry) => {
+        const available = roots.some((root) => isSameWorkspacePath(root, entry.session.directory));
+        const hidden =
+          !available &&
+          entry.origins
+            .filter((origin) => roots.some((root) => isSameWorkspacePath(root, origin)))
+            .every((origin) =>
+              entry.hiddenOrigins?.some((item) => isSameWorkspacePath(item, origin))
+            );
+        const session: Session = {
+          ...entry.session,
+          transfer: {
+            originDirectory: entry.session.transfer!.originDirectory,
+            available,
+          },
+        };
+        if (hidden) session.transfer!.hidden = true;
+        if (entry.hiddenOrigins?.length) session.transfer!.hiddenOrigins = [...entry.hiddenOrigins];
+        return session;
+      });
   }
 
   get(server: string, roots: readonly string[], sessionId: string): Session | undefined {
@@ -71,6 +97,30 @@ export class SessionTransferCatalog {
     return entry?.origins.some((origin) => roots.some((root) => isSameWorkspacePath(origin, root)))
       ? entry.session
       : undefined;
+  }
+
+  async hide(server: string, roots: readonly string[], sessionId: string): Promise<boolean> {
+    const key = `${server}\0${sessionId}`;
+    const entry = this.entries.get(key);
+    if (!entry) return false;
+    const origins = entry.origins.filter(
+      (origin) =>
+        roots.some((root) => isSameWorkspacePath(origin, root)) &&
+        !isSameWorkspacePath(origin, entry.session.directory)
+    );
+    if (!origins.length) return false;
+    const next = {
+      ...entry,
+      hiddenOrigins: [...new Set([...(entry.hiddenOrigins ?? []), ...origins])].slice(0, 32),
+    };
+    this.entries.set(key, next);
+    try {
+      await this.persistence.set(STORAGE_KEY, [...this.entries.values()]);
+    } catch (error) {
+      if (this.entries.get(key) === next) this.entries.set(key, entry);
+      throw error;
+    }
+    return true;
   }
 
   async remove(server: string, sessionId: string) {

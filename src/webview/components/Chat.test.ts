@@ -1111,6 +1111,75 @@ describe('SessionListSectionHeader', () => {
 });
 
 describe('header status badges', () => {
+  it('removes a hidden moved row and its running badge as soon as hiding succeeds, before reload completes', async () => {
+    const now = Date.now();
+    setState('editorContext', 'workspacePath', '/repo');
+    setState('editorContext', 'workspaceFolders', [{ name: 'Repo', path: '/repo' }]);
+    setState('sessions', [
+      session('moved', now, {
+        directory: '/outside',
+        transfer: { originDirectory: '/repo', available: false },
+      }),
+      session('local', now - 1),
+    ]);
+    setState('activeSessionId', 'moved');
+    setState('sessionStatus', { moved: { type: 'busy' }, local: { type: 'idle' } });
+    setShowSessionPicker(true);
+    vi.spyOn(client.varro.session, 'hideTransfer').mockResolvedValue(true);
+    let finishReload!: () => void;
+    vi.spyOn(openCodeModule, 'reloadSessions').mockReturnValue(
+      new Promise<void>((resolve) => {
+        finishReload = resolve;
+      })
+    );
+    cleanup = render(() => Chat(), container!);
+    expect(container?.querySelector('.chat-header-running-count')?.textContent).toBe('1');
+    container
+      ?.querySelector('[data-session-id="moved"]')
+      ?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+    Array.from(document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'))
+      .find((button) => button.textContent === 'Hide from this list')!
+      .click();
+    await vi.waitFor(() =>
+      expect(container?.querySelector('[data-session-id="moved"]')).toBeNull()
+    );
+    expect(container?.querySelector('.chat-header-running-badge')).toBeNull();
+    expect(container?.querySelector('[data-session-id="local"]')).not.toBeNull();
+    expect(state.activeSessionId).toBe('moved');
+    expect(state.sessionStatus.moved?.type).toBe('busy');
+    finishReload();
+  });
+
+  it.each(['hidden', 'hiddenOrigins'] as const)(
+    'does not count a persisted %s moved link after mounting a fresh view',
+    (preference) => {
+      const now = Date.now();
+      setState('editorContext', 'workspacePath', '/repo');
+      setState('editorContext', 'workspaceFolders', [{ name: 'Repo', path: '/repo' }]);
+      setState('sessions', [
+        session('moved', now, {
+          directory: '/outside',
+          transfer: {
+            originDirectory: '/repo',
+            available: false,
+            hidden: preference === 'hidden',
+            hiddenOrigins: preference === 'hiddenOrigins' ? ['/repo'] : undefined,
+          },
+        }),
+        session('local', now - 1),
+      ]);
+      setState('activeSessionId', 'local');
+      setState('sessionStatus', { moved: { type: 'busy' }, local: { type: 'idle' } });
+      setShowSessionPicker(true);
+      cleanup = render(() => Chat(), container!);
+      expect(container?.querySelector('[data-session-id="moved"]')).toBeNull();
+      expect(container?.querySelector('.chat-header-running-badge')).toBeNull();
+      vi.advanceTimersByTime(1500);
+      expect(container?.querySelector('.chat-header-running-badge')).toBeNull();
+      expect(state.sessionStatus.moved?.type).toBe('busy');
+    }
+  );
+
   it('opens a Pending filter from the hourglass and keeps it separate from Running', () => {
     const now = Date.now();
     setState('sessions', [session('waiting', now), session('working', now)]);

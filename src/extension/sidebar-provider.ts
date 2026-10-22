@@ -1029,17 +1029,29 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       },
       sessionTransferred: (sessionID, directory, originDirectory) =>
         this.handleSessionTransfer(sessionID, directory, undefined, originDirectory),
-      getTransferredSessions: (roots) =>
-        this.sessionTransferCatalog.list(this.server.url ?? '', roots).map((session) => ({
+      getTransferredSessions: (roots, options) =>
+        this.sessionTransferCatalog.list(this.server.url ?? '', roots, options).map((session) => ({
           ...session,
           transfer: {
-            originDirectory: session.transfer!.originDirectory,
+            ...session.transfer!,
             available: Boolean(
               this.getOpenSessionDirectory(session.directory) ||
               endpointRef.restProxy?.isSessionCatalogEventAuthorized(session.id, session.directory)
             ),
           },
         })),
+      hideTransferredSession: async (sessionID, roots) => {
+        const hidden = await this.sessionTransferCatalog.hide(
+          this.server.url ?? '',
+          roots,
+          sessionID
+        );
+        if (hidden) {
+          for (const endpoint of this.endpoints) endpoint.restProxy.invalidateSessionCatalog();
+          this.post({ type: 'session/catalog-invalidated' });
+        }
+        return hidden;
+      },
     });
     endpointRef.restProxy = restProxy;
 

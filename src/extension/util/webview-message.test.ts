@@ -289,6 +289,13 @@ describe('webview message validation', () => {
     expect(isAllowedApiRequest('POST', '/varro/session/session-1/pin')).toBe(true);
     expect(isAllowedApiRequest('POST', '/varro/session/session-1/rename-if-untitled')).toBe(true);
     expect(isAllowedApiRequest('POST', '/varro/session/session-1/reorder-pin')).toBe(true);
+    expect(isAllowedApiRequest('POST', '/varro/session-transfer/hide')).toBe(true);
+    expect(isAllowedApiRequest('POST', '/varro/session-transfer/hide?directory=%2Frepo')).toBe(
+      true
+    );
+    expect(isAllowedApiRequest('DELETE', '/varro/session-transfer/hide')).toBe(false);
+    expect(isAllowedApiRequest('GET', '/varro/session-transfer/hide')).toBe(false);
+    expect(isAllowedApiRequest('POST', '/varro/session-transfer/hide?unexpected=true')).toBe(false);
     expect(isAllowedApiRequest('DELETE', '/varro/session/session-1/delete')).toBe(true);
     expect(isAllowedApiRequest('GET', '/varro/session-trash')).toBe(true);
     expect(isAllowedApiRequest('POST', '/varro/session-trash/session-1/restore')).toBe(true);

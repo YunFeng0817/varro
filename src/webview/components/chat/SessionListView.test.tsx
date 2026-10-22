@@ -420,6 +420,117 @@ describe('SessionListView keyboard recovery', () => {
 });
 
 describe('SessionListView model details', () => {
+  it('hides a moved link from its origin list without deleting or switching the active conversation', async () => {
+    const moved = session('moved', Date.now(), {
+      directory: '/outside',
+      transfer: { originDirectory: '/repo', available: false },
+    });
+    setState('editorContext', 'workspacePath', '/repo');
+    setSessions([moved, session('local', Date.now() - 1)]);
+    setState('activeSessionId', 'moved');
+    setState('sessionsHasMore', true);
+    const hide = vi.spyOn(client.varro.session, 'hideTransfer').mockResolvedValue(true);
+    const reload = deferred<void>();
+    reloadSessionsMock.mockReturnValueOnce(reload.promise);
+    const count = vi.fn();
+    cleanup = render(() => <SessionListView onPrimarySessionsCountChange={count} />, container);
+    openSessionActions(container.querySelector<HTMLElement>('.session-item')!);
+    const action = Array.from(
+      document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')
+    ).find((button) => button.textContent === 'Hide from this list');
+    expect(action).toBeDefined();
+    action!.click();
+    await vi.waitFor(() => expect(container.querySelectorAll('.session-item')).toHaveLength(1));
+    expect(container.querySelector('.session-item')?.textContent).toContain('local');
+    expect(hide).toHaveBeenCalledExactlyOnceWith('moved', { directory: '/repo' });
+    expect(appState.activeSessionId).toBe('moved');
+    expect(appState.sessions.find((item) => item.id === 'moved')).toBeDefined();
+    expect(count).toHaveBeenLastCalledWith(1);
+    expect(document.querySelector('.session-item-actions-menu')).toBeNull();
+    expect(reloadSessionsMock).toHaveBeenCalledOnce();
+    expect(appState.sessions.find((item) => item.id === 'moved')?.transfer?.hiddenOrigins).toEqual([
+      '/repo',
+    ]);
+    reload.resolve();
+  });
+
+  it('keeps the moved link visible and reports a failed hide', async () => {
+    setSessions([
+      session('moved', Date.now(), {
+        directory: '/outside',
+        transfer: { originDirectory: '/repo', available: false },
+      }),
+    ]);
+    vi.spyOn(client.varro.session, 'hideTransfer').mockRejectedValue(
+      new Error('Storage unavailable')
+    );
+    cleanup = render(() => <SessionListView />, container);
+    openSessionActions(container.querySelector<HTMLElement>('.session-item')!);
+    Array.from(document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'))
+      .find((button) => button.textContent === 'Hide from this list')!
+      .click();
+    await vi.waitFor(() => expect(error()).toBe('Storage unavailable'));
+    expect(container.querySelectorAll('.session-item')).toHaveLength(1);
+    expect(reloadSessionsMock).not.toHaveBeenCalled();
+  });
+
+  it('hides only the dismissed origin when switching a multi-root list', () => {
+    setState('editorContext', {
+      workspacePath: '/repo',
+      workspaceFolders: [
+        { name: 'Repo', path: '/repo' },
+        { name: 'Outside', path: '/outside' },
+      ],
+      activeFile: null,
+      selection: null,
+      diagnostics: [],
+    });
+    setSessions([
+      session('moved', Date.now(), {
+        directory: '/outside',
+        transfer: { originDirectory: '/repo', available: true, hiddenOrigins: ['/repo'] },
+      }),
+    ]);
+    cleanup = render(() => <SessionListView />, container);
+    expect(container.querySelectorAll('.session-item')).toHaveLength(1);
+    const selector = container.querySelector('.session-list-workspace-selector')!;
+    selector.querySelector<HTMLButtonElement>('.workspace-picker-button')!.click();
+    selector.querySelector<HTMLButtonElement>('[data-workspace-path="/repo"]')!.click();
+    expect(container.querySelectorAll('.session-item')).toHaveLength(0);
+  });
+
+  it('does not restore hidden links through native search results', async () => {
+    const moved = session('moved', Date.now(), {
+      directory: '/outside',
+      transfer: { originDirectory: '/repo', available: false, hidden: true },
+    });
+    setSessions([moved]);
+    vi.spyOn(client.session, 'list').mockResolvedValue({ items: [moved], hasMore: false });
+    cleanup = render(() => <SessionListView />, container);
+    const search = container.querySelector<HTMLInputElement>('.session-list-search-input')!;
+    search.value = 'moved';
+    search.dispatchEvent(new InputEvent('input', { bubbles: true }));
+    await vi.waitFor(() => expect(client.session.list).toHaveBeenCalled());
+    expect(container.querySelectorAll('.session-item')).toHaveLength(0);
+  });
+
+  it.each([false, true])(
+    'does not offer hiding for a destination-folder session, transfer=%s',
+    (transfer) => {
+      setState('editorContext', 'workspacePath', '/repo');
+      setSessions([
+        session('local', Date.now(), {
+          transfer: transfer ? { originDirectory: '/other', available: true } : undefined,
+        }),
+      ]);
+      cleanup = render(() => <SessionListView />, container);
+      openSessionActions(container.querySelector<HTMLElement>('.session-item')!);
+      expect(document.querySelector('.session-item-actions-menu')?.textContent).not.toContain(
+        'Hide from this list'
+      );
+    }
+  );
+
   it('keeps a transferred conversation in the origin folder with a workspace-style destination label', async () => {
     setState('editorContext', {
       workspacePath: '/repo',
