@@ -144,6 +144,7 @@ describe.skipIf(!process.env.VARRO_OPENCODE_TEST_BINARY)('released managed start
           return child;
         });
       let phase = 'initial startup';
+      let primaryFailure: Error | undefined;
       const probes: Array<{
         phase: string;
         route: string;
@@ -608,6 +609,10 @@ describe.skipIf(!process.env.VARRO_OPENCODE_TEST_BINARY)('released managed start
             desktopRegistration
           );
       } catch (error) {
+        primaryFailure = new Error(
+          `Isolated ${mode} failed during ${phase}: ${error instanceof Error ? error.message : String(error)}; evidence: ${root}`,
+          { cause: error }
+        );
         await writeFile(
           join(root, 'failure.json'),
           JSON.stringify(
@@ -622,45 +627,46 @@ describe.skipIf(!process.env.VARRO_OPENCODE_TEST_BINARY)('released managed start
             2
           )
         );
-        throw new Error(`Isolated ${mode} failed during ${phase}; evidence: ${root}`, {
-          cause: error,
-        });
+        throw primaryFailure;
       } finally {
-        await completeTestCleanup([
-          () => {
-            fetchObservation.mockRestore();
-            healthObservation.mockRestore();
-          },
-          () => attached?.dispose(),
-          () => server.dispose(),
-          () => {
-            if (!desktopStarted) return;
-            const stopped = spawnSync(desktopBinary, ['service', 'stop'], {
-              cwd: editor.directory,
-              encoding: 'utf8',
-              timeout: 15000,
-            });
-            expect(stopped.status, stopped.stderr).toBe(0);
-          },
-          () => {
-            ownershipFailure?.mockRestore();
-            launchObservation?.mockRestore();
-          },
-          async () => {
-            // The test owns this isolated launch even though the simulated editor
-            // cannot prove lifecycle ownership. Teardown never targets production.
-            unownedLaunch?.removeAllListeners('exit');
-            await unownedTree?.stop();
-          },
-          () => replacementTree?.stop(),
-          // Simulated reload/disconnect relinquishes editor ownership, not fixture ownership.
-          ...launchedTrees.map((tree) => () => tree.stop()),
-          () => {
-            vi.unstubAllEnvs();
-          },
-          () => writeFile(join(root, 'connection-probes.json'), JSON.stringify(probes, null, 2)),
-          () => writeFile(join(root, 'startup-diagnostics.md'), diagnosticTimeline.export('')),
-        ]);
+        await completeTestCleanup(
+          [
+            () => {
+              fetchObservation.mockRestore();
+              healthObservation.mockRestore();
+            },
+            () => attached?.dispose(),
+            () => server.dispose(),
+            () => {
+              if (!desktopStarted) return;
+              const stopped = spawnSync(desktopBinary, ['service', 'stop'], {
+                cwd: editor.directory,
+                encoding: 'utf8',
+                timeout: 15000,
+              });
+              expect(stopped.status, stopped.stderr).toBe(0);
+            },
+            () => {
+              ownershipFailure?.mockRestore();
+              launchObservation?.mockRestore();
+            },
+            async () => {
+              // The test owns this isolated launch even though the simulated editor
+              // cannot prove lifecycle ownership. Teardown never targets production.
+              unownedLaunch?.removeAllListeners('exit');
+              await unownedTree?.stop();
+            },
+            () => replacementTree?.stop(),
+            // Simulated reload/disconnect relinquishes editor ownership, not fixture ownership.
+            ...launchedTrees.map((tree) => () => tree.stop()),
+            () => {
+              vi.unstubAllEnvs();
+            },
+            () => writeFile(join(root, 'connection-probes.json'), JSON.stringify(probes, null, 2)),
+            () => writeFile(join(root, 'startup-diagnostics.md'), diagnosticTimeline.export('')),
+          ],
+          primaryFailure
+        );
       }
     }
   );

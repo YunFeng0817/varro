@@ -15,7 +15,8 @@ type ProcessIdentity = { pid: number; birth: string; executable: string };
 
 /** Attempt every resource cleanup, even when an earlier disposal or evidence write fails. */
 export async function completeTestCleanup(
-  operations: Array<() => void | Promise<void>>
+  operations: Array<() => void | Promise<void>>,
+  primaryFailure?: Error
 ): Promise<void> {
   const failures: unknown[] = [];
   for (const operation of operations) {
@@ -25,7 +26,13 @@ export async function completeTestCleanup(
       failures.push(error);
     }
   }
-  if (failures.length) throw new AggregateError(failures, 'Isolated fixture cleanup failed');
+  if (failures.length)
+    throw new AggregateError(
+      primaryFailure ? [primaryFailure, ...failures] : failures,
+      primaryFailure
+        ? `Isolated fixture cleanup failed after: ${primaryFailure.message}`
+        : 'Isolated fixture cleanup failed'
+    );
 }
 
 /** The fixture owns these launches, independently of the simulated editor's lease. */

@@ -1017,7 +1017,20 @@ export class OpenCodeProcess {
         'OpenCode endpoint changed during credential verification'
       );
     this.clearLocalOwnership();
-    this.credentialRegistration = { url, path, lease, source, discovered };
+    // Background ownership preparation can reverify the same credential-only
+    // attachment while SSE admission is pending. Preserve its identity unless
+    // connection evidence changed; replacement/reset still invalidates old reads.
+    const registered = this.credentialRegistration;
+    if (
+      registered?.url !== url ||
+      registered.path !== path ||
+      registered.source !== source ||
+      registered.discovered !== discovered ||
+      registered.lease.port !== lease.port ||
+      registered.lease.password !== lease.password ||
+      (registered.lease.username || 'opencode') !== (lease.username || 'opencode')
+    )
+      this.credentialRegistration = { url, path, lease, source, discovered };
     this.serverPassword = lease.password;
     this.serverUsername = lease.username;
     this.credentialUrl = url;
@@ -3212,23 +3225,33 @@ export class OpenCodeProcess {
       }
     }
 
+    const stillOwned = async (): Promise<boolean> => {
+      try {
+        return await this.matchesOwnershipLease(lease);
+      } catch (error) {
+        // After signalling the verified listener, it can exit between the
+        // listener query and identity reads. A live, unverifiable PID still fails closed.
+        if (!isProcessAlive(lease.pid)) return false;
+        throw error;
+      }
+    };
     const deadline = Date.now() + PROCESS_STOP_TIMEOUT_MS;
-    while (Date.now() < deadline && (await this.matchesOwnershipLease(lease))) {
+    while (Date.now() < deadline && (await stillOwned())) {
       await delay(100);
     }
-    if (await this.matchesOwnershipLease(lease)) {
+    if (await stillOwned()) {
       if (process.platform === 'win32') {
         throw new Error(`Port ${lease.port} is still occupied after stopping managed OpenCode`);
       }
       // Revalidate immediately before escalating so a reused PID is never signalled.
-      if (await this.matchesOwnershipLease(lease)) {
+      if (await stillOwned()) {
         try {
           process.kill(lease.pid, 'SIGKILL');
         } catch (err) {
           if ((err as NodeJS.ErrnoException)?.code !== 'ESRCH') throw err;
         }
       }
-      if (await this.matchesOwnershipLease(lease)) {
+      if (await stillOwned()) {
         throw new Error(`Port ${lease.port} is still occupied after stopping managed OpenCode`);
       }
     }

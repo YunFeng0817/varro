@@ -207,6 +207,20 @@ unverifiable registered process blocks replacement. Corrupt or unreadable leases
 are retained and reported, not interpreted as absent. Process identity mismatch
 does not authorize signalling the replacement PID.
 
+After signalling a freshly verified owned process, shutdown can race a listener
+snapshot: the PID is returned just before its executable or start identity becomes
+unavailable on exit. A failed post-signal identity read completes shutdown only
+when a fresh process-existence check confirms exit. A still-live or inaccessible
+process retains the verification error and ownership records; no escalation is
+authorized from missing identity. Initial pre-signal verification is unchanged.
+
+Background ownership preparation can reverify a credential-only attachment while
+SSE admission is pending. Refreshing the same endpoint, record path, credential
+source, discovery mode, saved port, password, and effective username preserves
+the registration identity. A fresh credential check still runs; object replacement
+alone must not reject an unchanged connection. Changed evidence and resets still
+invalidate in-flight checks, and credential-only admission grants no lifecycle rights.
+
 Retirement also clears matching in-memory ownership, not just the startup lease
 candidate. Otherwise a previously observed server can reject requests to a newly
 discovered service at another port. Missing files do not prove retirement: cached
