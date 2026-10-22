@@ -28,6 +28,181 @@ async function appendStreamingTextDelta(page: Page, partID: string, delta: strin
   );
 }
 
+test('renders streamed LaTeX with local fonts and scrollable wide equations', async ({ page }) => {
+  await page.setViewportSize({ width: 441, height: 900 });
+  await page.goto('/e2e/harness/index.html?scenario=rapid-streaming-jitter');
+  const markdown = page.locator(`${ROW} .rendered-markdown`);
+  await expect(markdown).toHaveText('Starting...');
+  const formula = Array.from({ length: 20 }, (_, index) => `x_{${index + 1}}`).join(' + ');
+  await appendDeltaToRapidStreaming(
+    page,
+    `\n\nInline $x^2$, literal \`$x^2$\`, and currency $5.\n\nThe equation is:\n$$${formula}`
+  );
+  await expect(markdown.locator('.katex')).toHaveCount(1);
+  await expect(markdown.locator('code')).toHaveText('$x^2$');
+  await expect(markdown.getByRole('img', { name: 'Streaming content' })).toBeVisible();
+  expect(await markdown.innerText()).not.toContain('x_{1}');
+  await page.evaluate(() => document.fonts.ready);
+  await waitForAnimationFrames(page, 20);
+  const pendingHeight = await markdown.evaluate(
+    (element) => element.getBoundingClientRect().height
+  );
+
+  await appendDeltaToRapidStreaming(page, '\n\n= 123456789');
+  await waitForAnimationFrames(page, 3);
+  await expect(markdown.locator('.katex-display')).toHaveCount(0);
+  expect(await markdown.innerText()).not.toContain('123456789');
+  expect(await markdown.evaluate((element) => element.getBoundingClientRect().height)).toBeCloseTo(
+    pendingHeight,
+    0
+  );
+  await appendDeltaToRapidStreaming(page, '$');
+  await waitForAnimationFrames(page, 3);
+  await expect(markdown.locator('.katex-display')).toHaveCount(0);
+  expect(await markdown.innerText()).not.toContain('x_{1}');
+  expect(await markdown.evaluate((element) => element.getBoundingClientRect().height)).toBeCloseTo(
+    pendingHeight,
+    0
+  );
+  await appendDeltaToRapidStreaming(page, '$\n\nFollowing paragraph.');
+  await expect(markdown.locator('.katex')).toHaveCount(2);
+  await expect(markdown.locator('.katex-error')).toHaveCount(0);
+  await expect(markdown).toContainText('Following paragraph.');
+  const fontCount = await page.evaluate(async () => {
+    const fonts = await document.fonts.load('16px KaTeX_Main');
+    await document.fonts.ready;
+    return fonts.length;
+  });
+  expect(fontCount).toBeGreaterThan(0);
+
+  const display = markdown.locator('.katex-display');
+  const geometry = await display.evaluate((element) => {
+    const box = element.getBoundingClientRect();
+    const parts = element.querySelectorAll('.katex-html > .katex-base');
+    const firstLeft = parts[0]!.getBoundingClientRect().left - box.left;
+    element.scrollLeft = element.scrollWidth;
+    return {
+      clientWidth: element.clientWidth,
+      scrollWidth: element.scrollWidth,
+      scrollLeft: element.scrollLeft,
+      firstLeft,
+      lastRight: parts[parts.length - 1]!.getBoundingClientRect().right - box.right,
+      overflowX: getComputedStyle(element).overflowX,
+      mathmlPosition: getComputedStyle(element.querySelector('.katex-mathml')!).position,
+    };
+  });
+  expect(geometry.overflowX).toBe('auto');
+  expect(geometry.mathmlPosition).toBe('absolute');
+  expect(geometry.scrollWidth).toBeGreaterThan(geometry.clientWidth);
+  expect(geometry.scrollLeft).toBeGreaterThan(0);
+  expect(geometry.firstLeft).toBeGreaterThanOrEqual(-1);
+  expect(geometry.lastRight).toBeLessThanOrEqual(1);
+});
+
+test('preserves a settled equation and its horizontal position as more math streams', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 441, height: 900 });
+  await page.goto('/e2e/harness/index.html?scenario=rapid-streaming-jitter');
+  const markdown = page.locator(`${ROW} .rendered-markdown`);
+  await expect(markdown).toHaveText('Starting...');
+  const formula = Array.from({ length: 24 }, (_, index) => `x_{${index + 1}}`).join(' + ');
+  await appendDeltaToRapidStreaming(page, `\n\n$$${formula} > 0$$\n\nReading the equation.`);
+  await expect(markdown).toContainText('Reading the equation.');
+  const equation = markdown.locator('[data-markdown-segment="stable"] .katex-display').first();
+  await expect(equation).toBeVisible();
+  await page.evaluate(() => document.fonts.ready);
+  await expect
+    .poll(() =>
+      getScrollMetrics(page, '.interactive-list').then((metrics) => metrics.distanceFromBottom)
+    )
+    .toBeLessThanOrEqual(1);
+  await equation.hover();
+  await page.mouse.wheel(200, 0);
+  await expect.poll(() => equation.evaluate((element) => element.scrollLeft)).toBeGreaterThan(0);
+  const original = await equation.elementHandle();
+  const left = await equation.evaluate((element) => element.scrollLeft);
+
+  for (let index = 0; index < 4; index += 1) {
+    await appendDeltaToRapidStreaming(
+      page,
+      `\n\n$$y_${index} < z_${index}$$\n\nNext paragraph ${index}.`
+    );
+    await expect(markdown).toContainText(`Next paragraph ${index}.`);
+    expect(await original!.evaluate((element) => element.isConnected)).toBe(true);
+    expect(await equation.evaluate((element) => element.scrollLeft)).toBe(left);
+  }
+});
+
+test('hides inline LaTeX until its closing delimiter arrives', async ({ page }) => {
+  await page.goto('/e2e/harness/index.html?scenario=rapid-streaming-jitter');
+  const markdown = page.locator(`${ROW} .rendered-markdown`);
+  await expect(markdown).toHaveText('Starting...');
+  await appendDeltaToRapidStreaming(page, '\n\nThe result is ');
+  for (const delta of ['$', '\\', 'frac{a', '}{b}']) {
+    await appendDeltaToRapidStreaming(page, delta);
+    await waitForAnimationFrames(page, 3);
+    await expect(markdown.locator('.katex')).toHaveCount(0);
+    await expect(markdown.locator('.streaming-markdown-pending')).toHaveCount(1);
+    await expect(markdown.getByRole('img', { name: 'Streaming content' })).toBeVisible();
+    expect((await markdown.innerText()).trimEnd()).toBe('Starting...\n\nThe result is');
+  }
+  await appendDeltaToRapidStreaming(page, '$. It costs $5.');
+  await expect(markdown.locator('.katex')).toHaveCount(1);
+  await expect(markdown.locator('.streaming-markdown-pending')).toHaveCount(0);
+  expect(await markdown.innerText()).toContain('It costs $5.');
+});
+
+for (const reducedMotion of ['no-preference', 'reduce'] as const) {
+  test(`shows stable pending link and document dots with motion ${reducedMotion}`, async ({
+    page,
+  }) => {
+    await page.emulateMedia({ reducedMotion });
+    await page.goto('/e2e/harness/index.html?scenario=rapid-streaming-jitter');
+    const markdown = page.locator(`${ROW} .rendered-markdown`);
+    await expect(markdown).toHaveText('Starting...');
+    await appendDeltaToRapidStreaming(page, '\n\nRead https://example.test/');
+    const indicator = markdown.getByRole('img', { name: 'Streaming content' });
+    await expect(indicator).toBeVisible();
+    const original = await indicator.elementHandle();
+    const before = await indicator.boundingBox();
+    const animations = await indicator.evaluate((element) =>
+      Array.from(element.children)
+        .flatMap((dot) => dot.getAnimations())
+        .map((animation) => ({
+          state: animation.playState,
+          iterations: animation.effect?.getTiming().iterations,
+        }))
+    );
+    expect(animations).toHaveLength(reducedMotion === 'reduce' ? 0 : 3);
+    if (reducedMotion === 'no-preference') {
+      expect(
+        animations.every(
+          (animation) => animation.state === 'running' && animation.iterations === Infinity
+        )
+      ).toBe(true);
+    }
+    await appendDeltaToRapidStreaming(page, 'reference');
+    await waitForAnimationFrames(page, 3);
+    expect(await indicator.evaluate((element, old) => element === old, original)).toBe(true);
+    const after = await indicator.boundingBox();
+    expect(after?.width).toBe(before?.width);
+    expect(after?.height).toBe(before?.height);
+    expect(await markdown.innerText()).not.toContain('https://example.test');
+
+    await appendDeltaToRapidStreaming(page, ' and docs/');
+    await expect(markdown.locator('a[href="https://example.test/reference"]')).toBeVisible();
+    await expect(indicator).toBeVisible();
+    await appendDeltaToRapidStreaming(page, 'usage.md');
+    await waitForAnimationFrames(page, 3);
+    expect(await markdown.innerText()).not.toContain('docs/usage.md');
+    await appendDeltaToRapidStreaming(page, ' ');
+    await expect(indicator).toHaveCount(0);
+    await expect(markdown.locator('a.file-path-link')).toContainText('usage.md');
+    await original?.dispose();
+  });
+}
+
 for (const numbered of [false, true]) {
   test(`keeps blank-separated ${numbered ? 'numbered' : 'bullet'} gaps fixed while the last item streams`, async ({
     page,
@@ -78,7 +253,7 @@ for (const numbered of [false, true]) {
   });
 }
 
-test('keeps the Thinking gap fixed while a following markdown block is incomplete', async ({
+test('keeps the Thinking gap fixed while a pending indicator holds growing content', async ({
   page,
 }) => {
   await page.setViewportSize({ width: 464, height: 900 });
@@ -87,11 +262,14 @@ test('keeps the Thinking gap fixed while a following markdown block is incomplet
   await expect(markdown).toHaveText('Starting...');
   await appendDeltaToRapidStreaming(page, '\n\n- Last visible bullet.');
   await expect(markdown.locator('li')).toHaveText('Last visible bullet.');
+  await appendDeltaToRapidStreaming(page, '\n\n`');
+  await expect(markdown.getByRole('img', { name: 'Streaming content' })).toBeVisible();
+  await waitForAnimationFrames(page, 6);
   await expect(page.locator('.interactive-loading-row .loading-indicator')).toBeVisible();
   const collector = await markdown.evaluateHandle((element) => {
     const state = { running: true, gaps: [] as number[] };
     const sample = () => {
-      const item = element.querySelector('li');
+      const item = element.querySelector('.streaming-markdown-indicator')?.closest('p');
       const thinking = document.querySelector('.interactive-loading-row .loading-verb');
       if (item && thinking) {
         state.gaps.push(thinking.getBoundingClientRect().top - item.getBoundingClientRect().bottom);
@@ -101,7 +279,7 @@ test('keeps the Thinking gap fixed while a following markdown block is incomplet
     sample();
     return state;
   });
-  for (const delta of ['\n\n', '`', 'npm run', ' test']) {
+  for (const delta of ['npm', ' run', ' test']) {
     await appendDeltaToRapidStreaming(page, delta);
     await waitForAnimationFrames(page, 20);
   }
@@ -264,8 +442,9 @@ test('hides streamed inline commands until the closing backtick arrives', async 
       text += delta;
       await appendDeltaToRapidStreaming(page, delta);
       const pending = markdown.locator('.streaming-markdown-pending');
-      await expect(pending).toHaveText(text.slice(text.lastIndexOf('`')));
-      await expect(pending).toBeHidden();
+      await expect(pending).toHaveText('');
+      await expect(pending).toBeVisible();
+      await expect(pending).toHaveAttribute('aria-label', 'Streaming content');
       await expect(markdown.locator('code')).toHaveText(commands.slice(0, index));
       expect(await markdown.innerText()).not.toContain('`');
     }

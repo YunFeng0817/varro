@@ -64,7 +64,9 @@ for (const reference of [
 
     for (const chunk of reference.chunks) {
       await appendDeltaToRapidStreaming(page, chunk);
-      await expect(row.locator('.streaming-markdown-pending')).toContainText(chunk);
+      await waitForAnimationFrames(page, 4);
+      await expect(row.getByRole('img', { name: 'Streaming content' })).toBeVisible();
+      expect(await row.innerText()).not.toContain(chunk);
       await expect
         .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
         .toBeLessThanOrEqual(1);

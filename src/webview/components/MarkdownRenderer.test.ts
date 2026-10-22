@@ -82,6 +82,15 @@ function assertInertWithSafeAnchor(root: ParentNode) {
   expect(anchor?.getAttribute('data-external')).toBe('true');
 }
 
+function expectStreamingIndicator(root: ParentNode) {
+  const indicator = root.querySelector('.streaming-markdown-indicator');
+  expect(indicator?.getAttribute('role')).toBe('img');
+  expect(indicator?.getAttribute('aria-label')).toBe('Streaming content');
+  expect(indicator?.children).toHaveLength(3);
+  expect(indicator?.textContent).toBe('');
+  return indicator;
+}
+
 function dispatchAnchorClick(anchor: HTMLAnchorElement | null | undefined) {
   anchor?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
 }
@@ -479,6 +488,250 @@ describe('MarkdownRenderer', () => {
     cleanup = undefined;
     await Promise.resolve();
     expect(mounted).not.toHaveBeenCalled();
+  });
+
+  it('renders inline and display LaTeX with KaTeX', () => {
+    const html = __parseMarkdownForTests(
+      [
+        'Inline: $\\mathcal{N}(\\mu_t^{(p)},\\Sigma_t^{(p)})$',
+        '',
+        '$$',
+        '\\hat\\mu_t^{(p)}=A_t^{(p)}\\mu_t^{(p)}+b_t^{(p)},\\qquad',
+        '\\hat\\Sigma_t^{(p)}=A_t^{(p)}\\Sigma_t^{(p)}(A_t^{(p)})^\\top',
+        '$$',
+      ].join('\n'),
+      { cacheByContent: false }
+    );
+    const root = document.createElement('div');
+    root.innerHTML = html;
+
+    expect(root.querySelectorAll('.katex')).toHaveLength(2);
+    expect(root.querySelector('.katex-display')).not.toBeNull();
+    expect(root.querySelector('.katex-html [style]')).not.toBeNull();
+    expect(root.querySelector('.katex-error')).toBeNull();
+  });
+
+  it.each(['$$\nx^2 + y^2 = z^2\n$$', '$$x^2 +\ny^2 = z^2$$', '$$x^2 + y^2 = z^2$$'])(
+    'renders display math %j immediately after prose',
+    (math) => {
+      const root = document.createElement('div');
+      root.innerHTML = __parseMarkdownForTests(`The equation is:\n${math}\nAfter.`, {
+        cacheByContent: false,
+      });
+
+      expect(root.querySelectorAll('.katex-display')).toHaveLength(1);
+      expect(root.querySelector('.katex-error')).toBeNull();
+      expect(Array.from(root.querySelectorAll('p'), (element) => element.textContent)).toEqual([
+        'The equation is:',
+        'After.',
+      ]);
+    }
+  );
+
+  it('keeps LaTeX literal inside code spans and fenced code blocks', () => {
+    const html = __parseMarkdownForTests(
+      ['Inline code: `$x^2$`', '', '```text', '$$y^2$$', '```'].join('\n'),
+      { cacheByContent: false }
+    );
+    const root = document.createElement('div');
+    root.innerHTML = html;
+
+    expect(root.querySelector('.katex')).toBeNull();
+    expect(root.querySelector('code')?.textContent).toBe('$x^2$');
+    expect(root.querySelector('pre')?.textContent).toContain('$$y^2$$');
+  });
+
+  it.each(['It costs $5 and $10.', 'It costs $5.', 'Literal \\$x^2\\$.'])(
+    'does not treat currency or escaped dollars as math: %s',
+    (content) => {
+      const root = document.createElement('div');
+      root.innerHTML = __parseMarkdownForTests(content, { cacheByContent: false });
+
+      expect(root.querySelector('.katex')).toBeNull();
+      expect(root.textContent?.trim()).toBe(content.replaceAll('\\$', '$'));
+    }
+  );
+
+  it.each([
+    '查询出 $\\mathcal{N}(\\mu_t^{(p)},\\Sigma_t^{(p)})$，再变换回全局：',
+    '(where $x^2$)',
+    'It costs $5 and $10. The variable is $x$.',
+  ])('renders inline math alongside punctuation or currency: %s', (content) => {
+    const root = document.createElement('div');
+    root.innerHTML = __parseMarkdownForTests(content, { cacheByContent: false });
+
+    expect(root.querySelectorAll('.katex')).toHaveLength(1);
+    expect(root.querySelector('.katex-error')).toBeNull();
+  });
+
+  it('keeps unsafe TeX commands inert without allowing authored styles', () => {
+    const root = document.createElement('div');
+    root.innerHTML = __parseMarkdownForTests(
+      '<span style="position:fixed">Plain</span>\n\n$\\href{javascript:alert(1)}{x}$\n\n$\\includegraphics{https://example.test/image.png}$',
+      { cacheByContent: false }
+    );
+
+    expect(root.querySelector('a, img, script')).toBeNull();
+    expect(root.querySelector('span')?.hasAttribute('style')).toBe(false);
+    expect(root.querySelector('.katex-html')).not.toBeNull();
+  });
+
+  it('shows invalid TeX without losing the surrounding message', () => {
+    const root = document.createElement('div');
+    root.innerHTML = __parseMarkdownForTests('Before $\\frac{$ after.', {
+      cacheByContent: false,
+    });
+
+    expect(root.querySelector('.katex-error')?.textContent).toBe('\\frac{');
+    expect(root.textContent).toContain('Before');
+    expect(root.textContent).toContain('after.');
+  });
+
+  it.each(['$$\nx^2\n\ny^2\n$$', '$$\\left[x\\right)$$', '$\\left[x\\right)$'])(
+    'preserves complete math %j during streaming',
+    async (math) => {
+      cleanup = render(
+        () => createComponent(MarkdownRenderer, { content: math, forceStreaming: true }),
+        container!
+      );
+      await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+
+      expect(container?.querySelectorAll('.katex')).toHaveLength(1);
+      expect(container?.querySelector('.katex-error')).toBeNull();
+      expect(container?.querySelector('.streaming-markdown-pending')).toBeNull();
+    }
+  );
+
+  it('keeps streamed math whole across blank lines and split closing delimiters', async () => {
+    vi.useFakeTimers();
+    const prefix = 'Stable paragraph.\n\n';
+    const [content, setContent] = createSignal(`${prefix}$$x^2`);
+    cleanup = render(
+      () =>
+        createComponent(MarkdownRenderer, {
+          get content() {
+            return content();
+          },
+          forceStreaming: true,
+        }),
+      container!
+    );
+    await vi.advanceTimersByTimeAsync(16);
+    const stableParagraph = container?.querySelector('p');
+
+    for (const suffix of ['', '\n\n', 'y^2', '$']) {
+      setContent(content() + suffix);
+      await vi.advanceTimersByTimeAsync(16);
+      expect(container?.querySelector('.katex')).toBeNull();
+      expect(container?.querySelector('p')).toBe(stableParagraph);
+      expectStreamingIndicator(container!);
+      expect(container?.textContent).not.toContain('$$');
+    }
+    setContent(`${content()}$`);
+    await vi.advanceTimersByTimeAsync(16);
+    expect(container?.querySelectorAll('.katex-display')).toHaveLength(1);
+    expect(container?.querySelector('annotation')?.textContent).toBe('x^2\n\ny^2');
+
+    setContent(`${content()}\n\nFollowing paragraph.`);
+    await vi.advanceTimersByTimeAsync(16);
+    expect(container?.querySelectorAll('.katex-display')).toHaveLength(1);
+    const settledMath = container?.querySelector('.katex');
+    setContent(`${content()} More text.`);
+    await vi.advanceTimersByTimeAsync(16);
+    expect(container?.querySelector('.katex')).toBe(settledMath);
+    expect(container?.querySelector('p')).toBe(stableParagraph);
+  });
+
+  it.each([
+    { prefix: 'The result is ', chunks: ['$', '\\', 'frac{a', '}{b}'], closer: '$' },
+    { prefix: 'The result is ', chunks: ['$$', 'x^2', '$'], closer: '$' },
+    { prefix: 'The result is ', chunks: ['$2 +', ' 2'], closer: '$' },
+    { prefix: '- ', chunks: ['$', '\\left[', 'x\\right)'], closer: '$' },
+    { prefix: 'Price: ', chunks: ['$', '\\text{cost \\$', '5}'], closer: '$' },
+    { prefix: 'The equation is:\n', chunks: ['$', '$', '\nx^2\n\ny^2\n', '$'], closer: '$' },
+  ])(
+    'hides unfinished formulas with $prefix until the closer arrives',
+    async ({ prefix, chunks, closer }) => {
+      vi.useFakeTimers();
+      const [content, setContent] = createSignal(prefix);
+      cleanup = render(
+        () =>
+          createComponent(MarkdownRenderer, {
+            get content() {
+              return content();
+            },
+            forceStreaming: true,
+          }),
+        container!
+      );
+
+      for (const chunk of chunks) {
+        setContent(content() + chunk);
+        await vi.advanceTimersByTimeAsync(16);
+        expect(container?.querySelector('.katex')).toBeNull();
+        expectStreamingIndicator(container!);
+        expect(container?.textContent).not.toContain('$');
+      }
+
+      setContent(content() + closer);
+      await vi.advanceTimersByTimeAsync(16);
+      expect(container?.querySelectorAll('.katex')).toHaveLength(1);
+      expect(container?.querySelector('.katex-error')).toBeNull();
+      expect(container?.querySelector('.streaming-markdown-pending')).toBeNull();
+    }
+  );
+
+  it.each([
+    'It costs $5 and $10.',
+    'It costs $5',
+    'Literal \\$x^2',
+    'Code: `$x^2`',
+    '```latex\n$$\nx^2',
+    'A shell variable foo$bar',
+    'An invalid $x$word',
+  ])('keeps non-math dollar content visible while streaming: %s', async (content) => {
+    cleanup = render(
+      () => createComponent(MarkdownRenderer, { content, forceStreaming: true }),
+      container!
+    );
+    await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+    expect(container?.querySelector('.streaming-markdown-pending')).toBeNull();
+    expect(container?.querySelector('.katex')).toBeNull();
+    expect(container?.textContent).toContain('$');
+  });
+
+  it.each(['A formula $\\frac{x}', 'An equation:\n$$\nx^2\n\ny^2'])(
+    'reveals unmatched math as literal text when streaming ends: %s',
+    async (content) => {
+      vi.useFakeTimers();
+      const [completed, setCompleted] = createSignal(false);
+      cleanup = render(
+        () =>
+          createComponent(MarkdownRenderer, {
+            content,
+            get cacheByContent() {
+              return completed();
+            },
+          }),
+        container!
+      );
+      await vi.advanceTimersByTimeAsync(16);
+      expectStreamingIndicator(container!);
+
+      setCompleted(true);
+      await vi.advanceTimersByTimeAsync(16);
+      expect(container?.querySelector('.streaming-markdown-pending')).toBeNull();
+      expect(container?.querySelector('.katex')).toBeNull();
+      expect(container?.textContent).toContain(content.includes('$$') ? '$$' : '$\\frac{x}');
+    }
+  );
+
+  it('does not let code-fenced math delimiters consume later streaming boundaries', () => {
+    const stableContent = '```text\n$$\nx^2\n```';
+    expect(splitStreamingMarkdownContent(`${stableContent}\n\nTail`)).toEqual({
+      stableContent,
+      tailContent: 'Tail',
+    });
   });
 
   it('renders indented text as prose while preserving fenced code blocks', () => {
@@ -2586,18 +2839,13 @@ describe('MarkdownRenderer', () => {
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
 
     const paragraph = container?.querySelector('[data-markdown-segment="tail"] p');
-    expect(paragraph?.textContent).toContain('src/webview/components/Markdown');
-    expect(container?.querySelector('.streaming-markdown-pending')?.textContent).toContain(
-      'src/webview/components/Markdown'
-    );
+    expect(paragraph?.textContent).not.toContain('src/webview/components/Markdown');
+    expectStreamingIndicator(container!);
     expect(container?.querySelectorAll('a.file-path-link')).toHaveLength(0);
-    expect(container?.querySelector('.streaming-markdown-pending')?.classList).toContain(
-      'streaming-markdown-pending-hidden'
-    );
 
     setContent('The related tests are in `src/webview/components/MarkdownRenderer.test.ts');
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
-    expect(container?.textContent).toContain('MarkdownRenderer.test.ts');
+    expect(container?.textContent).not.toContain('MarkdownRenderer.test.ts');
     expect(container?.querySelector('.streaming-markdown-pending')).not.toBeNull();
 
     setContent('The related tests are in `src/webview/components/MarkdownRenderer.test.ts`');
@@ -2613,16 +2861,22 @@ describe('MarkdownRenderer', () => {
   });
 
   it.each([
-    { name: 'a bullet list', prefix: 'Two corrections:\n\n- ', visibleItems: 0 },
-    { name: 'a numbered list', prefix: 'Two corrections:\n\n3. ', visibleItems: 0 },
+    { name: 'a bullet list', prefix: 'Two corrections:\n\n- ', visibleItems: 0, pendingItems: 0 },
+    {
+      name: 'a numbered list',
+      prefix: 'Two corrections:\n\n3. ',
+      visibleItems: 0,
+      pendingItems: 1,
+    },
     {
       name: 'a later bullet',
       prefix: 'Two corrections:\n\n- First visible item.\n- ',
       visibleItems: 1,
+      pendingItems: 1,
     },
   ])(
-    'hides an item in $name whose only content is unfinished inline code',
-    async ({ prefix, visibleItems }) => {
+    'shows an indicator in $name while its inline code is unfinished',
+    async ({ prefix, visibleItems, pendingItems }) => {
       const [content, setContent] = createSignal(`${prefix}\`Open as Edi`);
       cleanup = render(
         () =>
@@ -2636,15 +2890,14 @@ describe('MarkdownRenderer', () => {
       );
       await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
 
-      // An empty list item still paints its marker and overflows its zero-height box.
+      // The pending block shows dots without painting an orphan list marker.
       const paintedItems = () =>
         Array.from(container!.querySelectorAll('li')).filter(
           (item) => !item.closest('.streaming-markdown-pending-block')
         );
-      expect(container?.querySelector('.streaming-markdown-pending-hidden')?.textContent).toContain(
-        '`Open as Edi'
-      );
-      expect(paintedItems()).toHaveLength(visibleItems);
+      expectStreamingIndicator(container!);
+      expect(container?.textContent).not.toContain('`Open as Edi');
+      expect(paintedItems()).toHaveLength(pendingItems);
 
       setContent(`${content()}tor\` is not a model-change event.`);
       await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
@@ -2684,9 +2937,10 @@ describe('MarkdownRenderer', () => {
       setContent(`Two corrections:\n\n- \`Open as Edi`);
       await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
       expect(visibleItems()).toHaveLength(0);
+      expectStreamingIndicator(container!);
       expect(
         container?.querySelector('[data-markdown-tail-tag]')?.getAttribute('data-markdown-tail-tag')
-      ).toBe('');
+      ).toBe('p');
 
       setContent(`Two corrections:\n\n- \`Open as Editor\` is not a model-change event.`);
       await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
@@ -2717,10 +2971,7 @@ describe('MarkdownRenderer', () => {
       for (const chunk of ['', ...chunks]) {
         setContent(content() + chunk);
         await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
-        const pending = container?.querySelector('.streaming-markdown-pending');
-        expect(pending?.textContent).toBe(content().slice(prefix.length));
-        expect(pending?.getAttribute('aria-hidden')).toBe('true');
-        expect(pending?.classList).toContain('streaming-markdown-pending-hidden');
+        expectStreamingIndicator(container!);
         expect(Array.from(container!.querySelectorAll('code'), (code) => code.textContent)).toEqual(
           ['npm run lint']
         );
@@ -2801,9 +3052,8 @@ describe('MarkdownRenderer', () => {
       container!
     );
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
-    const pending = container?.querySelector('.streaming-markdown-pending');
-    expect(pending?.getAttribute('aria-hidden')).toBe('true');
-    expect(pending?.textContent).toBe('`npm run test');
+    expectStreamingIndicator(container!);
+    expect(container?.textContent).not.toContain('`npm run test');
 
     setContent(`${content()}\``);
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
@@ -2824,9 +3074,7 @@ describe('MarkdownRenderer', () => {
       container!
     );
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
-    expect(
-      container?.querySelector('.streaming-markdown-pending')?.getAttribute('aria-hidden')
-    ).toBe('true');
+    expectStreamingIndicator(container!);
 
     setCompleted(true);
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
@@ -2857,30 +3105,30 @@ describe('MarkdownRenderer', () => {
     );
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
 
-    expect(container?.textContent).toContain('the renderer implementation');
-    expect(container?.querySelector('.streaming-markdown-pending')?.textContent).toContain(
-      'the renderer implementation'
-    );
+    expect(container?.textContent).not.toContain('the renderer implementation');
+    expectStreamingIndicator(container!);
     expect(container?.querySelectorAll('a.file-path-link')).toHaveLength(0);
 
     setContent(
       'Explicit local links use standard Markdown syntax. Open [the renderer implementation]'
     );
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
-    expect(container?.textContent).toContain('the renderer implementation');
+    expect(container?.textContent).not.toContain('the renderer implementation');
+    expectStreamingIndicator(container!);
 
     setContent(
       'Explicit local links use standard Markdown syntax. Open [the renderer implementation](src/webview/components/'
     );
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
-    expect(container?.textContent).toContain('src/webview/components/');
+    expect(container?.textContent).not.toContain('src/webview/components/');
 
     setContent(
       'Explicit local links use standard Markdown syntax. Open [the renderer implementation](src/webview/components/MarkdownRenderer.tsx) or [its test'
     );
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
     expect(container?.textContent).toContain('the renderer implementation');
-    expect(container?.textContent).toContain('its test');
+    expect(container?.textContent).not.toContain('its test');
+    expectStreamingIndicator(container!);
     expect(container?.querySelectorAll('a.file-path-link')).toHaveLength(1);
 
     setContent(
@@ -2944,10 +3192,8 @@ describe('MarkdownRenderer', () => {
       );
       await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
 
-      expect(container?.textContent).toContain(testCase.partial);
-      expect(container?.querySelector('.streaming-markdown-pending')?.textContent).toContain(
-        testCase.partial
-      );
+      expect(container?.textContent).not.toContain(testCase.partial);
+      expectStreamingIndicator(container!);
       expect(container?.querySelector('a.file-path-link')).toBeNull();
 
       setContent(`Bare path: ${testCase.complete} `);
@@ -2977,9 +3223,8 @@ describe('MarkdownRenderer', () => {
     );
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
 
-    expect(container?.querySelector('.streaming-markdown-pending')?.textContent).toBe(
-      'https://example.test/reference/Mark'
-    );
+    expectStreamingIndicator(container!);
+    expect(container?.textContent).not.toContain('https://example.test/reference/Mark');
     expect(container?.querySelector('a[href^="https://example.test"]')).toBeNull();
 
     setContent('Docs: https://example.test/reference/Markdown ');
@@ -3004,9 +3249,8 @@ describe('MarkdownRenderer', () => {
     );
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
 
-    expect(container?.querySelector('.streaming-markdown-pending')?.textContent).toBe(
-      'MarkdownRenderer.t'
-    );
+    expectStreamingIndicator(container!);
+    expect(container?.textContent).not.toContain('MarkdownRenderer.t');
     expect(container?.querySelector('a.file-path-link')).toBeNull();
 
     setContent('File: MarkdownRenderer.tsx ');
@@ -3035,10 +3279,8 @@ describe('MarkdownRenderer', () => {
     expect(links?.[0]?.dataset.file).toBe(JSON.stringify({ path: 'C:/work/project/App.tsx' }));
     expect(links?.[1]?.textContent).toBe('open it');
     expect(links?.[1]?.dataset.file).toBe(JSON.stringify({ path: 'C:/work/project/App.tsx' }));
-    expect(container?.textContent).toContain('https://example.test/folder/App');
-    expect(container?.querySelector('.streaming-markdown-pending')?.textContent).toBe(
-      'https://example.test/folder/App'
-    );
+    expect(container?.textContent).not.toContain('https://example.test/folder/App');
+    expectStreamingIndicator(container!);
   });
 
   it('does not hold escaped backticks or content inside a streaming fence', async () => {
@@ -3246,9 +3488,8 @@ describe('MarkdownRenderer', () => {
     setContent('Files: `src/webview/components/MarkdownRenderer');
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
 
-    expect(container?.querySelector('.streaming-markdown-pending')?.textContent).toContain(
-      'MarkdownRenderer'
-    );
+    expectStreamingIndicator(container!);
+    expect(container?.textContent).not.toContain('MarkdownRenderer');
     expect(container?.querySelector('a.file-path-link')).toBeNull();
   });
 

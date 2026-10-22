@@ -103,8 +103,10 @@ the shared invariants below remain true.
   Drop disconnected/replaced rows and never measure inert placeholders. The threshold bootstrap
   observer setup also measures its connected snapshot as a batch. While history owns an exact anchor,
   measurement publication must not queue a competing generic anchor after direct input becomes idle.
-  Ordinary gesture-driven virtual mounts still measure synchronously so the scroll event cannot save
-  an already-shifted destination before height compensation above the viewport runs.
+   Gesture-driven range updates collect mounted rows during the scroll handler's reactive batch, then
+   measure them together before saving the destination anchor. Coalesce mounted sticky-preview checks
+   at the same boundary. Other gesture-driven mounts still measure synchronously. Never defer height
+   compensation above the viewport until after the handler has remembered an already-shifted destination.
 
 ### Height Accounting
 

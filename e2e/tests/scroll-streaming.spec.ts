@@ -431,16 +431,12 @@ test.describe('rapid streaming bottom follow', () => {
       .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
       .toBeLessThan(15);
 
-    await appendDeltaToRapidStreaming(
-      page,
-      `\n\nPending inline \`${'VFZ-PENDING-MARKDOWN '.repeat(24)}`
-    );
-    await waitForAnimationFrames(page, 2);
+    const codeText = 'VFZ-PENDING-MARKDOWN '.repeat(24).trim();
+    await appendDeltaToRapidStreaming(page, `\n\nPending inline \`${codeText}`);
 
-    await expect(row).toContainText('VFZ-PENDING-MARKDOWN');
-    await expect(row.locator('.streaming-markdown-pending')).toHaveCSS('visibility', 'hidden');
-    await expect(row.locator('.streaming-markdown-pending')).toHaveAttribute('aria-hidden', 'true');
-    await expect(row).toContainText('VFZ-PENDING-MARKDOWN '.repeat(24).trim());
+    await expect(row.getByRole('img', { name: 'Streaming content' })).toBeVisible();
+    await expect(row).not.toContainText('VFZ-PENDING-MARKDOWN');
+    await expect(row.locator('code')).toHaveCount(0);
     await expect
       .poll(() =>
         getScrollMetrics(page, '.interactive-list').then((metrics) => metrics.distanceFromBottom)
@@ -450,6 +446,7 @@ test.describe('rapid streaming bottom follow', () => {
     await appendDeltaToRapidStreaming(page, '`');
     await expect(row.locator('.streaming-markdown-pending')).toHaveCount(0);
     await expect(row.locator('code').filter({ hasText: 'VFZ-PENDING-MARKDOWN' })).toBeVisible();
+    await expect(row.locator('code')).toHaveText(codeText);
     await expect
       .poll(() =>
         getScrollMetrics(page, '.interactive-list').then((metrics) => metrics.distanceFromBottom)

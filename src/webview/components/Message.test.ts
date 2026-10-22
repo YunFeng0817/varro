@@ -2488,22 +2488,36 @@ describe('Message streamed assistant text rendering', () => {
     expect(container?.querySelectorAll('hr')).toHaveLength(0);
   });
 
-  it('keeps a completed compact summary streaming buffer in pending Markdown mode', () => {
+  it('keeps a completed compact summary streaming buffer in pending Markdown mode', async () => {
+    const [streamingText, setStreamingText] = createSignal(
+      'Files: `src/webview/components/MarkdownRenderer'
+    );
     cleanup = render(
       () =>
         Message({
           info: assistantSummaryMessage('message-stream-pending-summary'),
           parts: [textPart('text-1', '')],
           streamingPartId: 'text-1',
-          streamingText: 'Files: `src/webview/components/MarkdownRenderer',
+          get streamingText() {
+            return streamingText();
+          },
         }),
       container!
     );
 
-    expect(container?.querySelector('.streaming-markdown-pending')?.textContent).toContain(
-      'MarkdownRenderer'
-    );
+    const indicator = container?.querySelector('.streaming-markdown-indicator');
+    expect(indicator?.getAttribute('aria-label')).toBe('Streaming content');
+    expect(indicator?.children).toHaveLength(3);
+    expect(container?.textContent).not.toContain('MarkdownRenderer');
     expect(container?.querySelector('a.file-path-link')).toBeNull();
+
+    setStreamingText('Files: `src/webview/components/MarkdownRenderer.tsx`');
+    await vi.waitFor(() => {
+      expect(container?.querySelector('.streaming-markdown-pending')).toBeNull();
+      expect(container?.querySelector('a.file-path-link')?.textContent).toBe(
+        'MarkdownRenderer.tsx'
+      );
+    });
   });
 
   it('preserves a compact stream boundary that completes a bare URL', () => {

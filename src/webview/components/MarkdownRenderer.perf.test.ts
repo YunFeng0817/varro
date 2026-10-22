@@ -69,7 +69,8 @@ describe('MarkdownRenderer performance regressions', () => {
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
 
     expect(markerChecks.length).toBeLessThanOrEqual(2);
-    expect(container.textContent).toContain('[unfinished');
+    expect(container.textContent).not.toContain('[unfinished');
+    expect(container.querySelector('.streaming-markdown-indicator')).not.toBeNull();
   });
 
   it('keeps adjacent placeholder-like source text intact while streaming', async () => {
@@ -79,8 +80,48 @@ describe('MarkdownRenderer performance regressions', () => {
     cleanup = render(() => MarkdownRenderer({ content }), container);
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
 
-    expect(container.textContent.trimEnd()).toBe(content);
+    expect(container.textContent.trimEnd()).toBe(`${marker}${marker}X`);
+    expect(container.querySelector('.streaming-markdown-indicator')).not.toBeNull();
   });
+
+  it.each(['$$\\frac{x', 'Inline $\\frac{x', 'Docs: https://example.test/', 'File: docs/'])(
+    'preserves indicator nodes without DOM mutations as hidden content grows: %s',
+    async (initial) => {
+      vi.useFakeTimers();
+      const [content, setContent] = createSignal(initial);
+      cleanup = render(
+        () =>
+          createComponent(MarkdownRenderer, {
+            get content() {
+              return content();
+            },
+            forceStreaming: true,
+          }),
+        container
+      );
+      await vi.advanceTimersByTimeAsync(16);
+      const indicator = container.querySelector('.streaming-markdown-indicator');
+      expect(indicator).not.toBeNull();
+      const mutations: MutationRecord[] = [];
+      const observer = new MutationObserver((records) => mutations.push(...records));
+      observer.observe(container, {
+        childList: true,
+        attributes: true,
+        characterData: true,
+        subtree: true,
+      });
+      try {
+        for (let index = 0; index < 20; index += 1) {
+          setContent(`${content()}x`);
+          await vi.advanceTimersByTimeAsync(16);
+          expect(container.querySelector('.streaming-markdown-indicator')).toBe(indicator);
+        }
+        expect(mutations).toHaveLength(0);
+      } finally {
+        observer.disconnect();
+      }
+    }
+  );
 
   it('parses long plain streaming transcripts incrementally without populating caches', async () => {
     vi.useFakeTimers();
@@ -157,12 +198,82 @@ describe('MarkdownRenderer performance regressions', () => {
   });
 
   it.each([
+    ['display math', '$$\nf(x) = \\begin{cases}x^2 & x < 0 \\\\ x & x > 0\\end{cases}\n$$'],
+    ['inline math', 'For $x < 0$ and $y > 0$, compare the two values.'],
+    ['fenced code', '```html\n<div>Example</div>\n```'],
+    ['inline code', 'Read `<div>` and `value > 0` literally.'],
+    ['blockquotes', '> A quoted paragraph.'],
+  ])('retains settled blocks with angle brackets in %s', async (_label, block) => {
+    vi.useFakeTimers();
+    const sections = Array.from({ length: 20 }, (_, index) => `## Section ${index}\n\n${block}`);
+    const [content, setContent] = createSignal(`${sections[0]}\n\nTail`);
+    const sanitize = vi.spyOn(DOMPurify, 'sanitize');
+    cleanup = render(
+      () =>
+        createComponent(MarkdownRenderer, {
+          get content() {
+            return content();
+          },
+        }),
+      container
+    );
+    await vi.advanceTimersByTimeAsync(16);
+    const firstHeading = container.querySelector('h2');
+    const firstBlock = firstHeading?.nextElementSibling;
+    for (let index = 1; index < sections.length; index += 1) {
+      setContent(`${sections.slice(0, index + 1).join('\n\n')}\n\nTail`);
+      await vi.advanceTimersByTimeAsync(16);
+      expect(container.querySelector('h2')).toBe(firstHeading);
+      expect(firstHeading?.nextElementSibling).toBe(firstBlock);
+    }
+    const sanitizedBytes = sanitize.mock.calls.reduce(
+      (sum, [html]) => sum + String(html).length,
+      0
+    );
+    const expected = document.createElement('div');
+    expected.innerHTML = __parseMarkdownForTests(content(), { cacheByContent: false });
+    expect(sanitizedBytes).toBeLessThan(expected.innerHTML.length * 3);
+    expect(container.textContent).toBe(expected.textContent);
+  });
+
+  it('finalizes the pending tail without reparsing settled math and prose', async () => {
+    vi.useFakeTimers();
+    const content = `${Array.from({ length: 30 }, (_, index) => `## Settled ${index}\n\nFor $x < ${index}$, keep this paragraph.`).join('\n\n')}\n\nTail \`unfinished`;
+    const [complete, setComplete] = createSignal(false);
+    const sanitize = vi.spyOn(DOMPurify, 'sanitize');
+    cleanup = render(
+      () =>
+        createComponent(MarkdownRenderer, {
+          content,
+          get cacheByContent() {
+            return complete();
+          },
+        }),
+      container
+    );
+    await vi.advanceTimersByTimeAsync(16);
+    const firstHeading = container.querySelector('h2');
+    expect(container.querySelector('.streaming-markdown-indicator')).not.toBeNull();
+    sanitize.mockClear();
+    setComplete(true);
+    await vi.advanceTimersByTimeAsync(16);
+
+    expect(container.querySelector('h2')).toBe(firstHeading);
+    expect(container.querySelectorAll('.katex')).toHaveLength(30);
+    expect(container.querySelector('.streaming-markdown-indicator')).toBeNull();
+    expect(container.textContent).toContain('Tail `unfinished');
+    expect(sanitize.mock.calls.some(([html]) => String(html).includes('Settled 0'))).toBe(false);
+  });
+
+  it.each([
     ['- First item', '- Second item'],
     ['1. First item', '2. Second item'],
     ['- First item\n- Second item', '  Continued paragraph'],
     ['> First quote', '> Continued quote'],
     ['A [reference][target].', '[target]: https://example.com'],
     ['<div>First block', 'Second block</div>'],
+    ['Text <span', 'title="note">inside the span</span>'],
+    ['> A [reference][target].', '[target]: https://example.com'],
     ['## Heading', 'A **bold** paragraph with `code`.'],
     ['```ts\nconst value = 1;\n```', '## Next section'],
     ['| Name | Value |\n| --- | --- |\n| one | two |', 'A following paragraph.'],
@@ -190,6 +301,87 @@ describe('MarkdownRenderer performance regressions', () => {
         element.getAttribute('href'),
       ]);
     expect(blocks(container)).toEqual(blocks(expected));
+  });
+
+  it.each([false, true])(
+    'keeps code-free Markdown on core changes, finalized=%s',
+    async (cacheByContent) => {
+      vi.useFakeTimers();
+      const [lightweight, setLightweight] = createSignal(false);
+      cleanup = render(
+        () =>
+          createComponent(MarkdownRenderer, {
+            content: '## Formula\n\n$$x < y$$\n\nFinished.',
+            cacheByContent,
+            get lightweight() {
+              return lightweight();
+            },
+          }),
+        container
+      );
+      await vi.advanceTimersByTimeAsync(16);
+      const equation = container.querySelector('.katex');
+      expect(equation).not.toBeNull();
+      const sanitize = vi.spyOn(DOMPurify, 'sanitize');
+      for (const value of [true, false, true, false]) {
+        setLightweight(value);
+        await vi.advanceTimersByTimeAsync(16);
+        expect(container.querySelector('.katex')).toBe(equation);
+      }
+      expect(sanitize).not.toHaveBeenCalled();
+    }
+  );
+
+  it.each([
+    ['math', '## Formula\n\n$$x < y$$\n\nFinished.'],
+    ['table', '| A | B |\n| - | - |\n| one | two |\n\nFinished.'],
+    ['list continuation', '- First\n\n- Second'],
+    ['reference', '[Reference][target]\n\n[target]: https://example.com'],
+    ['HTML', '<div>First\n\nSecond</div>'],
+    ['closed fence', '## Code\n\n```js\nconst value = 1;\n```\n\nFinished.'],
+    ['open fence', '## Code\n\n```text\nunclosed'],
+  ])(
+    'keeps full-render equivalence when caching completed streaming %s',
+    async (label, content) => {
+      vi.useFakeTimers();
+      const [complete, setComplete] = createSignal(false);
+      cleanup = render(
+        () =>
+          createComponent(MarkdownRenderer, {
+            content,
+            get cacheByContent() {
+              return complete();
+            },
+          }),
+        container
+      );
+      await vi.advanceTimersByTimeAsync(16);
+      setComplete(true);
+      await vi.advanceTimersByTimeAsync(16);
+      cleanup();
+      cleanup = undefined;
+      const sanitize = vi.spyOn(DOMPurify, 'sanitize');
+      const remounted = __parseMarkdownForTests(content, { cacheByContent: true });
+      if (label === 'math' || label === 'table') expect(sanitize).not.toHaveBeenCalled();
+      expect(remounted).toBe(__parseMarkdownForTests(content, { cacheByContent: false }));
+    }
+  );
+
+  it('reuses finalized Markdown after visiting a history page within the byte budget', () => {
+    const content = Array.from(
+      { length: 24 },
+      (_, index) => `## Section ${index}\n\n$$x_${index} = \\frac{a+b}{c+d}$$`
+    ).join('\n\n');
+    const original = __parseMarkdownForTests(content, { cacheByContent: true });
+    for (let index = 0; index < 200; index += 1) {
+      __parseMarkdownForTests(`Earlier history paragraph ${index}.`, { cacheByContent: true });
+    }
+    const stats = getMarkdownCacheStatsForTests();
+    expect(stats.bytes).toBeLessThan(stats.byteBudget);
+    const sanitize = vi.spyOn(DOMPurify, 'sanitize');
+
+    expect(__parseMarkdownForTests(content, { cacheByContent: true })).toBe(original);
+    expect(sanitize).not.toHaveBeenCalled();
   });
 
   it('enforces one total byte budget across finalized markdown caches', () => {

@@ -98,6 +98,44 @@ describe('prepareMeasuredEntrance', () => {
     dispose();
   });
 
+  it('uses the exact content height when Markdown grows during its entrance', async () => {
+    let notify: (() => void) | undefined;
+    let resize: FrameRequestCallback | undefined;
+    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
+      resize = callback;
+      return 1;
+    });
+    vi.stubGlobal('cancelAnimationFrame', vi.fn());
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        constructor(callback: () => void) {
+          notify = callback;
+        }
+        observe() {}
+        disconnect() {}
+      }
+    );
+    const element = document.createElement('div');
+    let naturalHeight = 22.265625;
+    Object.defineProperty(element, 'scrollHeight', { get: () => Math.round(naturalHeight) });
+    vi.spyOn(element, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 0, 20));
+    document.body.appendChild(element);
+    const dispose = prepareMeasuredEntrance(element, {
+      animationName: 'test-entrance',
+      heightProperty: '--test-entrance-height',
+      measureContentHeight: () => naturalHeight,
+    });
+    await Promise.resolve();
+    expect(element.style.getPropertyValue('--test-entrance-height')).toBe('22.265625px');
+
+    naturalHeight = 56.53125;
+    notify!();
+    resize!(16);
+    expect(element.style.getPropertyValue('--test-entrance-height')).toBe('56.53125px');
+    dispose();
+  });
+
   it('coalesces resize growth outside observer delivery and cancels it on cleanup', async () => {
     let notify: (() => void) | undefined;
     let nextFrame = 0;

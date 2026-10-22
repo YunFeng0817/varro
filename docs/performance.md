@@ -70,6 +70,11 @@ any saving described here.
   including `::before` and `::after`. Screenshots alone miss specificity changes.
 - Measure before adding build workarounds. Tailwind's `color-mix()` fallbacks duplicate some rules,
   but removing them showed no measurable style-recalculation saving.
+- Keep row-only custom properties out of Markdown descendants. Resetting
+  `--interactive-item-block-correction` at `.rendered-markdown` reduced a retained math remount's
+  rounding style pass from 8,531 elements to 91. The row spacer and outer activity guides still
+  inherit the real correction. Count affected elements, not just style passes: this avoids work
+  within an existing pass without reducing its count.
 
 ## Webview transport
 
@@ -95,6 +100,14 @@ any saving described here.
 
 ## Memory
 
+- Finalized Markdown caches share a 2 MiB byte budget, with at most 256 entries per cache. The entry
+  cap must accommodate a 200-message history page: the old 100-entry cap evicted a large rendered
+  response during native scrolling even with most of the byte budget free, adding a parse/sanitize
+  pass to its remount. Keep the history-page reuse and shared-byte-budget regressions together.
+- Streaming completion can cache its sanitized stable/tail HTML when the append validator proves
+  the boundary independent. Never assemble a full-result cache entry across contextual HTML,
+  reference definitions, or an unfinished code fence. Core/overscan changes only need a Markdown
+  reparse when code or diagram rendering changes; code-free content keeps its existing HTML.
 - After scrolling a virtualized history repeatedly, a heap snapshot should contain no detached DOM and
   heap growth should level off. Treat steady per-cycle growth as a lead to investigate.
 

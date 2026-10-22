@@ -1,0 +1,14 @@
+/* Center formulas that fit; scroll wide formulas within the chat column. */
+.katex-display {
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.katex-display > .katex {
+  max-width: none;
+}
+
+.katex {
+  color: inherit;
+}
