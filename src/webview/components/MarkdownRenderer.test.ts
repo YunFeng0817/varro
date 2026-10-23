@@ -564,6 +564,85 @@ describe('MarkdownRenderer', () => {
     expect(root.querySelector('.katex-error')).toBeNull();
   });
 
+  it.each([
+    '：',
+    '，',
+    '。',
+    '；',
+    '！',
+    '？',
+    '、',
+    '（',
+    '）',
+    '【',
+    '】',
+    '《',
+    '》',
+    '「',
+    '」',
+    '『',
+    '』',
+    '［',
+    '］',
+    '｛',
+    '｝',
+    '中',
+    '𠀀',
+    'あ',
+    'ア',
+    '한',
+  ])('renders inline math next to the CJK boundary %s without spaces', (boundary) => {
+    const root = document.createElement('div');
+    root.innerHTML = __parseMarkdownForTests(`前文${boundary}$x^2$${boundary}后文`, {
+      cacheByContent: false,
+    });
+
+    expect(root.querySelectorAll('.katex')).toHaveLength(1);
+    expect(root.querySelector('annotation')?.textContent).toBe('x^2');
+    expect(root.querySelector('.katex-error')).toBeNull();
+    expect(root.textContent).not.toContain('$');
+  });
+
+  it('renders the Chinese inline and display formulas from issue 45', () => {
+    const root = document.createElement('div');
+    root.innerHTML = __parseMarkdownForTests(
+      String.raw`下面是一些行内公式：
+
+- 高斯分布：$p(x\mid z)=\mathcal{N}(x;\mu,\Sigma)$
+- Softmax：$\operatorname{softmax}(z_i)=\dfrac{e^{z_i}}{\sum_j e^{z_j}}$
+
+行间公式：
+
+$$
+p(\mathbf{x}\mid\boldsymbol{\mu},\boldsymbol{\Sigma})
+=\frac{1}{(2\pi)^{d/2}|\boldsymbol{\Sigma}|^{1/2}}
+\exp\left[-\frac12(\mathbf{x}-\boldsymbol{\mu})^\top
+\boldsymbol{\Sigma}^{-1}(\mathbf{x}-\boldsymbol{\mu})\right]
+$$`,
+      { cacheByContent: false }
+    );
+
+    expect(root.querySelectorAll('li .katex')).toHaveLength(2);
+    expect(root.querySelectorAll('.katex-display')).toHaveLength(1);
+    expect(root.querySelector('.katex-error')).toBeNull();
+    expect(root.textContent).not.toContain('$');
+  });
+
+  it.each([
+    '中文$5，另一个价格$10。',
+    '中文\\$x^2\\$。',
+    '中文`$x^2$`。',
+    'A shell variable foo$bar$',
+    'An invalid $x$word',
+    'An identifier foo$x$。',
+  ])('keeps non-math dollar content literal alongside CJK text: %s', (content) => {
+    const root = document.createElement('div');
+    root.innerHTML = __parseMarkdownForTests(content, { cacheByContent: false });
+
+    expect(root.querySelector('.katex')).toBeNull();
+    expect(root.textContent).toContain('$');
+  });
+
   it('keeps unsafe TeX commands inert without allowing authored styles', () => {
     const root = document.createElement('div');
     root.innerHTML = __parseMarkdownForTests(
@@ -649,6 +728,11 @@ describe('MarkdownRenderer', () => {
     { prefix: '- ', chunks: ['$', '\\left[', 'x\\right)'], closer: '$' },
     { prefix: 'Price: ', chunks: ['$', '\\text{cost \\$', '5}'], closer: '$' },
     { prefix: 'The equation is:\n', chunks: ['$', '$', '\nx^2\n\ny^2\n', '$'], closer: '$' },
+    ...['：', '，', '。', '；', '！', '？', '、', '中', '𠀀', 'あ', 'ア', '한'].map((boundary) => ({
+      prefix: `前文${boundary}`,
+      chunks: ['$', '\\', 'frac{a', '}{b}'],
+      closer: '$后文',
+    })),
   ])(
     'hides unfinished formulas with $prefix until the closer arrives',
     async ({ prefix, chunks, closer }) => {
@@ -689,6 +773,10 @@ describe('MarkdownRenderer', () => {
     '```latex\n$$\nx^2',
     'A shell variable foo$bar',
     'An invalid $x$word',
+    '中文$5，另一个价格$10。',
+    '中文\\$x^2',
+    '中文`$x^2`',
+    'An identifier foo$x$。',
   ])('keeps non-math dollar content visible while streaming: %s', async (content) => {
     cleanup = render(
       () => createComponent(MarkdownRenderer, { content, forceStreaming: true }),
@@ -700,31 +788,33 @@ describe('MarkdownRenderer', () => {
     expect(container?.textContent).toContain('$');
   });
 
-  it.each(['A formula $\\frac{x}', 'An equation:\n$$\nx^2\n\ny^2'])(
-    'reveals unmatched math as literal text when streaming ends: %s',
-    async (content) => {
-      vi.useFakeTimers();
-      const [completed, setCompleted] = createSignal(false);
-      cleanup = render(
-        () =>
-          createComponent(MarkdownRenderer, {
-            content,
-            get cacheByContent() {
-              return completed();
-            },
-          }),
-        container!
-      );
-      await vi.advanceTimersByTimeAsync(16);
-      expectStreamingIndicator(container!);
+  it.each([
+    'A formula $\\frac{x}',
+    'An equation:\n$$\nx^2\n\ny^2',
+    '中文：$\\frac{x}',
+    '中文$\\frac{x}',
+  ])('reveals unmatched math as literal text when streaming ends: %s', async (content) => {
+    vi.useFakeTimers();
+    const [completed, setCompleted] = createSignal(false);
+    cleanup = render(
+      () =>
+        createComponent(MarkdownRenderer, {
+          content,
+          get cacheByContent() {
+            return completed();
+          },
+        }),
+      container!
+    );
+    await vi.advanceTimersByTimeAsync(16);
+    expectStreamingIndicator(container!);
 
-      setCompleted(true);
-      await vi.advanceTimersByTimeAsync(16);
-      expect(container?.querySelector('.streaming-markdown-pending')).toBeNull();
-      expect(container?.querySelector('.katex')).toBeNull();
-      expect(container?.textContent).toContain(content.includes('$$') ? '$$' : '$\\frac{x}');
-    }
-  );
+    setCompleted(true);
+    await vi.advanceTimersByTimeAsync(16);
+    expect(container?.querySelector('.streaming-markdown-pending')).toBeNull();
+    expect(container?.querySelector('.katex')).toBeNull();
+    expect(container?.textContent).toContain(content.includes('$$') ? '$$' : '$\\frac{x}');
+  });
 
   it('does not let code-fenced math delimiters consume later streaming boundaries', () => {
     const stableContent = '```text\n$$\nx^2\n```';
