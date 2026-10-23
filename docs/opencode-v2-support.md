@@ -25,7 +25,7 @@ update does not block later deletion. Cancelled updates check their signal befor
 reading, and before replacing the annotation file, so cancellation while queued or preparing a write
 does not commit that update.
 
-`npm run test:compatibility:adapters` installs published binaries into isolated directories and tests the production adapters. The current tested versions are v1 `1.19.4` and v2 `2.1.3`, alongside the v1 `1.16.0` and v2 `2.0.5` support floors. Release-specific results are recorded below. The checks cover managed startup, credential recovery in a second window, restart, multi-window recovery after process exit, bootstrap, workspace path encoding, v2 configuration precedence, session updates, deterministic streamed model responses, actual fixture-only tool execution, message pagination, tail editing, helper generation, fork/revert, deletion, and native v2 permissions/forms. The generated report is `artifacts/opencode-adapters/verified.json`.
+`npm run test:compatibility:adapters` installs published binaries into isolated directories and tests the production adapters. The current tested versions are v1 `1.19.4` and v2 `2.1.4`, alongside the v1 `1.16.0` and v2 `2.0.5` support floors. Release-specific results are recorded below. The checks cover managed startup, credential recovery in a second window, restart, multi-window recovery after process exit, bootstrap, workspace path encoding, v2 configuration precedence, session updates, deterministic streamed model responses, actual fixture-only tool execution, message pagination, tail editing, helper generation, fork/revert, deletion, and native v2 permissions/forms. The generated report is `artifacts/opencode-adapters/verified.json`.
 
 Fresh VS Code sandbox windows passed `v2-first-run` and the existing `healthy-first-run` scenario. These editor checks verify activation, ownership, health, and event-stream connection. `test:compatibility:ui` additionally exercises the actual composer, successful replies, pre-turn failures, HTTP 401 handling, recovery through a working provider, and reopening history. Full visual streaming performance remains a separate verification task.
 
@@ -83,6 +83,59 @@ resolve to `literal/directory`. V2 location queries retain their normal URL enco
 The released-server adapter tests cover exact workspace resolution for Japanese text, emoji,
 and literal percent escapes. Unit tests also cover header construction with embedded newlines
 and preservation of Windows separators and casing.
+
+### 2.1.4 compatibility review
+
+Reviewed v2.1.3 to v2.1.4, `e965774fa` through `2a3e7c0f3`. All 121 existing
+OpenAPI routes are unchanged. SSE names and payloads, session/message/inbox shapes, permissions/forms,
+and managed `serve`/upgrade arguments remain compatible. No adapter changes are
+required. V1 `1.19.4` is still the latest published v1 release; both support floors
+remain unchanged.
+
+V2 adds experimental client-hosted MCP connections, heap-dump diagnostics, and
+opt-in background compaction. These additions require no Varro integration for
+existing behavior. Server-owned fixes cover MCP elicitation event locations,
+OAuth callbacks and timeouts, MCP startup/shutdown, compaction overflow recovery,
+native agent-file detection, agent model selection, and imported v1 project
+ownership. ChatGPT model filtering and context caps remain server-owned catalog
+behavior. App/TUI changes are optional parity work.
+
+The complete upstream diff is retained in `artifacts/opencode-2.1.4-upstream.diff`.
+The development/CI Node pin remains `24.22.0`; supported Node floors are unchanged.
+
+The published-server adapter matrix passed all 149 applicable checks, with 47
+family/platform skips and no leaked or recovered processes. Evidence is
+`artifacts/opencode-2.1.4-adapters.log` and
+`artifacts/opencode-adapters/run-lva5LK/`.
+
+| Published server | Passed | Skipped | Issues found | All cases complete |
+| --- | ---: | ---: | --- | --- |
+| v1.16.0 | 30 | 19 | None in tested cases | Yes, applicable automated cases |
+| v1.19.4 | 31 | 18 | None in tested cases | Yes, applicable automated cases |
+| v2.0.5 | 42 | 7 | None in tested cases | Yes, applicable automated cases |
+| v2.1.4 | 46 | 3 | None in tested cases | Yes, applicable automated cases |
+
+All 1,059 focused tests and five compatibility-summary tests passed.
+`npm run lint`, `npm run fmt`, `npm run lint:check`, `npm run typecheck`,
+`npm run typecheck:suggestions`, and `npm run build` passed. Logs use the
+`artifacts/opencode-2.1.4-` prefix. The v1 dependency is unchanged, so the Docker
+v1 support-range matrix was not rerun. Real-editor, visual streaming, live-model
+action parity, and native Windows checks were not run for this bump.
+
+The full `npm run test` run passed 10,603 tests, skipped 51, and failed one:
+`src/extension/macos-tray.test.ts` could not discover a Unix socket created after
+the publisher started. It expected one snapshot but received none. The failure
+reproduced in isolated file and single-case runs on Node `24.22.1`; all 24 tray
+tests passed with the same dependency tree on Node `24.22.0`. Evidence is
+`artifacts/opencode-2.1.4-unit-tests.log`,
+`artifacts/opencode-2.1.4-macos-tray-recheck.log`,
+`artifacts/opencode-2.1.4-macos-tray-node-baseline.log`, and
+`artifacts/opencode-2.1.4-macos-tray-volta-target.log`. This is a Node-version-linked
+macOS discovery issue, not an OpenCode adapter failure. Next, compare a minimal
+`fs.watch` reproduction on both Node versions and check whether the event is lost
+or the publisher ignores it. Tray implementation changes are outside this bump.
+The Node `24.22.1` pin was reverted to `24.22.0` because of this failure; the
+OpenCode version update is retained.
 
 ### 2.1.3 and 1.19.4 compatibility review
 
