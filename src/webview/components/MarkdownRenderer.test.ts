@@ -151,6 +151,98 @@ afterEach(() => {
 
 describe('MarkdownRenderer', () => {
   it.each([
+    `Use "*" and '*'.`,
+    `Use "**" and '**'.`,
+    `Use "***" and '***'.`,
+    '"*" followed by an unmatched word*',
+    '"**" followed by an unmatched word**',
+    '*unmatched words followed by "*"',
+    '**unmatched words followed by "**"',
+    'Use * with spaces and another * here.',
+    `Use "_" and '_'.`,
+    `Use "__" and '__'.`,
+    `Use "___" and '___'.`,
+    '"_" followed by an unmatched word_',
+    '"__" followed by an unmatched word__',
+    '_unmatched words followed by "_"',
+    '__unmatched words followed by "__"',
+    'Use _ with spaces and another _ here.',
+  ])('keeps literal emphasis markers in %s', (content) => {
+    container!.innerHTML = __parseMarkdownForTests(content, { cacheByContent: true });
+
+    expect(container!.textContent?.trim()).toBe(content);
+    expect(container!.querySelector('em, strong')).toBeNull();
+  });
+
+  it.each([
+    { content: '*word*', selector: 'em', text: 'word' },
+    { content: '*two words*', selector: 'em', text: 'two words' },
+    { content: '**bold words**', selector: 'strong', text: 'bold words' },
+    { content: `"*" then *word* and '*'`, selector: 'em', text: 'word' },
+    { content: `'*word*'`, selector: 'em', text: 'word' },
+    { content: `*use "*" and '*' here*`, selector: 'em', text: `use "*" and '*' here` },
+    { content: `**use "**" and '**' here**`, selector: 'strong', text: `use "**" and '**' here` },
+    { content: '_word_', selector: 'em', text: 'word' },
+    { content: '_two words_', selector: 'em', text: 'two words' },
+    { content: '__bold words__', selector: 'strong', text: 'bold words' },
+    { content: `"_" then _word_ and '_'`, selector: 'em', text: 'word' },
+    { content: `'_word_'`, selector: 'em', text: 'word' },
+    { content: `_use "_" and '_' here_`, selector: 'em', text: `use "_" and '_' here` },
+    { content: `__use "__" and '__' here__`, selector: 'strong', text: `use "__" and '__' here` },
+  ])('preserves emphasis in $content', ({ content, selector, text }) => {
+    container!.innerHTML = __parseMarkdownForTests(content, { cacheByContent: true });
+
+    expect(container!.querySelectorAll('em, strong')).toHaveLength(1);
+    expect(container!.querySelector(selector)?.textContent).toBe(text);
+  });
+
+  it.each(['*', '_'])('preserves quoted %s inside inline and fenced code', (marker) => {
+    const code = `"${marker}" and '${marker}'`;
+    container!.innerHTML = __parseMarkdownForTests(`\`${code}\`\n\n\`\`\`text\n${code}\n\`\`\``, {
+      cacheByContent: true,
+    });
+
+    const blocks = container!.querySelectorAll('code');
+    expect(blocks).toHaveLength(2);
+    expect(blocks[0]?.textContent).toBe(code);
+    expect(blocks[1]?.textContent?.trim()).toBe(code);
+  });
+
+  it.each(['*', '_'])(
+    'keeps quoted %s literal as a message streams and settles',
+    async (marker) => {
+      const initial = `Use "${marker}"`;
+      const complete = `${initial} and '${marker}'.`;
+      const [content, setContent] = createSignal(initial);
+      const [streaming, setStreaming] = createSignal(true);
+      cleanup = render(
+        () =>
+          createComponent(MarkdownRenderer, {
+            get content() {
+              return content();
+            },
+            get forceStreaming() {
+              return streaming();
+            },
+          }),
+        container!
+      );
+
+      for (const next of [initial, complete, `${complete}\n\nDone.`]) {
+        setContent(next);
+        await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+        expect(container!.textContent).toContain(initial);
+        expect(container!.querySelector('em, strong')).toBeNull();
+      }
+
+      setStreaming(false);
+      await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+      expect(container!.textContent).toContain(complete);
+      expect(container!.querySelector('em, strong')).toBeNull();
+    }
+  );
+
+  it.each([
     { header: '**#**', values: ['First stage', 'Second stage'], compact: true },
     { header: 'Stage', values: ['**1**', '`2`'], compact: true },
     { header: 'File', values: ['`src/first.ts`', '`src/second.ts`'], compact: false },

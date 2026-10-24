@@ -380,6 +380,30 @@ describe('getActiveCompletion', () => {
     expect(getActiveCompletion('review test', 11)).toBeNull();
   });
 
+  it.each(['/usr/libexec/lsd', '/usr/libexec/', '//server/share/file.txt', '/repo\\file.txt'])(
+    'does not search slash commands for the path %s',
+    (path) => {
+      for (const text of [path, `Inspect ${path}`]) {
+        expect(getActiveCompletion(text, text.length)).toBeNull();
+      }
+      // Moving the caret inside an already pasted path must not reopen the picker.
+      expect(getActiveCompletion(path, 2)).toBeNull();
+    }
+  );
+
+  it('still offers explicit file and skill lookups containing path separators', () => {
+    for (const [prefix, type] of [
+      ['@', 'mention'],
+      ['$', 'skill'],
+    ]) {
+      const text = `${prefix}/usr/libexec/lsd`;
+      expect(getActiveCompletion(text, text.length)).toMatchObject({
+        type,
+        query: '/usr/libexec/lsd',
+      });
+    }
+  });
+
   it('detects session completions for the active token', () => {
     expect(getActiveCompletion('compare &auth', 13)).toEqual({
       type: 'session',

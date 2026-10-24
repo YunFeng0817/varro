@@ -14,6 +14,7 @@ import {
   state,
 } from '../lib/state';
 import { closeSideQuestion } from '../lib/side-question';
+import { flushInputDraft } from '../lib/input-draft-persistence';
 import type { Session } from '../types';
 import { fixture } from '../test-fixtures';
 import { SideQuestionDialog } from './SideQuestionDialog';
@@ -118,6 +119,7 @@ afterEach(() => {
   cleanup = undefined;
   container.remove();
   closeSideQuestion();
+  flushInputDraft();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });

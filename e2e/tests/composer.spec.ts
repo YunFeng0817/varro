@@ -2,6 +2,7 @@
 /* oxlint-disable anti-slop/require-safety-comment-for-type-assertion -- SAFETY: Assertions access composer hooks and protocol-shaped fixtures installed by the controlled E2E harness. */
 import { expect, test } from '@playwright/test';
 import type { Page } from '@playwright/test';
+import type * as WebviewState from '../../src/webview/lib/state';
 import { getScrollMetrics, waitForAnimationFrames, waitForHarnessStartup } from './helpers';
 
 async function delayPromptRequest(page: Page, delayMs: number) {
@@ -64,6 +65,44 @@ test('creates a session and sends a prompt through the mocked bridge', async ({ 
   );
   await expect(page.locator('.chat-turn-assistant').last()).toContainText(
     'Add a smoke test for the sidebar'
+  );
+});
+
+test('pastes an absolute path as immediately editable text without command suggestions', async ({
+  page,
+}) => {
+  await page.goto('/e2e/harness/index.html?scenario=blank');
+  await waitForHarnessStartup(page);
+  const composer = page.getByRole('textbox', { name: 'Message composer' }).first();
+  await composer.click();
+  await page.evaluate(async () => {
+    const path = '/src/webview/lib/state.ts';
+    const { setState } = (await import(path)) as typeof WebviewState;
+    setState('commands', [
+      {
+        name: 'inspect-launch-services',
+        description: 'Inspect /usr/libexec/lsd',
+        template: 'Inspect launch services',
+        source: 'skill',
+      },
+    ]);
+  });
+  const pastedPath = '/usr/libexec/lsd';
+  const immediateText = await composer.evaluate((editor, text) => {
+    const clipboardData = new DataTransfer();
+    clipboardData.setData('text/plain', text);
+    editor.dispatchEvent(
+      new ClipboardEvent('paste', { bubbles: true, cancelable: true, clipboardData })
+    );
+    return editor.textContent;
+  }, pastedPath);
+  expect(immediateText).toBe(pastedPath);
+  await expect(page.locator('.composer-completion-menu')).toHaveCount(0);
+  await page.keyboard.type(' inspect this');
+  await expect(composer).toHaveText(`${pastedPath} inspect this`);
+  await composer.press('Enter');
+  await expect(page.locator('.chat-turn-assistant').last()).toContainText(
+    `Mock assistant response for: ${pastedPath} inspect this`
   );
 });
 
