@@ -283,6 +283,7 @@ export class FollowupService {
         'When offering actions, write a useful one- or two-sentence summary, roughly 120-300 characters and at most 400. Name the relevant findings and explain what the next work would address. Do not use a generic heading such as Suggested next actions. Do not claim work was done or that the user has approved it.',
         'Return zero to three actions. Zero is normal; never fill a quota. Titles max 40 characters, prompts max 600 characters.',
         'Ground every action in explicit unfinished work or concrete optional next steps in the answer and the user goal.',
+        'Order actions from most recommended to least, considering relevance to the user goal, expected impact, and prerequisites.',
         "Propose useful next tasks; never execute them. Each suggestion requires separate user consent and does not change the completed turn's scope.",
         'A review that reports actionable defects can suggest "Fix reported issues", even though the review itself was read-only.',
         'For example, after "Review the changes" finds two bugs, suggest a prompt to fix only those reported bugs and add focused regression tests.',

@@ -91,6 +91,19 @@ function setup() {
 }
 
 describe('FollowupService', () => {
+  it('requests actions ordered by recommendation, considering relevance, impact, and prerequisites', async () => {
+    const { server, request, input } = setup();
+    expect(await new FollowupService(server).suggest(input)).toEqual(suggestions);
+    const body = request.mock.calls.find(([, path]) => path === '/api/experimental/generate')?.[2];
+    expect(body).toEqual(
+      expect.objectContaining({
+        prompt: expect.stringContaining(
+          'Order actions from most recommended to least, considering relevance to the user goal, expected impact, and prerequisites.'
+        ),
+      })
+    );
+  });
+
   it('clears old suggestion content on the next accepted turn without allowing old-turn regeneration', async () => {
     const { server, request, input } = setup();
     const service = new FollowupService(server);
