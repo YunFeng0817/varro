@@ -114,7 +114,7 @@ export class SharedThumbnailClient {
       const port = 40000 + (identity.readUInt32LE(slot * 4) % 20000);
       const endpoint = { port, secret };
       try {
-        await this.exchange(endpoint, undefined, undefined, this.controller.signal);
+        await this.probe(endpoint);
         return endpoint;
       } catch (error) {
         if (asRecord(error)?.code !== 'ECONNREFUSED') continue;
@@ -144,7 +144,7 @@ export class SharedThumbnailClient {
         if (launchError) throw launchError;
         await sleep(25, undefined, { signal: this.controller.signal });
         try {
-          await this.exchange(endpoint, undefined, undefined, this.controller.signal);
+          await this.probe(endpoint);
           return endpoint;
         } catch (error) {
           if (asRecord(error)?.code !== 'ECONNREFUSED') break;
@@ -152,6 +152,21 @@ export class SharedThumbnailClient {
       }
     }
     throw new Error('Could not start or authenticate the shared thumbnail service');
+  }
+
+  private async probe(endpoint: Endpoint): Promise<void> {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        await this.exchange(endpoint, undefined, undefined, this.controller.signal);
+        return;
+      } catch (error) {
+        // A competing starter can reset a connection while losing the bind race on Windows.
+        // Retry this port before selecting another, but never retry failed authentication.
+        if (attempt >= 3 || !['ECONNRESET', 'EPIPE'].includes(String(asRecord(error)?.code)))
+          throw error;
+        await sleep(25, undefined, { signal: this.controller.signal });
+      }
+    }
   }
 
   private exchange(

@@ -10,6 +10,7 @@ import { build } from 'esbuild';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { thumbnailWorkerBuildOptions } from '../../scripts/build-thumbnail-worker.mjs';
 import { SharedThumbnailClient } from './image-thumbnail-shared-client';
+import { thumbnailProof, thumbnailSecret } from './image-thumbnail-service-auth';
 
 const gif = 'R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
 let directory: string;
@@ -25,6 +26,50 @@ afterAll(async () => {
 });
 
 describe('cross-process thumbnail service', () => {
+  it('retries reset health connections on the same port instead of starting another service', async () => {
+    const stateDirectory = join(directory, 'reset-account');
+    const identity = createHash('sha256')
+      .update(stateDirectory)
+      .update(servicePath)
+      .update(await readFile(servicePath))
+      .update(await readFile(join(directory, 'thumbnail-worker.js')))
+      .digest();
+    const secret = thumbnailProof(await thumbnailSecret(stateDirectory), identity.toString('hex'));
+    const port = 40000 + (identity.readUInt32LE(0) % 20000);
+    let probes = 0;
+    const server = createServer((request, response) => {
+      probes++;
+      if (probes <= 2) {
+        request.socket.destroy();
+        return;
+      }
+      const value = `${String(request.headers['x-nonce'])}:0:`;
+      response.setHeader('x-proof', thumbnailProof(secret, `server:${value}`));
+      response.setHeader('x-thumbnail-process', String(process.pid));
+      response.end('{}');
+    });
+    server.on('checkContinue', (request, response) => {
+      const value = `${String(request.headers['x-nonce'])}:${String(request.headers['content-length'])}:${String(request.headers['x-format'])}`;
+      response.setHeader('x-proof', thumbnailProof(secret, `server:${value}`));
+      response.setHeader('x-thumbnail-process', String(process.pid));
+      response.end(JSON.stringify({ url: null }));
+    });
+    await new Promise<void>((resolve, reject) => {
+      server.once('error', reject);
+      server.listen(port, '127.0.0.1', resolve);
+    });
+    const client = new SharedThumbnailClient({ servicePath, stateDirectory, idleMs: 1500 });
+    try {
+      expect(await client.convert(gif, 'gif', new AbortController().signal)).toBeNull();
+      expect(client.processID).toBe(process.pid);
+      expect(probes).toBe(3);
+    } finally {
+      client.dispose();
+      server.closeAllConnections();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  }, 20_000);
+
   // Cold process and WASM startup need the same CI budget as the other integration cases.
   it('never uploads images to a replacement listener without a valid same-connection proof', async () => {
     const stateDirectory = join(directory, 'identity-account');
