@@ -1,6 +1,7 @@
 /* oxlint-disable anti-slop/no-module-mocking -- Sending is isolated so these UI tests cannot execute an agent. */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createSignal } from 'solid-js';
+import { reconcile } from 'solid-js/store';
 import { render } from 'solid-js/web';
 import { client } from '../../lib/client';
 import { replaceMessages, setState } from '../../lib/state';
@@ -34,6 +35,9 @@ beforeEach(() => {
   setState('activeSessionId', 'session-1');
   setState('serverStatus', { state: 'running', url: 'mock://server', apiVersion: 2 });
   setState('followupModel', 'test/small');
+  setState('followupsEnabled', true);
+  setState('selectedModel', { providerID: 'test', modelID: 'session', variant: 'high' });
+  setState('sessionSelectedModels', reconcile({}));
   setState('messagesLoading', false);
   setState('followupOpening', null);
   setState('sessions', [session('session-1')]);
@@ -60,6 +64,9 @@ afterEach(() => {
   dispose = undefined;
   container.remove();
   setState('followupModel', '');
+  setState('followupsEnabled', true);
+  setState('selectedModel', null);
+  setState('sessionSelectedModels', reconcile({}));
   setState('messages', []);
   vi.restoreAllMocks();
 });
@@ -188,19 +195,76 @@ describe('FollowupSuggestions', () => {
     }
   );
 
-  it('never generates for idle history or when no model is assigned', async () => {
+  it('never generates for idle history or when explicitly disabled', async () => {
     mount(false);
     await flush();
     expect(client.varro.followups).toHaveBeenCalledTimes(1);
     expect(vi.mocked(client.varro.followups).mock.calls[0]?.[2].allowGenerate).toBe(false);
     dispose?.();
     vi.mocked(client.varro.followups).mockClear();
-    setState('followupModel', '');
+    setState('followupsEnabled', false);
     const { setWorking } = mount();
     setWorking(false);
     await flush();
     expect(client.varro.followups).not.toHaveBeenCalled();
   });
+
+  it.each(['high', undefined])(
+    'uses the session model and reasoning %s without an override',
+    async (variant) => {
+      setState('followupModel', '');
+      setState('sessionSelectedModels', 'session-1', {
+        providerID: 'test',
+        modelID: 'session',
+        variant,
+      });
+      setState('selectedModel', { providerID: 'other', modelID: 'draft', variant: 'low' });
+      const { setWorking } = mount();
+      setWorking(false);
+      await flush();
+      expect(client.varro.followups).toHaveBeenCalledExactlyOnceWith(
+        'session-1',
+        expect.any(Object),
+        expect.objectContaining({
+          allowGenerate: true,
+          model: { providerID: 'test', modelID: 'session', variant },
+        })
+      );
+      expect(container.querySelector('.followup-suggestions')).not.toBeNull();
+    }
+  );
+
+  it('cancels pending suggestions when opted out and ignores the late result', async () => {
+    let finish!: (value: typeof suggestions) => void;
+    vi.mocked(client.varro.followups).mockImplementationOnce(
+      () => new Promise((resolve) => (finish = resolve))
+    );
+    const { setWorking } = mount();
+    setWorking(false);
+    const signal = vi.mocked(client.varro.followups).mock.calls[0]![2].signal;
+    setState('followupsEnabled', false);
+    expect(signal.aborted).toBe(true);
+    finish(suggestions);
+    await flush();
+    expect(container.querySelector('.followup-suggestions')).toBeNull();
+    expect(client.varro.followups).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['model', 'variant'] as const)(
+    'invalidates session-model suggestions on a %s change without new inference',
+    async (change) => {
+      setState('followupModel', '');
+      const { setWorking } = mount();
+      setWorking(false);
+      await flush();
+      expect(container.querySelector('.followup-suggestions')).not.toBeNull();
+      setState('selectedModel', change === 'model' ? 'modelID' : 'variant', 'other');
+      await flush();
+      expect(container.querySelector('.followup-suggestions')).toBeNull();
+      expect(client.varro.followups).toHaveBeenCalledTimes(2);
+      expect(vi.mocked(client.varro.followups).mock.calls[1]?.[2].allowGenerate).toBe(false);
+    }
+  );
 
   it('sends an action immediately on click, without a dialog or duplicate sends', async () => {
     const { setWorking } = mount();
@@ -284,7 +348,7 @@ describe('FollowupSuggestions', () => {
     }
   );
 
-  it.each(['busy', 'model', 'session', 'blocked', 'text'])(
+  it.each(['busy', 'model', 'session', 'blocked', 'text', 'disabled'])(
     'invalidates suggestions on %s changes without sending or regenerating',
     async (change) => {
       const { setWorking, setBlocked } = mount();
@@ -295,6 +359,7 @@ describe('FollowupSuggestions', () => {
       if (change === 'session') setState('activeSessionId', 'session-2');
       if (change === 'blocked') setBlocked(true);
       if (change === 'text') setState('messages', 1, 'parts', [textPart('a', 'Already fixed.')]);
+      if (change === 'disabled') setState('followupsEnabled', false);
       await flush();
       expect(container.querySelector('.followup-suggestions')).toBeNull();
       expect(document.querySelector('[role="dialog"]')).toBeNull();

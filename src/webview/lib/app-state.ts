@@ -126,6 +126,7 @@ export interface AppState {
   autoAttachProblems: boolean;
   autoAttachActiveFile: boolean;
   promptCompletionModel: string;
+  followupsEnabled: boolean;
   followupModel: string;
   remoteImages: RemoteImageMode;
   debugShowQuotaWarning: boolean;
@@ -398,6 +399,7 @@ export function createAppState(): AppStateInstance {
     autoAttachProblems: initialWebviewState.autoAttachProblems ?? true,
     autoAttachActiveFile: initialWebviewState.autoAttachActiveFile ?? true,
     promptCompletionModel: initialWebviewState.promptCompletionModel ?? '',
+    followupsEnabled: initialWebviewState.followupsEnabled ?? true,
     followupModel: initialWebviewState.followupModel ?? '',
     remoteImages: parseRemoteImageMode(initialWebviewState.remoteImages),
     debugShowQuotaWarning: initialWebviewState.debugShowQuotaWarning ?? false,

@@ -12,6 +12,7 @@ export type ExtensionConfigState = {
   showEmptyStateHistogram?: boolean;
   remoteImages?: RemoteImageMode;
   promptCompletionModel?: string;
+  followupsEnabled?: boolean;
   followupModel?: string;
   debugShowQuotaWarning?: boolean;
   debugResetWarningDays?: number;
@@ -32,6 +33,7 @@ export type WebviewConfigUpdatePayload = Pick<
   | 'showTurnTimer'
   | 'showEmptyStateHistogram'
   | 'promptCompletionModel'
+  | 'followupsEnabled'
   | 'followupModel'
   | 'debugShowQuotaWarning'
   | 'debugResetWarningDays'

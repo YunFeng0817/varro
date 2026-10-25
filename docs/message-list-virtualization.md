@@ -616,6 +616,10 @@ Direct input acquires ownership only when it can affect the transcript:
   An accepted new turn clears prior suggestion contents and retires pending results for that session,
   retaining only bounded admission metadata. Rejected sends do not clear the cache.
   Only source responses explicitly identified as Build are eligible, in both the webview and host.
+  Follow-ups default to enabled; the application-scoped `chat.followupsEnabled` opt-out gates both
+  display and host inference. An unset `chat.followupModel` uses the current session model and reasoning
+  variant. Model, reasoning, or enabled-state changes invalidate pending presentation without admitting
+  another inference for the same turn.
   The model supplies a bounded plain-text summary with zero to three title/prompt pairs; prompt hints
   use the shared tooltip component, and the close control uses the shared icon.
   Suggestions are optional post-message flow chrome outside row-only prefixes. Arrival leaves focus

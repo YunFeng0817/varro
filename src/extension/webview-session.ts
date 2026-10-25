@@ -546,6 +546,7 @@ export class WebviewSession {
       showEmptyStateHistogram: config.showEmptyStateHistogram,
       remoteImages: config.remoteImages,
       promptCompletionModel: config.promptCompletionModel,
+      followupsEnabled: config.followupsEnabled,
       followupModel: config.followupModel,
       debugShowQuotaWarning: config.debugShowQuotaWarning,
       debugResetWarningDays: config.debugResetWarningDays,

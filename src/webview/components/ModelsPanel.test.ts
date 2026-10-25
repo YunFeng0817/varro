@@ -2198,7 +2198,7 @@ describe('ModelsPanel', () => {
     ['commit_message', 'Use for commit messages', false, undefined],
     ['commit_message', "Don't use for commit messages", true, undefined],
     ['followups', 'Use for follow-ups', false, undefined],
-    ['followups', "Don't use for follow-ups", true, undefined],
+    ['followups', 'Use session model for follow-ups', true, undefined],
     ['auto_approve', 'Use for auto-approve', false, undefined],
     ['auto_approve', "Don't use for auto-approve", true, undefined],
     ['prompt_completion', 'Use for prompt completion', false, undefined],

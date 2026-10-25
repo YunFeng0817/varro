@@ -10,8 +10,10 @@ import {
   readFollowupText,
 } from '../../../shared/followups';
 import { client } from '../../lib/client';
+import type { ChatModelSelection } from '../../../shared/protocol';
 import { logWarn } from '../../lib/log';
-import { state } from '../../lib/state';
+import { getSelectedModelForSession, state } from '../../lib/state';
+import { deriveSelectedModelFromSession } from '../../hooks/routing-state';
 import { prepareForMessageBlockRemoval } from '../../lib/message-list-layout';
 import { sendMessage } from '../../hooks/useOpenCode';
 import { xmarkIcon } from '../../lib/ui-icons';
@@ -45,6 +47,18 @@ export function FollowupSuggestions(props: {
   const attempted = new Set<string>();
   // The parent turn projection also changes for unrelated assistant metadata updates.
   const turnId = createMemo(() => props.turnId);
+  const sessionModel = createMemo<ChatModelSelection | null>(() => {
+    if (state.followupModel) return null;
+    const model =
+      getSelectedModelForSession(state.activeSessionId) ??
+      state.selectedModel ??
+      deriveSelectedModelFromSession(
+        state.sessions.find((session) => session.id === state.activeSessionId)
+      );
+    return model
+      ? { providerID: model.providerID, modelID: model.modelID, variant: model.variant }
+      : null;
+  });
   const scope = createMemo(() =>
     JSON.stringify([
       state.activeSessionId,
@@ -53,11 +67,14 @@ export function FollowupSuggestions(props: {
       state.serverStatus.state,
       state.serverStatus.state === 'running' ? state.serverStatus.url : null,
       state.followupModel,
+      state.followupsEnabled,
+      sessionModel(),
     ])
   );
   const sourceKey = createMemo(() => {
     if (
-      !state.followupModel ||
+      !state.followupsEnabled ||
+      (!state.followupModel && !sessionModel()) ||
       state.serverStatus.state !== 'running' ||
       state.serverStatus.apiVersion !== 2 ||
       props.blocked ||
@@ -184,7 +201,7 @@ export function FollowupSuggestions(props: {
         }
       });
     }
-    if (working && !loading && state.followupModel && currentTurnId) {
+    if (working && !loading && state.followupsEnabled && currentTurnId) {
       untrack(() => {
         const answers = messages.filter(
           (entry) => entry.info.role === 'assistant' && entry.info.parentID === currentTurnId
@@ -232,7 +249,12 @@ export function FollowupSuggestions(props: {
       () => state.sessions.find((session) => session.id === sessionId)?.directory
     );
     void client.varro
-      .followups(sessionId, source, { signal: controller.signal, directory, allowGenerate })
+      .followups(sessionId, source, {
+        signal: controller.signal,
+        directory,
+        allowGenerate,
+        model: untrack(sessionModel),
+      })
       .then((suggestions) => {
         if (controller.signal.aborted || scope() !== currentScope || sourceKey() !== key) return;
         // Treat bridge output as inert plain text and enforce the same bounds as the host.

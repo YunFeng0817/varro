@@ -20,7 +20,7 @@ const mocks = vi.hoisted(() => ({
       getWorkspaceFolder: vi.fn(() => undefined),
       getConfiguration: vi.fn(() => ({
         get: vi.fn<() => string | undefined>(() => undefined),
-        inspect: vi.fn(() => ({ globalValue: undefined as unknown })),
+        inspect: vi.fn((_key?: string) => ({ globalValue: undefined as unknown })),
       })),
       asRelativePath: vi.fn((uri: { fsPath: string }) => uri.fsPath),
       fs: {
@@ -816,11 +816,13 @@ describe('RestProxy handleRequest', () => {
     expect(callbacks.server.request).not.toHaveBeenCalled();
   });
 
-  it('does not let a repository setting opt into follow-up inference', async () => {
+  it('honors the user follow-up opt-out even with a model and repository opt-in', async () => {
     const { proxy, callbacks } = createProxy();
     const configuration = mocks.vscode.workspace.getConfiguration.mockReturnValue({
       get: vi.fn(() => 'openai/repository-model'),
-      inspect: vi.fn(() => ({ globalValue: undefined })),
+      inspect: vi.fn((key?: string) => ({
+        globalValue: key === 'chat.followupsEnabled' ? false : 'openai/user-model',
+      })),
     });
     try {
       await proxy.handleRequest(
@@ -829,6 +831,8 @@ describe('RestProxy handleRequest', () => {
           userMessageId: 'u',
           userPrompt: 'Fix the parser',
           answer: 'One issue remains.',
+          model: { providerID: 'openai', modelID: 'session', variant: 'high' },
+          allowGenerate: true,
         })
       );
       expect(callbacks.postApiResponse).toHaveBeenLastCalledWith(1, {
@@ -842,6 +846,77 @@ describe('RestProxy handleRequest', () => {
         inspect: vi.fn(() => ({ globalValue: undefined })),
       });
     }
+  });
+
+  it.each([undefined, 'openai/small'])(
+    'uses the session model and reasoning unless an override is set: %s',
+    async (override) => {
+      const { proxy, callbacks } = createProxy();
+      let enabled = true;
+      const configuration = mocks.vscode.workspace.getConfiguration.mockReturnValue({
+        get: vi.fn(() => 'openai/repository-model'),
+        inspect: vi.fn((key?: string) => ({
+          globalValue: key === 'chat.followupsEnabled' ? enabled : override,
+        })),
+      });
+      const suggest = vi
+        .spyOn(FollowupService.forServer(callbacks.server), 'suggest')
+        .mockResolvedValue({ summary: '', actions: [] });
+      const model = { providerID: 'openai', modelID: 'session', variant: 'high' };
+      try {
+        await proxy.handleRequest(
+          makePayload(511, 'POST', '/varro/session/session-1/followups', {
+            assistantMessageId: 'a',
+            userMessageId: 'u',
+            userPrompt: 'Review',
+            answer: 'One bug remains',
+            model,
+            allowGenerate: true,
+          })
+        );
+        expect(suggest).toHaveBeenCalledWith(
+          expect.objectContaining({
+            model: override ? { providerID: 'openai', modelID: 'small' } : model,
+            allowGenerate: true,
+          })
+        );
+        const isModelCurrent = suggest.mock.calls[0]![0].isModelCurrent;
+        expect(isModelCurrent()).toBe(true);
+        enabled = false;
+        expect(isModelCurrent()).toBe(false);
+      } finally {
+        suggest.mockRestore();
+        configuration.mockReturnValue({
+          get: vi.fn(() => undefined),
+          inspect: vi.fn(() => ({ globalValue: undefined })),
+        });
+        proxy.dispose();
+      }
+    }
+  );
+
+  it.each([
+    undefined,
+    { providerID: '', modelID: 'session' },
+    { providerID: 'openai', modelID: 'session', variant: 42 },
+  ])('does not infer without a valid session fallback: %j', async (model) => {
+    const { proxy, callbacks } = createProxy();
+    await proxy.handleRequest(
+      makePayload(512, 'POST', '/varro/session/session-1/followups', {
+        assistantMessageId: 'a',
+        userMessageId: 'u',
+        userPrompt: 'Review',
+        answer: 'One bug remains',
+        model,
+        allowGenerate: true,
+      })
+    );
+    expect(callbacks.postApiResponse).toHaveBeenLastCalledWith(1, {
+      id: 512,
+      data: { summary: '', actions: [] },
+    });
+    expect(callbacks.server.request).not.toHaveBeenCalled();
+    proxy.dispose();
   });
 
   it.each([false, true])(

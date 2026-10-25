@@ -1683,12 +1683,30 @@ describe('client', () => {
     expect(bridgeMocks.apiCall).toHaveBeenCalledWith(
       'POST',
       '/varro/session/session-1/followups?directory=%2Ffixture',
-      { ...source, allowGenerate: false },
+      { ...source, allowGenerate: false, model: undefined },
       {
         signal,
         timeoutMs: 35_000,
         retries: 0,
       }
+    );
+  });
+  it('forwards the session follow-up model and reasoning as plain data', async () => {
+    const { client } = await loadClient();
+    const signal = new AbortController().signal;
+    const source = {
+      assistantMessageId: 'answer',
+      userMessageId: 'user',
+      userPrompt: 'Review',
+      answer: 'One bug remains.',
+    };
+    const model = { providerID: 'openai', modelID: 'sol', variant: 'high' };
+    await client.varro.followups('s', source, { signal, model, allowGenerate: true });
+    expect(bridgeMocks.apiCall).toHaveBeenCalledWith(
+      'POST',
+      '/varro/session/s/followups',
+      { ...source, allowGenerate: true, model },
+      { signal, timeoutMs: 35_000, retries: 0 }
     );
   });
   it('persists follow-up dismissal through the scoped host route without retries', async () => {

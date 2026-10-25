@@ -990,7 +990,7 @@ export function ModelsPanel() {
                   (!isModelRoute(routing().followupModel, menu.providerID, menu.modelID) &&
                     (state.serverStatus.state !== 'running' || state.serverStatus.apiVersion !== 2))
                 }
-                title="Suggest optional next actions after a response finishes using an additional model request. Leave unset to disable. Requires OpenCode V2."
+                title="Suggest optional next actions using an additional model request. Leave unset to use the session model and reasoning. Disable with varro.chat.followupsEnabled. Requires OpenCode V2."
                 onClick={() =>
                   void saveRouting({
                     target: 'followups',
@@ -1003,7 +1003,7 @@ export function ModelsPanel() {
                 }
               >
                 {isModelRoute(routing().followupModel, menu.providerID, menu.modelID)
-                  ? "Don't use for "
+                  ? 'Use session model for '
                   : 'Use for '}
                 <strong>follow-ups</strong>
               </button>

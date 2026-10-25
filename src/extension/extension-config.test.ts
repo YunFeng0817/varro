@@ -44,6 +44,7 @@ describe('readExtensionConfigState', () => {
       expandThinking: false,
       showTurnTimer: true,
       showEmptyStateHistogram: false,
+      followupsEnabled: true,
       debugShowQuotaWarning: false,
       debugResetWarningDays: 5,
       autoAttachProblems: true,
@@ -72,7 +73,23 @@ describe('readExtensionConfigState', () => {
     expect(readExtensionConfigState().showEmptyStateHistogram).toBe(true);
   });
 
-  it('enables follow-ups only through a user-level model assignment', () => {
+  it('defaults follow-ups to enabled and respects a user-level opt-out', () => {
+    expect(readExtensionConfigState().followupsEnabled).toBe(true);
+    mocks.values.set('varro.chat.followupsEnabled', false);
+    expect(readExtensionConfigState().followupsEnabled).toBe(false);
+    mocks.values.set('varro.chat.followupsEnabled', true);
+    expect(readExtensionConfigState().followupsEnabled).toBe(true);
+  });
+
+  it('does not let repository settings override the follow-up opt-out', () => {
+    mocks.getConfiguration.mockReturnValueOnce({
+      get: vi.fn(() => true),
+      inspect: vi.fn(() => ({ globalValue: false })),
+    });
+    expect(readExtensionConfigState().followupsEnabled).toBe(false);
+  });
+
+  it('reads follow-up model overrides only from user settings', () => {
     expect(readExtensionConfigState().followupModel).toBe('');
     mocks.values.set('varro.chat.followupModel', 'openai/fast');
     expect(readExtensionConfigState().followupModel).toBe('openai/fast');

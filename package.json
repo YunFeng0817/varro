@@ -629,13 +629,19 @@
           "patternErrorMessage": "Use provider/model, or leave the setting empty.",
           "markdownDescription": "Optional provider/model for inline prompt suggestions. Requires OpenCode V2 and a supported direct completion API with API-key authentication. Subscription/OAuth connections and unsupported APIs cannot be used, and no utility chats are created. Leave empty to disable. Suggestions send your draft and recent prompts from the current conversation to this model. Choose an eligible fast model in Varro's Models view. Tab accepts a suggestion; Escape dismisses it. Enter sends typed or accepted text."
         },
+        "varro.chat.followupsEnabled": {
+          "type": "boolean",
+          "scope": "application",
+          "default": true,
+          "markdownDescription": "Suggest optional next actions after completed Build responses. Requires OpenCode V2 stateless generation. Sends the current request and final answer for additional inference, which may consume paid tokens or subscription quota. Disable to opt out."
+        },
         "varro.chat.followupModel": {
           "type": "string",
           "scope": "application",
           "default": "",
           "pattern": "^$|^[^/\\s]+/[^\\s]+$",
           "patternErrorMessage": "Use provider/model, or leave the setting empty.",
-          "markdownDescription": "Optional provider/model for Follow-ups. Suggests zero to three next actions after a new response finishes. Leave empty to disable, or choose Use for follow-ups in Varro's Models view. Requires OpenCode V2 stateless generation. Each eligible response sends its request and final answer to this model for an additional inference, which may use paid tokens or subscription quota. Selecting an action previews an editable prompt; Send starts normal agent work with unchanged permissions."
+          "markdownDescription": "Optional provider/model override for follow-ups. Leave empty to use the current session's model and reasoning, or choose Use for follow-ups in Varro's Models view. Disable varro.chat.followupsEnabled to opt out. Hover an action to preview its prompt; click to send immediately with unchanged permissions, draft, and attachments."
         },
         "varro.chat.autoRenameUntitledSessions": {
           "type": "boolean",

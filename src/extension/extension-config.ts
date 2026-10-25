@@ -22,6 +22,7 @@ export function readExtensionConfigState(
     // Never let a repository opt the user into network requests through workspace settings.
     remoteImages: parseRemoteImageMode(config.inspect?.('chat.remoteImages')?.globalValue),
     promptCompletionModel: config.get<string>('chat.promptCompletionModel', ''),
+    followupsEnabled: readFollowupsEnabled(config),
     followupModel: readFollowupModel(config),
     debugShowQuotaWarning: config.get<boolean>('debug.showQuotaWarning', false),
     debugResetWarningDays: readResetWarningDays(config),
@@ -38,7 +39,13 @@ export function readExtensionConfigState(
   };
 }
 
-/** Only a user assignment may opt into additional inference, never a repository setting. */
+/** Repository settings must not override the user's follow-up preferences. */
+export function readFollowupsEnabled(
+  config: vscode.WorkspaceConfiguration = vscode.workspace.getConfiguration('varro')
+): boolean {
+  return config.inspect?.<boolean>('chat.followupsEnabled')?.globalValue !== false;
+}
+
 export function readFollowupModel(
   config: vscode.WorkspaceConfiguration = vscode.workspace.getConfiguration('varro')
 ): string {

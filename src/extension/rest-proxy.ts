@@ -53,7 +53,12 @@ import { diagnosticTimeline } from './diagnostics';
 import { projectDeferredPart, projectPartAttachments } from './message-content';
 import { ImageThumbnails } from './image-thumbnails';
 import { RemoteImages } from './remote-images';
-import { readExtensionConfigState, readFollowupModel } from './extension-config';
+import {
+  readExtensionConfigState,
+  readFollowupModel,
+  readFollowupsEnabled,
+} from './extension-config';
+import { parseSelectedModel } from '../shared/model-preferences';
 import { ModelPricingCatalog } from './model-pricing';
 import type { ProviderLimitService } from './provider-limit-service';
 import type { PinnedSessionManager } from './pinned-session-manager';
@@ -506,7 +511,10 @@ export class RestProxy {
 
   constructor(private readonly callbacks: RestProxyCallbacks) {
     this.remoteImageConfigSubscription = vscode.workspace.onDidChangeConfiguration?.((event) => {
-      if (event.affectsConfiguration('varro.chat.followupModel'))
+      if (
+        event.affectsConfiguration('varro.chat.followupModel') ||
+        event.affectsConfiguration('varro.chat.followupsEnabled')
+      )
         FollowupService.forServer(callbacks.server, callbacks.followupPersistence).invalidate();
       if (
         event.affectsConfiguration('varro.chat.remoteImages') &&
@@ -1198,7 +1206,9 @@ export class RestProxy {
         /^\/varro\/session\/[^/]+\/followups(?:\/dismiss)?$/.test(requestPathname)
       ) {
         const modelRef = readFollowupModel();
-        const model = parseModelRoute(modelRef);
+        const model = modelRef
+          ? parseModelRoute(modelRef)
+          : parseSelectedModel(asRecord(payload.body)?.model);
         const source = parseFollowupSource(payload.body);
         if (!source) throw new Error('Invalid follow-ups source');
         const service = FollowupService.forServer(
@@ -1217,7 +1227,10 @@ export class RestProxy {
           return;
         }
         const data =
-          model && directSessionID && !this.isHiddenSession(directSessionID)
+          readFollowupsEnabled() &&
+          model &&
+          directSessionID &&
+          !this.isHiddenSession(directSessionID)
             ? await service.suggest({
                 sessionId: directSessionID,
                 source,
@@ -1225,7 +1238,7 @@ export class RestProxy {
                 directory: scopedWorkspaceDirectory ?? this.getCurrentWorkspacePath(),
                 signal: requestSignal,
                 allowGenerate: asRecord(payload.body)?.allowGenerate === true,
-                isModelCurrent: () => readFollowupModel() === modelRef,
+                isModelCurrent: () => readFollowupsEnabled() && readFollowupModel() === modelRef,
               })
             : EMPTY_FOLLOWUP_SUGGESTIONS;
         this.callbacks.postApiResponse(requestGeneration, { id: payload.id, data });

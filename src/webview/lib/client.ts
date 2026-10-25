@@ -835,7 +835,12 @@ export const client = {
     async followups(
       sessionId: string,
       source: FollowupSource,
-      options: { signal: AbortSignal; directory?: string; allowGenerate?: boolean }
+      options: {
+        signal: AbortSignal;
+        directory?: string;
+        allowGenerate?: boolean;
+        model?: ChatModelSelection | null;
+      }
     ): Promise<FollowupSuggestionSet> {
       return apiCall(
         'POST',
@@ -843,7 +848,17 @@ export const client = {
           `${VARRO_API_ENDPOINTS.session}/${encodeURIComponent(sessionId)}/followups`,
           options.directory
         ),
-        { ...source, allowGenerate: options.allowGenerate === true },
+        {
+          ...source,
+          allowGenerate: options.allowGenerate === true,
+          model: options.model
+            ? {
+                providerID: options.model.providerID,
+                modelID: options.model.modelID,
+                variant: options.model.variant,
+              }
+            : undefined,
+        },
         { signal: options.signal, timeoutMs: FOLLOWUP_REQUEST_TIMEOUT_MS, retries: 0 }
       );
     },

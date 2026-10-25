@@ -91,6 +91,22 @@ function setup() {
 }
 
 describe('FollowupService', () => {
+  it('preserves the selected reasoning variant in stateless generation', async () => {
+    const { server, request, input } = setup();
+    expect(
+      await new FollowupService(server).suggest({
+        ...input,
+        model: { ...input.model, variant: 'high' },
+      })
+    ).toEqual(suggestions);
+    expect(request).toHaveBeenCalledWith(
+      'POST',
+      '/api/experimental/generate',
+      expect.objectContaining({ model: { providerID: 'provider', id: 'small', variant: 'high' } }),
+      expect.any(Object)
+    );
+  });
+
   it('requests actions ordered by recommendation, considering relevance, impact, and prerequisites', async () => {
     const { server, request, input } = setup();
     expect(await new FollowupService(server).suggest(input)).toEqual(suggestions);
