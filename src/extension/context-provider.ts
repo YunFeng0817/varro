@@ -892,6 +892,12 @@ export class ContextProvider implements vscode.Disposable {
         return 'opened';
       }
 
+      if (options?.line === undefined || options.line < 1) {
+        // Let registered editors handle images and other non-text response files.
+        await vscode.commands.executeCommand('vscode.open', uri, { preview: false });
+        return 'opened';
+      }
+
       const doc = await vscode.workspace.openTextDocument(uri);
       const editor = await vscode.window.showTextDocument(doc, { preview: false });
       if (options?.line !== undefined && options.line >= 1) {
