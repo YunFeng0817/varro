@@ -1921,6 +1921,14 @@ const API_ROUTES: ApiRoute[] = [
   ),
   route(`${VARRO_API_ENDPOINTS.session}/:id/activate`, methodsNoQuery('POST')),
   route(
+    `${VARRO_API_ENDPOINTS.session}/:id/followups`,
+    ({ method, url }) => method === 'POST' && optionalDirectoryQuery(url)
+  ),
+  route(
+    `${VARRO_API_ENDPOINTS.session}/:id/followups/dismiss`,
+    ({ method, url }) => method === 'POST' && optionalDirectoryQuery(url)
+  ),
+  route(
     `${VARRO_API_ENDPOINTS.session}/:id/pin`,
     ({ method, url }) => method === 'POST' && optionalDirectoryQuery(url)
   ),

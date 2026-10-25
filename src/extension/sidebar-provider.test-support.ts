@@ -321,6 +321,7 @@ beforeEach(async () => {
   mocks.vscode.workspace.workspaceFolders = [{ name: 'repo', uri: { fsPath: '/repo' }, index: 0 }];
   mocks.vscode.workspace.getConfiguration.mockReset();
   mocks.vscode.workspace.getConfiguration.mockImplementation(() => ({
+    inspect: vi.fn((key: string) => ({ globalValue: mocks.configurationValues.get(key) })),
     get: vi.fn((key: string, fallback?: unknown) =>
       mocks.configurationValues.has(key) ? mocks.configurationValues.get(key) : fallback
     ),

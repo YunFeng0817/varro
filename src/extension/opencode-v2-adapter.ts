@@ -22,6 +22,7 @@ import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { asRecord, isBoolean, isNumber, isString, type UnknownRecord } from '../shared/type-utils';
+import { parseFollowupTitle } from '../shared/followups';
 import { compareVersions, extractVersion } from './server-utils';
 import { withStartupDeadline } from '../shared/startup';
 import { parseSkillAttachment } from '../shared/skill-reference';
@@ -1381,6 +1382,11 @@ export class OpenCodeV2Adapter {
               { value: input.system }
             );
           }
+          const followupTitle = parseFollowupTitle(input.followupTitle);
+          const metadata: UnknownRecord = {};
+          if (input.delivery === 'steer' || input.delivery === 'queue')
+            metadata.varroDelivery = input.delivery;
+          if (followupTitle) metadata.varroFollowupTitle = followupTitle;
           const payload = {
             id: input.messageID,
             text: action === 'command' ? (input.arguments ?? text) : text,
@@ -1394,10 +1400,7 @@ export class OpenCodeV2Adapter {
             // Keep the prompt with pending context, including Plan mode's synthetic reminder.
             // Queuing by default lets the reminder run as a separate provider turn.
             delivery: input.delivery === 'queue' ? 'queue' : 'steer',
-            metadata:
-              input.delivery === 'steer' || input.delivery === 'queue'
-                ? { varroDelivery: input.delivery }
-                : undefined,
+            metadata: Object.keys(metadata).length ? metadata : undefined,
             resume: input.noReply ? false : undefined,
           };
           if (action === 'command') {

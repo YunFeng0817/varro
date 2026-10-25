@@ -394,6 +394,25 @@ describe('error-details virtualization signatures', () => {
 });
 
 describe('bordered message projection', () => {
+  it('treats follow-up labels as unbordered action chrome without changing message or part identities', () => {
+    const message = {
+      info: { ...userMessage('followup'), followupTitle: 'Fix parser failures' },
+      parts: [textPart('followup-text', 'Fix only the reported parser failures.')],
+    };
+    const boundaries = getMessageBlockBoundaryMap([message], new Map(), {
+      expandedActivityGroup: () => false,
+      renderEmptyMessageIds: new Set(),
+      showThinking: true,
+    });
+    expect(boundaries.get('followup')).toEqual({
+      startsBordered: false,
+      endsBordered: false,
+      signature: 'user:content:u:u',
+    });
+    expect(message.info.id).toBe('followup');
+    expect(message.parts[0]?.id).toBe('followup-text');
+    expect(message.parts[0]).toMatchObject({ text: 'Fix only the reported parser failures.' });
+  });
   it('distinguishes bordered cards from prose and row chrome', () => {
     const messages: MessageEntry[] = [
       { info: userMessage('user-1'), parts: [textPart('user-text', 'Prompt')] },

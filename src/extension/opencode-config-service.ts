@@ -16,6 +16,7 @@ import type { OpenCodeModelRouting } from '../shared/protocol';
 import { VARRO_VISION_AGENT_DESCRIPTION, VARRO_VISION_AGENT_PROMPT } from '../shared/vision-agent';
 import { isSameWorkspacePath, normalizeWorkspaceIdentity } from '../shared/workspace-path';
 import { logger } from './logger';
+import { readFollowupModel } from './extension-config';
 import { v1Action, v2Action } from './opencode-v2-projection';
 import { getOpenCodeApiCapabilities } from './opencode-api-capabilities';
 import type { OpenCodeServer } from './server';
@@ -29,7 +30,13 @@ export type OpenCodeConfigRequest =
   | { kind: 'get' }
   | {
       kind: 'update';
-      target: 'small_model' | 'agent' | 'commit_message' | 'auto_approve' | 'prompt_completion';
+      target:
+        | 'small_model'
+        | 'agent'
+        | 'commit_message'
+        | 'auto_approve'
+        | 'prompt_completion'
+        | 'followups';
       providerID: string;
       modelID: string;
       agentName?: string;
@@ -141,13 +148,16 @@ export class OpenCodeConfigService {
     }
 
     const extensionConfig = vscode.workspace.getConfiguration('varro');
-    return {
+    const routing: OpenCodeModelRouting = {
       smallModel,
       agentModels,
       commitMessageModel: parseModelRoute(extensionConfig.get('commitMessage.model')),
       autoApproveModel: parseModelRoute(extensionConfig.get('chat.autoApproveModel')),
       promptCompletionModel: parseModelRoute(extensionConfig.get('chat.promptCompletionModel')),
     };
+    const followupModel = parseModelRoute(readFollowupModel(extensionConfig));
+    if (followupModel) routing.followupModel = followupModel;
+    return routing;
   }
 
   async readOpenCodeModelRouting(): Promise<OpenCodeModelRouting> {
@@ -224,14 +234,17 @@ export class OpenCodeConfigService {
     if (
       request.target === 'commit_message' ||
       request.target === 'auto_approve' ||
-      request.target === 'prompt_completion'
+      request.target === 'prompt_completion' ||
+      request.target === 'followups'
     ) {
       const key =
         request.target === 'commit_message'
           ? 'commitMessage.model'
           : request.target === 'prompt_completion'
             ? 'chat.promptCompletionModel'
-            : 'chat.autoApproveModel';
+            : request.target === 'followups'
+              ? 'chat.followupModel'
+              : 'chat.autoApproveModel';
       await vscode.workspace
         .getConfiguration('varro')
         .update(

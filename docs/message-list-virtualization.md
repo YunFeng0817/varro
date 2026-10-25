@@ -302,6 +302,9 @@ the shared invariants below remain true.
   history anchoring, edit visibility, or a direct user gesture.
 - Programmatic settling must be bounded and conditional. Do not repeatedly call `scrollIntoView()`
   when the target is already aligned.
+- Sticky navigation refreshes its remembered detached anchor after final alignment settles. Virtual
+  core measurement can move the initial destination; retaining that earlier offset makes the next
+  width resize restore a stale position. `scroll-sticky-reflow.spec.ts` covers this handoff.
 - Deferred bottom corrections retain the direct-input epoch as well as the session/request identity.
   A newer gesture cancels a queued forced correction even when the original request ID is unchanged.
 - User interaction with the destination cancels navigation settling before editing or attachment
@@ -487,6 +490,10 @@ Direct input acquires ownership only when it can affect the transcript:
   enough trailing reserve to make that destination reachable. Assistant growth consumes that reserve
   while direct transcript input cancels destination settling. Measured appends retain their
   viewport-only transition so provisional row reconciliation cannot create a large jump.
+- Steering, including a queued message sent as a steer, preserves the current follow owner rather
+  than issuing a send-time jump. An admitted steering card releases a retained activity-summary
+  anchor so bottom-follow can reveal it. A reader detached before steering or while admission is
+  pending stays detached; neither admission nor queue removal may reattach them.
 - A first turn that already fits at scroll position zero keeps that position without an alignment
   reserve. Track `min-height` can hide a small unreachable target, and repeated reconciliation then
   accumulates blank reserve until the scrollbar appears. `scroll-short-transcript.spec.ts` covers
@@ -505,6 +512,10 @@ Direct input acquires ownership only when it can affect the transcript:
 - The append reserve is general bottom-pinned flow geometry, not only activity-exit state. It may
   replace space lost from trays, todo collapse, external panels, or local container changes. Real
   appended growth consumes it while its original bottom target remains fixed.
+- Removing a message block below a detached reader must reserve any scroll-range shortfall before
+  removal, without arming a bottom-follow or collapse scroll owner. Dismissing follow-ups near the
+  bottom otherwise clamps the already-painted answer backward. `followups.spec.ts` checks both
+  viewport preservation and subsequent native upward movement at narrow and wide widths.
 - Reserve consumption accounts for pending row-rounding reductions. A queued tool entering a freed
   tray slot can otherwise consume the last reserved pixel before a deferred correction removes it,
   clamping the viewport backward. A deferred rounding write must recreate the required reserve even
@@ -595,6 +606,34 @@ Direct input acquires ownership only when it can affect the transcript:
   through background notices and continuation loading, and mark only the settled continuation.
   Earlier completed turns keep their markers while a new turn runs. `MessageList.rendering.test.ts`
   covers busy, retry, local loading, child execution, streaming, and background handoffs.
+- Follow-ups use that same settled final-response identity. New inference requires an observed
+  unfinished assistant or new live prompt, or an unread opening captured before acknowledging it.
+  Unread eligibility compares answer completion with the previous seen timestamp. A busy snapshot
+  alone, an idle read-history load, or a virtual row mount must never admit inference.
+  Cache-only retrieval restores current suggestions without model calls. The host persists admission
+  before inference and caches results, abstentions, failures, and explicit dismissals across reloads.
+  Navigation and invalidation do not persist dismissal; closing the card or an accepted action does.
+  An accepted new turn clears prior suggestion contents and retires pending results for that session,
+  retaining only bounded admission metadata. Rejected sends do not clear the cache.
+  Only source responses explicitly identified as Build are eligible, in both the webview and host.
+  The model supplies a bounded plain-text summary with zero to three title/prompt pairs; prompt hints
+  use the shared tooltip component, and the close control uses the shared icon.
+  Suggestions are optional post-message flow chrome outside row-only prefixes. Arrival leaves focus
+  and detached anchors unchanged; dismissal reserves disappearing space through the existing block
+  removal handler. Clicking an action sends its prompt immediately without a confirmation dialog,
+  using the normal session-targeted send path while preserving the main draft and attachments.
+  Remove the suggestion card in the same optimistic-publication batch that inserts its compact
+  action row, not after network admission. On rejection, restore it only while the original source
+  and view still own the send; do not persist dismissal until admission succeeds.
+  Sent follow-ups use the same compact play-icon action styling as Implement the plan, showing only
+  the generated title instead of an editable user prompt bubble. Explicit `followupTitle` attribution
+  travels with the optimistic message and native V2 metadata, surviving inbox delivery and history
+  reloads. The full text remains the model input. Follow-up actions do not receive prompt numbers,
+  sticky prompt ownership, navigation dots, composer-history entries, or user edit controls. Never
+  infer action attribution from matching prompt text or hide attached content under an action label.
+  Pending sends disable the card buttons; rejected sends retain the card with an inline retryable
+  error and do not persist dismissal. Model, workspace, session, source text,
+  pending input, editing, or renewed work invalidates suggestions without automatic retry.
 - A terminal parent response does not finish the turn while any descendant session is busy or retrying.
   Suppress the trailing Worked summary, including a retained summary, until those sessions settle.
   Keep the existing loading slot and the composer's subagent-waiting status. Show that status when

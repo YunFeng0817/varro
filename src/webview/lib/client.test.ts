@@ -1667,6 +1667,46 @@ describe('client', () => {
       }
     );
   });
+  it('keeps the follow-up bridge deadline longer than generation and forwards cancellation without retries', async () => {
+    const { client } = await loadClient();
+    const signal = new AbortController().signal;
+    const source = {
+      assistantMessageId: 'answer',
+      userMessageId: 'user',
+      userPrompt: 'Review the changes',
+      answer: 'Found two actionable defects.',
+    };
+    bridgeMocks.apiCall.mockResolvedValue({ summary: '', actions: [] });
+    expect(
+      await client.varro.followups('session-1', source, { signal, directory: '/fixture' })
+    ).toEqual({ summary: '', actions: [] });
+    expect(bridgeMocks.apiCall).toHaveBeenCalledWith(
+      'POST',
+      '/varro/session/session-1/followups?directory=%2Ffixture',
+      { ...source, allowGenerate: false },
+      {
+        signal,
+        timeoutMs: 35_000,
+        retries: 0,
+      }
+    );
+  });
+  it('persists follow-up dismissal through the scoped host route without retries', async () => {
+    const { client } = await loadClient();
+    const source = {
+      assistantMessageId: 'a',
+      userMessageId: 'u',
+      userPrompt: 'Review',
+      answer: 'One bug remains',
+    };
+    await client.varro.dismissFollowups('s', source, '/fixture');
+    expect(bridgeMocks.apiCall).toHaveBeenCalledWith(
+      'POST',
+      '/varro/session/s/followups/dismiss?directory=%2Ffixture',
+      source,
+      { retries: 0 }
+    );
+  });
   it('queries prompt completion eligibility without sending any credentials', async () => {
     const { client } = await loadClient();
     const availability = { 'meta/fast': { available: true } };

@@ -135,6 +135,27 @@ describe('MessageList prompt numbers', () => {
     ]);
   });
 
+  it('does not count generated follow-up actions as user prompts or navigation dots', () => {
+    const messages = [
+      { info: userMessage('user-1'), parts: [textPart('first', 'Review the parser')] },
+      { info: assistantMessage('review'), parts: [textPart('review-text', 'One bug remains')] },
+      {
+        info: { ...userMessage('followup'), followupTitle: 'Fix reported issue' },
+        parts: [textPart('followup-text', 'Fix only the reported parser bug.')],
+      },
+      { info: assistantMessage('fix'), parts: [] },
+      { info: userMessage('user-2'), parts: [textPart('second', 'Explain the fix')] },
+    ];
+    expect([...getPromptNumberMap(messages)]).toEqual([
+      ['user-1', 1],
+      ['user-2', 2],
+    ]);
+    expect(getUserMessageNavigationPreviews(messages).map(({ id }) => id)).toEqual([
+      'user-1',
+      'user-2',
+    ]);
+  });
+
   it('skips compaction, empty, and resume entries without consuming numbers or navigation dots', () => {
     const messages: MessageEntry[] = [
       { info: userMessage('user-1'), parts: [textPart('first', 'First prompt')] },

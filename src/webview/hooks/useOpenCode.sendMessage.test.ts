@@ -1573,73 +1573,79 @@ describe('sendMessage', () => {
     expect(stateModule.error()).toBe('Plan content is empty');
   });
 
-  it('retries the original request and attachments after an authentication failure', async () => {
-    const { stateModule, hookModule } = await loadModules();
-    const failedAssistant = assistantMessage('assistant-1', 'user-1');
-    if (failedAssistant.role !== 'assistant') {
-      throw new Error('Expected an assistant message fixture');
-    }
+  it.each([undefined, 'Inspect parser failures'])(
+    'retries the original request and attachments with attribution %s after an authentication failure',
+    async (followupTitle) => {
+      const { stateModule, hookModule } = await loadModules();
+      const failedAssistant = assistantMessage('assistant-1', 'user-1');
+      const originalUser = userMessage('user-1');
+      if (originalUser.role !== 'user') throw new Error('Expected a user message fixture');
+      if (failedAssistant.role !== 'assistant') {
+        throw new Error('Expected an assistant message fixture');
+      }
 
-    stateModule.setState('activeSessionId', 'session-1');
-    stateModule.setState('messages', [
-      {
-        info: userMessage('user-1'),
+      stateModule.setState('activeSessionId', 'session-1');
+      stateModule.setState('messages', [
+        {
+          info: { ...originalUser, followupTitle },
+          parts: [
+            {
+              id: 'text-1',
+              sessionID: 'session-1',
+              messageID: 'user-1',
+              type: 'text',
+              text: 'Describe what to build',
+            },
+            {
+              id: 'file-1',
+              sessionID: 'session-1',
+              messageID: 'user-1',
+              type: 'file',
+              mime: 'image/png',
+              filename: 'image.png',
+              url: 'blob:1',
+            },
+          ],
+        },
+        {
+          info: {
+            ...failedAssistant,
+            error: {
+              name: 'ProviderAuthError',
+              data: { providerID: 'openai', message: 'Unauthorized' },
+            },
+          },
+          parts: [],
+        },
+      ]);
+
+      clientMocks.sessionSendAsync.mockResolvedValue(undefined);
+      clientMocks.sessionGet.mockResolvedValue(session());
+      clientMocks.sessionMessages.mockResolvedValue([]);
+      clientMocks.sessionStatus.mockResolvedValue({ 'session-1': { type: 'busy' } });
+
+      await hookModule.retryMessage('assistant-1');
+
+      expect(clientMocks.sessionSendAsync).toHaveBeenCalledWith('session-1', {
         parts: [
           {
-            id: 'text-1',
-            sessionID: 'session-1',
-            messageID: 'user-1',
             type: 'text',
             text: 'Describe what to build',
           },
           {
-            id: 'file-1',
-            sessionID: 'session-1',
-            messageID: 'user-1',
             type: 'file',
             mime: 'image/png',
             filename: 'image.png',
             url: 'blob:1',
           },
         ],
-      },
-      {
-        info: {
-          ...failedAssistant,
-          error: {
-            name: 'ProviderAuthError',
-            data: { providerID: 'openai', message: 'Unauthorized' },
-          },
-        },
-        parts: [],
-      },
-    ]);
-
-    clientMocks.sessionSendAsync.mockResolvedValue(undefined);
-    clientMocks.sessionGet.mockResolvedValue(session());
-    clientMocks.sessionMessages.mockResolvedValue([]);
-    clientMocks.sessionStatus.mockResolvedValue({ 'session-1': { type: 'busy' } });
-
-    await hookModule.retryMessage('assistant-1');
-
-    expect(clientMocks.sessionSendAsync).toHaveBeenCalledWith('session-1', {
-      parts: [
-        {
-          type: 'text',
-          text: 'Describe what to build',
-        },
-        {
-          type: 'file',
-          mime: 'image/png',
-          filename: 'image.png',
-          url: 'blob:1',
-        },
-      ],
-      agent: 'build',
-      model: { providerID: 'openai', modelID: 'gpt-4o' },
-      variant: undefined,
-    });
-  });
+        agent: 'build',
+        model: { providerID: 'openai', modelID: 'gpt-4o' },
+        variant: undefined,
+        followupTitle,
+      });
+    }
+  );
 
   it('reports a missing original request instead of sending a recovery prompt', async () => {
     const { stateModule, hookModule } = await loadModules();

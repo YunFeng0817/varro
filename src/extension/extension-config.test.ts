@@ -72,6 +72,17 @@ describe('readExtensionConfigState', () => {
     expect(readExtensionConfigState().showEmptyStateHistogram).toBe(true);
   });
 
+  it('enables follow-ups only through a user-level model assignment', () => {
+    expect(readExtensionConfigState().followupModel).toBe('');
+    mocks.values.set('varro.chat.followupModel', 'openai/fast');
+    expect(readExtensionConfigState().followupModel).toBe('openai/fast');
+    mocks.getConfiguration.mockReturnValueOnce({
+      get: vi.fn(() => 'openai/from-repository'),
+      inspect: vi.fn(() => ({ globalValue: undefined })),
+    });
+    expect(readExtensionConfigState().followupModel).toBe('');
+  });
+
   it('defaults to ask and reads automatic loading only from application settings', () => {
     expect(readExtensionConfigState().remoteImages).toBe('ask');
     mocks.values.set('varro.chat.remoteImages', 'on');

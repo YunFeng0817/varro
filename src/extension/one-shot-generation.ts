@@ -14,6 +14,7 @@ export async function tryGenerateOneShot(
     model: ChatModelSelection | null;
     directory?: string;
     signal: AbortSignal;
+    maxResponseBytes?: number;
   }
 ): Promise<{ text: string } | null> {
   if (server.apiVersion !== 2) return null;
@@ -33,6 +34,11 @@ export async function tryGenerateOneShot(
   input.signal.throwIfAborted();
   let response;
   try {
+    const options: NonNullable<Parameters<OpenCodeServer['request']>[3]> = {
+      directory: input.directory,
+      signal: input.signal,
+    };
+    if (input.maxResponseBytes) options.maxResponseBytes = input.maxResponseBytes;
     response = await server.request(
       'POST',
       GENERATE_PATH,
@@ -46,7 +52,7 @@ export async function tryGenerateOneShot(
             }
           : null,
       },
-      { directory: input.directory, signal: input.signal }
+      options
     );
   } catch (error) {
     input.signal.throwIfAborted();

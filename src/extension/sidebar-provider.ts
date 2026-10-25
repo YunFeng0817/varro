@@ -287,6 +287,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private mermaidPreviewMaximized = false;
   private mermaidPreviewLayoutQueue: Promise<void> = Promise.resolve();
   private readonly contextProvider: ContextProvider;
+  private readonly followupPersistence: HostPersistence;
   private readonly generatedDependencyTreeGuard: GeneratedDependencyTreeGuard;
   private readonly workspaceSessionStatusCoordinator = new WorkspaceSessionStatusCoordinator();
   private readonly endpoints = new Set<WebviewEndpoint>();
@@ -367,6 +368,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         ? (extensionPackageJson as { version: string }).version
         : 'unknown';
     const persistence = new HostPersistence(workspaceState);
+    this.followupPersistence = persistence;
     this.serverMemoryPermissions = new ServerMemoryPermissionStore(persistence);
     this.sessionTransferCatalog = new SessionTransferCatalog(persistence);
     this.streamingText = new StreamingTextCache(persistence);
@@ -679,6 +681,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         event.affectsConfiguration('varro.chat.showEmptyStateHistogram') ||
         event.affectsConfiguration('varro.chat.remoteImages') ||
         event.affectsConfiguration('varro.chat.promptCompletionModel') ||
+        event.affectsConfiguration('varro.chat.followupModel') ||
         event.affectsConfiguration('varro.debug.showQuotaWarning') ||
         event.affectsConfiguration('varro.debug.resetWarningDays') ||
         event.affectsConfiguration('varro.chat.autoAttachProblems') ||
@@ -815,6 +818,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     const restProxy = new RestProxy({
       restoreStreamingText: (info, parts) => this.streamingText.restore(info, parts),
       server: endpointServer,
+      followupPersistence: this.followupPersistence,
       workspaceSessionStatusCoordinator: this.workspaceSessionStatusCoordinator,
       contextProvider: this.contextProvider,
       providerLimitService: this.providerLimitService,

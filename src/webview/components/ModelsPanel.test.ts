@@ -2197,6 +2197,8 @@ describe('ModelsPanel', () => {
     ['small_model', "Don't use as small model", true, undefined],
     ['commit_message', 'Use for commit messages', false, undefined],
     ['commit_message', "Don't use for commit messages", true, undefined],
+    ['followups', 'Use for follow-ups', false, undefined],
+    ['followups', "Don't use for follow-ups", true, undefined],
     ['auto_approve', 'Use for auto-approve', false, undefined],
     ['auto_approve', "Don't use for auto-approve", true, undefined],
     ['prompt_completion', 'Use for prompt completion', false, undefined],
@@ -2210,9 +2212,11 @@ describe('ModelsPanel', () => {
       commitMessageModel: route,
       autoApproveModel: route,
       promptCompletionModel: route,
+      followupModel: route,
       agentModels: route ? { review: route } : {},
     };
     clientMocks.openCodeConfig.mockResolvedValue(savedRouting);
+    setState('serverStatus', { state: 'running', url: 'mock://opencode', apiVersion: 2 });
     let resolveSave!: (value: typeof savedRouting) => void;
     clientMocks.saveModelRouting.mockImplementation(
       () => new Promise<typeof savedRouting>((resolve) => (resolveSave = resolve))
@@ -2497,6 +2501,7 @@ describe('ModelsPanel', () => {
     ['commitMessageModel', 'Commit message model'],
     ['autoApproveModel', 'Auto-approve model'],
     ['promptCompletionModel', 'Prompt completion model'],
+    ['followupModel', 'Follow-ups model'],
     ['agentModels', 'Agent model: vision'],
   ])('expands a hidden provider with a %s routing tag', async (target, label) => {
     const route = { providerID: 'openai', modelID: 'gpt-5-mini' };
@@ -2512,6 +2517,9 @@ describe('ModelsPanel', () => {
     expect(section?.querySelector('.models-chevron')?.classList.contains('expanded')).toBe(true);
     expect(section?.querySelectorAll('.models-model-row')).toHaveLength(2);
     expect(section?.querySelector(`[aria-label="${label}"]`)).not.toBeNull();
+    if (target === 'followupModel') {
+      expect(section?.querySelector(`[aria-label="${label}"]`)?.textContent).toBe('followup');
+    }
     expect(section?.querySelector('.models-provider-hidden-marker')?.textContent).toBe('Hidden');
     expect(state.hiddenProviders).toEqual(['openai']);
     expect(state.hiddenModels).toEqual(['openai:gpt-5', 'openai:gpt-5-mini']);

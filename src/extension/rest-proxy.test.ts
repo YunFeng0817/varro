@@ -55,6 +55,7 @@ import { OpenCodeResponseTooLargeError } from './open-code-transport';
 import { OpenCodeV2Adapter } from './opencode-v2-adapter';
 import { HiddenSessionManager } from './hidden-session-manager';
 import { PromptCompletionService } from './prompt-completion-service';
+import { FollowupService } from './followup-service';
 import { QueuedMessageStore } from './queued-message-store';
 import { SessionStateManager } from './session-state-manager';
 import { ServerMemoryPermissionStore } from './server-memory-permission-store';
@@ -814,6 +815,123 @@ describe('RestProxy handleRequest', () => {
     });
     expect(callbacks.server.request).not.toHaveBeenCalled();
   });
+
+  it('does not let a repository setting opt into follow-up inference', async () => {
+    const { proxy, callbacks } = createProxy();
+    const configuration = mocks.vscode.workspace.getConfiguration.mockReturnValue({
+      get: vi.fn(() => 'openai/repository-model'),
+      inspect: vi.fn(() => ({ globalValue: undefined })),
+    });
+    try {
+      await proxy.handleRequest(
+        makePayload(508, 'POST', '/varro/session/session-1/followups', {
+          assistantMessageId: 'a',
+          userMessageId: 'u',
+          userPrompt: 'Fix the parser',
+          answer: 'One issue remains.',
+        })
+      );
+      expect(callbacks.postApiResponse).toHaveBeenLastCalledWith(1, {
+        id: 508,
+        data: { summary: '', actions: [] },
+      });
+      expect(callbacks.server.request).not.toHaveBeenCalled();
+    } finally {
+      configuration.mockReturnValue({
+        get: vi.fn(() => undefined),
+        inspect: vi.fn(() => ({ globalValue: undefined })),
+      });
+    }
+  });
+
+  it.each([false, true])(
+    'forwards explicit follow-up admission %s to the host service',
+    async (allowGenerate) => {
+      const { proxy, callbacks } = createProxy();
+      const configuration = mocks.vscode.workspace.getConfiguration.mockReturnValue({
+        get: vi.fn(() => 'openai/small'),
+        inspect: vi.fn(() => ({ globalValue: 'openai/small' })),
+      });
+      const suggest = vi
+        .spyOn(FollowupService.forServer(callbacks.server), 'suggest')
+        .mockResolvedValue({ summary: '', actions: [] });
+      try {
+        await proxy.handleRequest(
+          makePayload(509, 'POST', '/varro/session/session-1/followups', {
+            assistantMessageId: 'a',
+            userMessageId: 'u',
+            userPrompt: 'Review',
+            answer: 'One bug remains',
+            allowGenerate,
+          })
+        );
+        expect(suggest).toHaveBeenCalledWith(
+          expect.objectContaining({ sessionId: 'session-1', allowGenerate })
+        );
+      } finally {
+        suggest.mockRestore();
+        configuration.mockReturnValue({
+          get: vi.fn(() => undefined),
+          inspect: vi.fn(() => ({ globalValue: undefined })),
+        });
+      }
+    }
+  );
+
+  it('persists dismissal through the host rather than forwarding it to OpenCode', async () => {
+    const { proxy, callbacks } = createProxy();
+    const dismiss = vi
+      .spyOn(FollowupService.forServer(callbacks.server), 'dismiss')
+      .mockResolvedValue();
+    try {
+      await proxy.handleRequest(
+        makePayload(510, 'POST', '/varro/session/session-1/followups/dismiss', {
+          assistantMessageId: 'a',
+          userMessageId: 'u',
+          userPrompt: 'Review',
+          answer: 'One bug remains',
+        })
+      );
+      expect(dismiss).toHaveBeenCalledWith(
+        expect.objectContaining({ sessionId: 'session-1', directory: '/repo' })
+      );
+      expect(callbacks.postApiResponse).toHaveBeenLastCalledWith(1, { id: 510, data: true });
+      expect(callbacks.server.request).not.toHaveBeenCalled();
+    } finally {
+      dismiss.mockRestore();
+    }
+  });
+
+  it.each([false, true])(
+    'clears the prior follow-up cache only after accepted prompts, rejected=%s',
+    async (rejected) => {
+      const { proxy, callbacks } = createProxy();
+      const clear = vi
+        .spyOn(FollowupService.forServer(callbacks.server), 'clearPreviousTurn')
+        .mockResolvedValue();
+      if (rejected)
+        vi.mocked(callbacks.server.request).mockRejectedValue(new Error('Rejected prompt'));
+      try {
+        await proxy.handleRequest(
+          makePayload(511, 'POST', '/session/session-1/prompt_async', {
+            messageID: 'next-user',
+            parts: [],
+          })
+        );
+        if (rejected) expect(clear).not.toHaveBeenCalled();
+        else
+          expect(clear).toHaveBeenCalledWith(
+            expect.objectContaining({
+              sessionId: 'session-1',
+              userMessageId: 'next-user',
+              directory: '/repo',
+            })
+          );
+      } finally {
+        clear.mockRestore();
+      }
+    }
+  );
 
   it('does not notify tests after their request generation changes', async () => {
     const { proxy, callbacks } = createProxy();

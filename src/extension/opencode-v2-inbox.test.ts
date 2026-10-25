@@ -116,6 +116,56 @@ describe('v2 pending steering history', () => {
       }
     }
   );
+  it.each([undefined, 'steer', 'queue'])(
+    'persists a clicked follow-up label with delivery %s and restores it from native history',
+    async (delivery) => {
+      const wire = vi.fn(async () => ({ data: {} }));
+      const adapter = new OpenCodeV2Adapter(wire);
+      await adapter.request('POST', '/session/ses_one/prompt_async', {
+        messageID: 'msg_followup',
+        delivery,
+        followupTitle: 'Inspect parser failures',
+        parts: [{ type: 'text', text: 'Investigate only the parser failures.' }],
+      });
+      const metadata: NonNullable<SessionMessageUser['metadata']> = {
+        varroFollowupTitle: 'Inspect parser failures',
+      };
+      if (delivery) metadata.varroDelivery = delivery;
+      expect(wire).toHaveBeenCalledWith(
+        'POST',
+        '/api/session/ses_one/prompt',
+        expect.objectContaining({ text: 'Investigate only the parser failures.', metadata }),
+        expect.anything()
+      );
+      const projected = projectV2Message({ ...delivered, metadata }, 'ses_one');
+      expect(projected.info).toMatchObject({
+        role: 'user',
+        followupTitle: 'Inspect parser failures',
+      });
+      expect(projected.parts[0]).toMatchObject({ type: 'text', text: delivered.text });
+    }
+  );
+
+  it.each(['', 'x'.repeat(41), 'Fix\nall', 1, {}])(
+    'does not trust malformed follow-up attribution %j',
+    async (title) => {
+      const wire = vi.fn(async () => ({ data: {} }));
+      await new OpenCodeV2Adapter(wire).request('POST', '/session/ses_one/prompt_async', {
+        followupTitle: title,
+        parts: [{ type: 'text', text: 'Normal prompt' }],
+      });
+      expect(wire).toHaveBeenCalledWith(
+        'POST',
+        '/api/session/ses_one/prompt',
+        expect.objectContaining({ text: 'Normal prompt', metadata: undefined }),
+        expect.anything()
+      );
+      expect(
+        projectV2Message({ ...delivered, metadata: { varroFollowupTitle: title } }, 'ses_one').info
+      ).not.toHaveProperty('followupTitle');
+    }
+  );
+
   it('restores pending prompts on reopen and keeps their identities after delivery', async () => {
     let consumed = false;
     const wire = vi.fn(async (_method: string, path: string) => {

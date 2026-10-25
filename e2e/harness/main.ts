@@ -6338,6 +6338,9 @@ async function handleApiRequest(
       }
     );
     const assistantId = assistantMessage.info.id;
+    if (userMessage.info.role === 'user' && typeof payload.followupTitle === 'string') {
+      userMessage.info.followupTitle = payload.followupTitle;
+    }
     if (simulateStalePromptSync) {
       dispatchToWebview({
         type: 'server/event',

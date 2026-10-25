@@ -53,7 +53,7 @@ import { diagnosticTimeline } from './diagnostics';
 import { projectDeferredPart, projectPartAttachments } from './message-content';
 import { ImageThumbnails } from './image-thumbnails';
 import { RemoteImages } from './remote-images';
-import { readExtensionConfigState } from './extension-config';
+import { readExtensionConfigState, readFollowupModel } from './extension-config';
 import { ModelPricingCatalog } from './model-pricing';
 import type { ProviderLimitService } from './provider-limit-service';
 import type { PinnedSessionManager } from './pinned-session-manager';
@@ -81,6 +81,9 @@ import { FULL_SESSION_LIST_LIMIT, FULL_SESSION_LIST_PATH } from './util/session-
 import { WorkspaceSessionStatusCoordinator } from './workspace-session-status-coordinator';
 import { OpenCodeConfigService, type OpenCodeConfigRequest } from './opencode-config-service';
 import { PromptCompletionService } from './prompt-completion-service';
+import { FollowupService } from './followup-service';
+import type { Persistence } from '../shared/persistence';
+import { EMPTY_FOLLOWUP_SUGGESTIONS, parseFollowupSource } from '../shared/followups';
 import {
   parsePromptCompletionRequest,
   parsePromptCompletionTestRequest,
@@ -303,12 +306,13 @@ export { scopeOpenCodeRequest, getOpenCodeDirectoryHeaders } from './util/openco
 export { resolveOpenCodeProjectConfigPaths } from './opencode-config-service';
 
 export interface RestProxyCallbacks {
+  followupPersistence?: Persistence;
   restoreStreamingText?(
     info: Record<string, unknown>,
     parts: Record<string, unknown>[]
   ): Record<string, unknown>[];
   server: Pick<OpenCodeServer, 'apiVersion' | 'getWorkspaceCwd' | 'request'> &
-    Partial<Pick<OpenCodeServer, 'isAttachOnly'>>;
+    Partial<Pick<OpenCodeServer, 'isAttachOnly' | 'url'>>;
   contextProvider: Pick<
     ContextProvider,
     'context' | 'getOpenWorkspaceRoot' | 'readFile' | 'resolvePath'
@@ -502,6 +506,8 @@ export class RestProxy {
 
   constructor(private readonly callbacks: RestProxyCallbacks) {
     this.remoteImageConfigSubscription = vscode.workspace.onDidChangeConfiguration?.((event) => {
+      if (event.affectsConfiguration('varro.chat.followupModel'))
+        FollowupService.forServer(callbacks.server, callbacks.followupPersistence).invalidate();
       if (
         event.affectsConfiguration('varro.chat.remoteImages') &&
         readExtensionConfigState().remoteImages !== 'on'
@@ -1187,6 +1193,44 @@ export class RestProxy {
         payload.path,
         payload.body
       );
+      if (
+        method === 'POST' &&
+        /^\/varro\/session\/[^/]+\/followups(?:\/dismiss)?$/.test(requestPathname)
+      ) {
+        const modelRef = readFollowupModel();
+        const model = parseModelRoute(modelRef);
+        const source = parseFollowupSource(payload.body);
+        if (!source) throw new Error('Invalid follow-ups source');
+        const service = FollowupService.forServer(
+          this.callbacks.server,
+          this.callbacks.followupPersistence
+        );
+        if (requestPathname.endsWith('/dismiss')) {
+          if (!directSessionID || this.isHiddenSession(directSessionID))
+            throw new Error('404 Session not found');
+          await service.dismiss({
+            sessionId: directSessionID,
+            source,
+            directory: scopedWorkspaceDirectory ?? this.getCurrentWorkspacePath(),
+          });
+          this.callbacks.postApiResponse(requestGeneration, { id: payload.id, data: true });
+          return;
+        }
+        const data =
+          model && directSessionID && !this.isHiddenSession(directSessionID)
+            ? await service.suggest({
+                sessionId: directSessionID,
+                source,
+                model,
+                directory: scopedWorkspaceDirectory ?? this.getCurrentWorkspacePath(),
+                signal: requestSignal,
+                allowGenerate: asRecord(payload.body)?.allowGenerate === true,
+                isModelCurrent: () => readFollowupModel() === modelRef,
+              })
+            : EMPTY_FOLLOWUP_SUGGESTIONS;
+        this.callbacks.postApiResponse(requestGeneration, { id: payload.id, data });
+        return;
+      }
       if (method === 'POST' && requestPathname === VARRO_API_ENDPOINTS.promptCompletionTest) {
         const model = parsePromptCompletionTestRequest(payload.body);
         const data = await this.promptCompletion.test(
@@ -1829,6 +1873,16 @@ export class RestProxy {
           await this.reconcileFailedPrompt(promptAttempt, err, promptWorkspaceDirectory);
         }
         throw err;
+      }
+      if (promptSessionID) {
+        const messageID = asRecord(payload.body)?.messageID;
+        await FollowupService.forServer(this.callbacks.server, this.callbacks.followupPersistence)
+          .clearPreviousTurn({
+            sessionId: promptSessionID,
+            directory: promptWorkspaceDirectory ?? undefined,
+            userMessageId: typeof messageID === 'string' ? messageID : undefined,
+          })
+          .catch(() => logger.warn('Could not clear previous-turn follow-up cache'));
       }
       await this.openCodeConfig.rememberApprovedServerMemoryPermissions(
         legacyServerMemoryRules,
@@ -4395,7 +4449,8 @@ export class RestProxy {
     if (
       target === 'commit_message' ||
       target === 'auto_approve' ||
-      target === 'prompt_completion'
+      target === 'prompt_completion' ||
+      target === 'followups'
     ) {
       return { kind: 'update', target, providerID, modelID, unset };
     }

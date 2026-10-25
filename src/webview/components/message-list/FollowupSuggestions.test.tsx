@@ -1,0 +1,356 @@
+/* oxlint-disable anti-slop/no-module-mocking -- Sending is isolated so these UI tests cannot execute an agent. */
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { createSignal } from 'solid-js';
+import { render } from 'solid-js/web';
+import { client } from '../../lib/client';
+import { replaceMessages, setState } from '../../lib/state';
+import { assistantMessage, session, textPart, userMessage } from '../MessageList.test-utils';
+import { FollowupSuggestions } from './FollowupSuggestions';
+
+const mocks = vi.hoisted(() => ({
+  send: vi.fn<
+    (prompt: string, options?: { onOptimisticPublish?: () => void }) => Promise<boolean>
+  >(),
+}));
+vi.mock('../../hooks/useOpenCode', () => ({ sendMessage: mocks.send }));
+
+const actions = [
+  { title: 'Inspect parser failures', prompt: 'Investigate only the reported parser failures.' },
+  { title: 'Add a regression test', prompt: 'Add focused regression coverage for empty tokens.' },
+  {
+    title: 'Explain the blocker',
+    prompt: 'Explain the unresolved parser blocker without making changes.',
+  },
+];
+const summary =
+  'The parser review found an unresolved empty-token bug and missing regression coverage. A focused investigation and test would address the reported gaps.';
+const suggestions = { summary, actions };
+let container: HTMLDivElement;
+let dispose: (() => void) | undefined;
+
+beforeEach(() => {
+  container = document.createElement('div');
+  document.body.append(container);
+  setState('activeSessionId', 'session-1');
+  setState('serverStatus', { state: 'running', url: 'mock://server', apiVersion: 2 });
+  setState('followupModel', 'test/small');
+  setState('messagesLoading', false);
+  setState('followupOpening', null);
+  setState('sessions', [session('session-1')]);
+  replaceMessages([
+    { info: userMessage('user'), parts: [textPart('u', 'Fix the parser')] },
+    {
+      info: assistantMessage('answer', {
+        parentID: 'user',
+        mode: 'build',
+        agent: 'build',
+        time: { created: 1 },
+      }),
+      parts: [textPart('a', 'The empty-token bug remains.')],
+    },
+  ]);
+  mocks.send.mockReset().mockResolvedValue(true);
+  vi.spyOn(client.varro, 'followups').mockImplementation(async (_id, _source, options) =>
+    options.allowGenerate ? suggestions : { summary: '', actions: [] }
+  );
+  vi.spyOn(client.varro, 'dismissFollowups').mockResolvedValue(true);
+});
+afterEach(() => {
+  dispose?.();
+  dispose = undefined;
+  container.remove();
+  setState('followupModel', '');
+  setState('messages', []);
+  vi.restoreAllMocks();
+});
+
+async function flush() {
+  await Promise.resolve();
+  await Promise.resolve();
+}
+function mount(initialWorking = true, agent = 'build') {
+  const complete = () =>
+    setState(
+      'messages',
+      1,
+      'info',
+      assistantMessage('answer', {
+        parentID: 'user',
+        agent,
+        mode: agent,
+        time: { created: 1, completed: 2 },
+      })
+    );
+  if (!initialWorking) complete();
+  const [working, setWorking] = createSignal(initialWorking);
+  const [blocked, setBlocked] = createSignal(false);
+  dispose = render(
+    () => (
+      <FollowupSuggestions
+        finalMessageId={working() ? null : 'answer'}
+        turnId="user"
+        working={working()}
+        blocked={blocked()}
+      />
+    ),
+    container
+  );
+  return {
+    setWorking: (value: boolean) => {
+      if (!value) complete();
+      setWorking(value);
+    },
+    setBlocked,
+  };
+}
+
+describe('FollowupSuggestions', () => {
+  it.each([0, 2, 3])(
+    'admits an unread opening only when the answer completed after the prior seen marker %s',
+    async (seenAt) => {
+      setState('followupOpening', { sessionId: 'session-1', seenAt });
+      mount(false);
+      await flush();
+      expect(vi.mocked(client.varro.followups).mock.calls[0]?.[2].allowGenerate).toBe(seenAt < 2);
+    }
+  );
+
+  it('never arms completed history hydrated under a stale busy status', async () => {
+    setState('messagesLoading', true);
+    const { setWorking } = mount(false);
+    setWorking(true);
+    setState('messagesLoading', false);
+    setWorking(false);
+    await flush();
+    expect(
+      vi
+        .mocked(client.varro.followups)
+        .mock.calls.every(([, , options]) => options.allowGenerate === false)
+    ).toBe(true);
+  });
+
+  it('restores a cached card on a read-history visit without allowing inference', async () => {
+    vi.mocked(client.varro.followups).mockResolvedValue(suggestions);
+    mount(false);
+    await flush();
+    expect(container.querySelector('.followup-suggestions')).not.toBeNull();
+    expect(vi.mocked(client.varro.followups).mock.calls[0]?.[2].allowGenerate).toBe(false);
+  });
+
+  it('persists explicit dismissal without sending a prompt', async () => {
+    const { setWorking } = mount();
+    setWorking(false);
+    await flush();
+    expect(client.varro.dismissFollowups).not.toHaveBeenCalled();
+    container.querySelector<HTMLButtonElement>('[aria-label="Dismiss follow-ups"]')!.click();
+    expect(client.varro.dismissFollowups).toHaveBeenCalledTimes(1);
+    expect(mocks.send).not.toHaveBeenCalled();
+  });
+  it.each(['ask', 'plan', 'review', 'custom'])(
+    'does not request or display suggestions for %s',
+    async (agent) => {
+      const { setWorking } = mount(true, agent);
+      setWorking(false);
+      await flush();
+      expect(client.varro.followups).not.toHaveBeenCalled();
+      expect(container.querySelector('.followup-suggestions')).toBeNull();
+    }
+  );
+  it('does not reinterpret an old final response as new work after a failed send', async () => {
+    const { setWorking } = mount(false);
+    setWorking(true);
+    setWorking(false);
+    await flush();
+    expect(
+      vi.mocked(client.varro.followups).mock.calls.every(([, , options]) => !options.allowGenerate)
+    ).toBe(true);
+  });
+  it.each(['empty', 'error', 'dismissed'])(
+    'does not retry %s suggestions during the same turn',
+    async (result) => {
+      if (result === 'empty')
+        vi.mocked(client.varro.followups).mockResolvedValueOnce({ summary: '', actions: [] });
+      if (result === 'error')
+        vi.mocked(client.varro.followups).mockRejectedValueOnce(new Error('Unavailable'));
+      const { setWorking, setBlocked } = mount();
+      setWorking(false);
+      await flush();
+      if (result === 'dismissed')
+        container.querySelector<HTMLButtonElement>('[aria-label="Dismiss follow-ups"]')!.click();
+      expect(container.querySelector('.followup-suggestions')).toBeNull();
+      setBlocked(true);
+      setBlocked(false);
+      setWorking(true);
+      setWorking(false);
+      await flush();
+      expect(client.varro.followups).toHaveBeenCalledTimes(1);
+      expect(container.querySelector('.followup-suggestions')).toBeNull();
+    }
+  );
+
+  it('never generates for idle history or when no model is assigned', async () => {
+    mount(false);
+    await flush();
+    expect(client.varro.followups).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(client.varro.followups).mock.calls[0]?.[2].allowGenerate).toBe(false);
+    dispose?.();
+    vi.mocked(client.varro.followups).mockClear();
+    setState('followupModel', '');
+    const { setWorking } = mount();
+    setWorking(false);
+    await flush();
+    expect(client.varro.followups).not.toHaveBeenCalled();
+  });
+
+  it('sends an action immediately on click, without a dialog or duplicate sends', async () => {
+    const { setWorking } = mount();
+    expect(client.varro.followups).not.toHaveBeenCalled();
+    setWorking(false);
+    await flush();
+    expect(client.varro.followups).toHaveBeenCalledTimes(1);
+    expect(container.querySelectorAll('.followup-suggestions-actions button')).toHaveLength(3);
+    expect(container.querySelector('.followup-suggestions-summary')?.textContent).toBe(summary);
+    const close = container.querySelector('[aria-label="Dismiss follow-ups"]');
+    expect(close?.querySelector('.ui-icon')).not.toBeNull();
+    expect(close?.textContent?.trim()).toBe('');
+    expect(
+      container.querySelector('.followup-suggestions-actions button')?.hasAttribute('title')
+    ).toBe(false);
+    expect(mocks.send).not.toHaveBeenCalled();
+    const button = container.querySelector<HTMLButtonElement>(
+      '.followup-suggestions-actions button'
+    )!;
+    button.click();
+    button.click();
+    expect(mocks.send).toHaveBeenCalledExactlyOnceWith(actions[0]!.prompt, {
+      targetSessionId: 'session-1',
+      preserveComposer: true,
+      omitContext: true,
+      followupTitle: actions[0]!.title,
+      onOptimisticPublish: expect.any(Function),
+    });
+    expect(container.querySelectorAll('button:disabled')).toHaveLength(4);
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+    await flush();
+    expect(container.querySelector('.followup-suggestions')).toBeNull();
+    expect(client.varro.dismissFollowups).toHaveBeenCalledTimes(1);
+  });
+
+  it('hides the card with optimistic publication, before admission, without persisting premature dismissal', async () => {
+    let finish!: (accepted: boolean) => void;
+    mocks.send.mockImplementationOnce((_prompt, options) => {
+      options?.onOptimisticPublish?.();
+      return new Promise((resolve) => {
+        finish = resolve;
+      });
+    });
+    const { setWorking } = mount();
+    setWorking(false);
+    await flush();
+    container.querySelector<HTMLButtonElement>('.followup-suggestions-actions button')!.click();
+    expect(container.querySelector('.followup-suggestions')).toBeNull();
+    expect(client.varro.dismissFollowups).not.toHaveBeenCalled();
+    finish(true);
+    await flush();
+    expect(client.varro.dismissFollowups).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['rejected', 'error'])(
+    'retains the card for retry after a %s send and optimistic busy transition',
+    async (failure) => {
+      const { setWorking } = mount();
+      setWorking(false);
+      await flush();
+      mocks.send.mockImplementationOnce(async (_prompt, options) => {
+        options?.onOptimisticPublish?.();
+        expect(container.querySelector('.followup-suggestions')).toBeNull();
+        setWorking(true);
+        await Promise.resolve();
+        setWorking(false);
+        if (failure === 'error') throw new Error('Unavailable');
+        return false;
+      });
+      container.querySelector<HTMLButtonElement>('.followup-suggestions-actions button')!.click();
+      await flush();
+      expect(container.querySelector('.followup-suggestions')).not.toBeNull();
+      expect(container.querySelectorAll('button:disabled')).toHaveLength(0);
+      expect(document.querySelector('[role="alert"]')?.textContent).toContain('Could not send');
+      expect(client.varro.dismissFollowups).not.toHaveBeenCalled();
+      container.querySelector<HTMLButtonElement>('.followup-suggestions-actions button')!.click();
+      await flush();
+      expect(mocks.send).toHaveBeenCalledTimes(2);
+      expect(container.querySelector('.followup-suggestions')).toBeNull();
+      expect(client.varro.dismissFollowups).toHaveBeenCalledTimes(1);
+    }
+  );
+
+  it.each(['busy', 'model', 'session', 'blocked', 'text'])(
+    'invalidates suggestions on %s changes without sending or regenerating',
+    async (change) => {
+      const { setWorking, setBlocked } = mount();
+      setWorking(false);
+      await flush();
+      if (change === 'busy') setWorking(true);
+      if (change === 'model') setState('followupModel', 'test/other');
+      if (change === 'session') setState('activeSessionId', 'session-2');
+      if (change === 'blocked') setBlocked(true);
+      if (change === 'text') setState('messages', 1, 'parts', [textPart('a', 'Already fixed.')]);
+      await flush();
+      expect(container.querySelector('.followup-suggestions')).toBeNull();
+      expect(document.querySelector('[role="dialog"]')).toBeNull();
+      expect(client.varro.followups).toHaveBeenCalledTimes(change === 'model' ? 2 : 1);
+      if (change === 'model')
+        expect(vi.mocked(client.varro.followups).mock.calls[1]?.[2].allowGenerate).toBe(false);
+      expect(mocks.send).not.toHaveBeenCalled();
+      expect(client.varro.dismissFollowups).not.toHaveBeenCalled();
+    }
+  );
+
+  it.each([true, false])(
+    'does not apply a late send result to another session, accepted=%s',
+    async (accepted) => {
+      let finish!: (value: boolean) => void;
+      mocks.send.mockImplementationOnce(
+        (_prompt, options) =>
+          new Promise((resolve) => {
+            options?.onOptimisticPublish?.();
+            finish = resolve;
+          })
+      );
+      const { setWorking } = mount();
+      setWorking(false);
+      await flush();
+      container.querySelector<HTMLButtonElement>('.followup-suggestions-actions button')!.click();
+      setState('activeSessionId', 'session-2');
+      finish(accepted);
+      await flush();
+      expect(container.querySelector('.followup-suggestions')).toBeNull();
+      expect(container.querySelector('[role="alert"]')).toBeNull();
+      expect(client.varro.dismissFollowups).toHaveBeenCalledTimes(accepted ? 1 : 0);
+      if (accepted)
+        expect(vi.mocked(client.varro.dismissFollowups).mock.calls[0]?.[0]).toBe('session-1');
+    }
+  );
+
+  it('ignores a late result after session switch and never retries empty results', async () => {
+    let finish!: (value: typeof suggestions) => void;
+    vi.mocked(client.varro.followups).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        })
+    );
+    const { setWorking } = mount();
+    setWorking(false);
+    setState('activeSessionId', 'session-2');
+    finish(suggestions);
+    await flush();
+    expect(container.querySelector('.followup-suggestions')).toBeNull();
+    setState('activeSessionId', 'session-1');
+    setWorking(true);
+    setWorking(false);
+    await flush();
+    expect(client.varro.followups).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(client.varro.followups).mock.calls[1]?.[2].allowGenerate).toBe(false);
+  });
+});

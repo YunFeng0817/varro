@@ -108,6 +108,23 @@ function createSelectionDependencies(
 }
 
 describe('selection outcomes', () => {
+  it('captures unread intent before activation and seen acknowledgement', async () => {
+    const calls: string[] = [];
+    const deps = createSelectionDependencies({
+      captureFollowupOpening: () => {
+        calls.push('capture');
+      },
+      setActiveSessionId: () => {
+        calls.push('active');
+      },
+      getActiveSessionId: () => 'session-1',
+      markSessionSeen: () => {
+        calls.push('seen');
+      },
+    });
+    await selectSessionWithDependencies(deps, { next: () => 1 }, 'session-1');
+    expect(calls).toEqual(['capture', 'active', 'seen']);
+  });
   it('reports missing-folder recovery without removing or importing the conversation', async () => {
     const deps = createSelectionDependencies({
       getActiveSessionId: () => 'session-1',

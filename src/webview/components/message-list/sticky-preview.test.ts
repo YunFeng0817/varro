@@ -306,6 +306,21 @@ describe('getNextVisibleUserMessageTopMap', () => {
 });
 
 describe('shouldShowStickyUserMessagePreview', () => {
+  it('keeps generated follow-ups out of user navigation and sticky prompt ownership', () => {
+    const followup = user('followup', 'Investigate the parser failures.');
+    if (followup.info.role !== 'user') throw new Error('Expected user transport role');
+    followup.info.followupTitle = 'Inspect parser failures';
+    const messages = [user('u1', 'Review the parser'), followup, assistant('answer', 'followup')];
+    expect(getStickyUserMessagePreview(messages, 1)?.id).toBe('u1');
+    expect(getStickyUserMessagePreview(messages, 2)?.id).toBe('u1');
+    expect(getUserMessageNavigationPreviews(messages).map(({ id }) => id)).toEqual(['u1']);
+    expect(
+      getNextVisibleUserMessageTopMap(
+        messages,
+        new Map([['followup', { top: 60, bottom: 100 }]])
+      ).get('u1')
+    ).toBeNull();
+  });
   // SAFETY: The fixture provides the complete domain shape read by this statement.
   const baseArgs = {
     preview: { id: 'u1', index: 0, text: 'hello', attachmentCount: 0, imageCount: 0 } as const,

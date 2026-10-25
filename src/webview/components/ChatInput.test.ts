@@ -14204,6 +14204,21 @@ function historyEntry(id: string, text: string) {
 }
 
 describe('ChatInput composer history hotkeys', () => {
+  it.each(['loaded history', 'live messages'])(
+    'does not recall generated follow-up prompts from %s as user input',
+    (source) => {
+      setState('activeSessionId', 'session-1');
+      const followup = historyEntry('followup', 'Fix only the reported parser failures.');
+      followup.info.followupTitle = 'Fix parser failures';
+      const entries = [historyEntry('typed', 'Review the parser'), followup];
+      if (source === 'loaded history') setSessionHistoryPrompts('session-1', entries);
+      else setState('messages', entries);
+      cleanup = render(() => ChatInput(), container!);
+      const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+      pressKey(editor, { key: 'ArrowUp' });
+      expect(inputText()).toBe('Review the parser');
+    }
+  );
   it.each(['loaded history', 'live messages'])('recalls only prompt text from %s', (source) => {
     setState('activeSessionId', 'session-1');
     const entry = historyEntry(

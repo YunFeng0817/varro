@@ -11,6 +11,7 @@ import type {
   SessionStructuredError,
 } from '@opencode/client';
 import { asRecord, isNumber, isString, type UnknownRecord } from '../shared/type-utils';
+import { parseFollowupTitle } from '../shared/followups';
 import { formatSkillAttachment } from '../shared/skill-reference';
 import { parseNativeForm } from '../shared/native-form';
 import type { OpenCodeV2GenerationTiming } from './opencode-v2-generation-timing';
@@ -421,6 +422,8 @@ export function projectV2Message(
     },
   };
   if (message.type === 'user') {
+    const followupTitle = parseFollowupTitle(message.metadata?.varroFollowupTitle);
+    if (followupTitle) info.followupTitle = followupTitle;
     const delivery = message.metadata?.varroDelivery;
     if (delivery === 'steer' || delivery === 'queue') info.delivery = delivery;
     return {

@@ -885,6 +885,7 @@ export type InitialWebviewState = {
   showEmptyStateHistogram?: boolean;
   remoteImages?: RemoteImageMode;
   promptCompletionModel?: string;
+  followupModel?: string;
   debugShowQuotaWarning?: boolean;
   debugResetWarningDays?: number;
   autoAttachProblems?: boolean;

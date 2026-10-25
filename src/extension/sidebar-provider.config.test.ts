@@ -829,6 +829,7 @@ describe('SidebarProvider local config routing', () => {
     ['commit_message', 'commitMessage.model', 'commitMessageModel'],
     ['auto_approve', 'chat.autoApproveModel', 'autoApproveModel'],
     ['prompt_completion', 'chat.promptCompletionModel', 'promptCompletionModel'],
+    ['followups', 'chat.followupModel', 'followupModel'],
   ] as const)('writes %s routing to VS Code user settings', async (target, key, responseKey) => {
     vscodeMock.workspace.fs.readFile.mockRejectedValue({ code: 'FileNotFound' });
     const server = createServer({ apiVersion: 2 });

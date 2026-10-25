@@ -1,7 +1,7 @@
 {
   "name": "varro",
   "displayName": "Varro: OpenCode Workbench",
-  "version": "0.33.20",
+  "version": "0.33.21",
   "description": "OpenCode agent workbench with project-aware chat, parallel sessions, plan and change review, model and permission controls, commit messages, and usage insights.",
   "categories": [
     "AI",
@@ -628,6 +628,14 @@
           "pattern": "^$|^[^/\\s]+/[^\\s]+$",
           "patternErrorMessage": "Use provider/model, or leave the setting empty.",
           "markdownDescription": "Optional provider/model for inline prompt suggestions. Requires OpenCode V2 and a supported direct completion API with API-key authentication. Subscription/OAuth connections and unsupported APIs cannot be used, and no utility chats are created. Leave empty to disable. Suggestions send your draft and recent prompts from the current conversation to this model. Choose an eligible fast model in Varro's Models view. Tab accepts a suggestion; Escape dismisses it. Enter sends typed or accepted text."
+        },
+        "varro.chat.followupModel": {
+          "type": "string",
+          "scope": "application",
+          "default": "",
+          "pattern": "^$|^[^/\\s]+/[^\\s]+$",
+          "patternErrorMessage": "Use provider/model, or leave the setting empty.",
+          "markdownDescription": "Optional provider/model for Follow-ups. Suggests zero to three next actions after a new response finishes. Leave empty to disable, or choose Use for follow-ups in Varro's Models view. Requires OpenCode V2 stateless generation. Each eligible response sends its request and final answer to this model for an additional inference, which may use paid tokens or subscription quota. Selecting an action previews an editable prompt; Send starts normal agent work with unchanged permissions."
         },
         "varro.chat.autoRenameUntitledSessions": {
           "type": "boolean",

@@ -523,6 +523,57 @@ describe('Message user prompt rendering', () => {
     expect(parts[0]?.text).toBe(buildPlanImplementationPrompt([]));
   });
 
+  it('renders an attributed follow-up as a compact action without exposing its prompt as user text', () => {
+    const parts = [
+      textPart(
+        'followup-text',
+        'Investigate the reported parser failures without unrelated edits.'
+      ),
+    ];
+    cleanup = render(
+      () =>
+        Message({
+          info: { ...userMessage('followup'), followupTitle: 'Inspect parser failures' },
+          parts,
+          promptNumber: 2,
+          showSentTimestamp: true,
+        }),
+      container!
+    );
+    const action = container?.querySelector<HTMLElement>('.followup-action');
+    expect(action?.textContent?.trim()).toBe('Inspect parser failures');
+    expect(action?.querySelector('.ui-icon')).not.toBeNull();
+    expect(action?.classList).toContain('user-message-card-wrapperless');
+    expect(action?.classList).not.toContain('user-message-card-editable');
+    expect(container?.querySelector('.user-message-text-scroll')).toBeNull();
+    expect(container?.querySelector('.prompt-number-badge')).toBeNull();
+    expect(container?.querySelector('.message-sent-time')).toBeNull();
+    expect(container?.textContent).not.toContain(parts[0]!.text);
+    expect(parts[0]!.text).toContain('Investigate the reported parser failures');
+  });
+
+  it('keeps manually typed follow-up text and attachments visible as normal user content', () => {
+    cleanup = render(
+      () => [
+        Message({
+          info: userMessage('typed'),
+          parts: [textPart('typed-text', 'Investigate the parser failures.')],
+        }),
+        Message({
+          info: { ...userMessage('attached'), followupTitle: 'Inspect parser failures' },
+          parts: [
+            textPart('attached-text', 'Investigate the parser failures.'),
+            filePart('attached-file', 'report.pdf'),
+          ],
+        }),
+      ],
+      container!
+    );
+    expect(container?.querySelector('.followup-action')).toBeNull();
+    expect(container?.textContent).toContain('Investigate the parser failures.');
+    expect(container?.textContent).toContain('report.pdf');
+  });
+
   it('does not hide attachments or custom implementation requests', () => {
     cleanup = render(
       () => [

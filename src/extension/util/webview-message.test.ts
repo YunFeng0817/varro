@@ -215,6 +215,12 @@ describe('webview message validation', () => {
 
   it('accepts known API routes used by the webview client', () => {
     expect(isAllowedApiRequest('POST', '/varro/prompt-completion/test')).toBe(true);
+    expect(isAllowedApiRequest('POST', '/varro/session/s/followups')).toBe(true);
+    expect(isAllowedApiRequest('POST', '/varro/session/s/followups/dismiss')).toBe(true);
+    expect(isAllowedApiRequest('GET', '/varro/session/s/followups/dismiss')).toBe(false);
+    expect(isAllowedApiRequest('POST', '/varro/session/s/followups?directory=%2Frepo')).toBe(true);
+    expect(isAllowedApiRequest('GET', '/varro/session/s/followups')).toBe(false);
+    expect(isAllowedApiRequest('POST', '/varro/session/s/followups?model=other')).toBe(false);
     expect(isAllowedApiRequest('GET', '/varro/prompt-completion/test')).toBe(false);
     expect(isAllowedApiRequest('POST', '/varro/prompt-completion/test?model=other')).toBe(false);
     expect(isAllowedApiRequest('GET', '/command')).toBe(true);

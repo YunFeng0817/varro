@@ -651,6 +651,68 @@ describe('MessageList auto-scroll', () => {
     }
   );
 
+  it.each(['never', 'before steering', 'before admission'])(
+    'preserves follow through steering admission with detachment=%s',
+    async (detach) => {
+      const animationFrames = installQueuedAnimationFrameMocks();
+      setState('activeSessionId', 'session-1');
+      replaceMessages([
+        { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt')] },
+        { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Response')] },
+      ]);
+      startLoading();
+      cleanup = render(() => MessageList(), container!);
+      const list = container!.querySelector<HTMLDivElement>('.interactive-list')!;
+      let height = 1200;
+      Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
+      Object.defineProperty(list, 'scrollHeight', { configurable: true, get: () => height });
+      await Promise.resolve();
+      animationFrames.flush();
+      expect(list.scrollTop).toBe(800);
+
+      const scrollAway = () => {
+        list.dispatchEvent(new WheelEvent('wheel', { deltaY: -400, bubbles: true }));
+        list.scrollTop = 400;
+        list.dispatchEvent(new Event('scroll'));
+      };
+      if (detach === 'before steering') scrollAway();
+      batch(() => {
+        setMessagesIncremental([
+          ...state.messages,
+          {
+            info: { ...userMessage('steer-1'), delivery: 'steer', pendingDelivery: 'steer' },
+            parts: [textPart('steer-text', 'Change direction')],
+          },
+        ]);
+      });
+      await Promise.resolve();
+      animationFrames.flush();
+      expect(container!.querySelector('[data-msg-id="steer-1"]')).toBeNull();
+      expect(list.scrollTop).toBe(detach === 'before steering' ? 400 : 800);
+      if (detach === 'before admission') scrollAway();
+
+      height = 1400;
+      setState('messages', 2, 'info', (info) => ({ ...info, pendingDelivery: undefined }));
+      await Promise.resolve();
+      settleBottomFollow(animationFrames, list);
+      expect(container!.querySelector('[data-msg-id="steer-1"]')).not.toBeNull();
+      expect(list.scrollTop).toBe(detach === 'never' ? 1000 : 400);
+
+      // Admission must not establish a new scroll request that overrides later reading.
+      list.dispatchEvent(new WheelEvent('wheel', { deltaY: -200, bubbles: true }));
+      const detachedTop = list.scrollTop - 200;
+      list.scrollTop = detachedTop;
+      list.dispatchEvent(new Event('scroll'));
+      height = 1600;
+      for (let frame = 0; frame < 4; frame += 1) {
+        await Promise.resolve();
+        animationFrames.flush();
+        expect(list.scrollTop).toBe(detachedTop);
+      }
+      animationFrames.restore();
+    }
+  );
+
   it('restores bottom follow on send after scrolling up and follows subsequent growth', async () => {
     const animationFrames = installQueuedAnimationFrameMocks();
     setState('activeSessionId', 'session-1');
