@@ -27,9 +27,12 @@ test('runs backend tests without browser setup and retains browser contracts in 
   const backend = config.test.projects.find((project) => project.test.name === 'backend');
   const browser = config.test.projects.find((project) => project.test.name === 'unit');
   assert.equal(backend.test.environment, 'node');
-  assert.equal(backend.test.setupFiles, undefined);
+  assert.deepEqual(backend.test.setupFiles, ['./src/test/state-isolation-setup.ts']);
   assert.equal(browser.test.environment, 'jsdom');
-  assert.deepEqual(browser.test.setupFiles, ['./vitest.setup.ts']);
+  assert.deepEqual(browser.test.setupFiles, [
+    './src/test/state-isolation-setup.ts',
+    './vitest.setup.ts',
+  ]);
   const backendFiles = await projectFiles(backend);
   const browserFiles = await projectFiles(browser);
   for (const file of [

@@ -11,6 +11,7 @@ describe('Varro test state paths', () => {
     expect(getVarroTestStateDirectory('servers')).toBeUndefined();
     expect(getVarroTestStateDirectory('opencode-v2')).toBeUndefined();
     expect(getVarroTestStateDirectory('provider-quota-v2')).toBeUndefined();
+    expect(getVarroTestStateDirectory('followups')).toBeUndefined();
   });
 
   it('uses one explicit test root for ownership and session annotations', () => {
@@ -19,11 +20,13 @@ describe('Varro test state paths', () => {
     expect(getVarroTestStateDirectory('servers')).toBe(join(root, 'servers'));
     expect(getVarroTestStateDirectory('opencode-v2')).toBe(join(root, 'opencode-v2'));
     expect(getVarroTestStateDirectory('provider-quota-v2')).toBe(join(root, 'provider-quota-v2'));
+    expect(getVarroTestStateDirectory('followups')).toBe(join(root, 'followups'));
   });
 
   it.each(['', '  ', 'relative/state'])('refuses invalid test state root %j', (root) => {
     vi.stubEnv('VARRO_TEST_STATE_ROOT', root);
     expect(() => getVarroTestStateDirectory('servers')).toThrow('absolute isolated directory');
+    expect(() => getVarroTestStateDirectory('followups')).toThrow('absolute isolated directory');
   });
 
   it('fails closed instead of using production state when a test endpoint lacks a scope', () => {
@@ -31,6 +34,7 @@ describe('Varro test state paths', () => {
     vi.stubEnv('VARRO_TEST_SERVER_URL', 'http://127.0.0.1:49999');
     expect(() => getVarroTestStateDirectory('servers')).toThrow('state isolation is missing');
     expect(() => getVarroTestStateDirectory('opencode-v2')).toThrow('state isolation is missing');
+    expect(() => getVarroTestStateDirectory('followups')).toThrow('state isolation is missing');
     expect(() => getVarroTestStateDirectory('provider-quota-v2')).toThrow(
       'state isolation is missing'
     );

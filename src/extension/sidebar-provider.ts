@@ -287,7 +287,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private mermaidPreviewMaximized = false;
   private mermaidPreviewLayoutQueue: Promise<void> = Promise.resolve();
   private readonly contextProvider: ContextProvider;
-  private readonly followupPersistence: HostPersistence;
+  private readonly legacyFollowupPersistence: HostPersistence;
   private readonly generatedDependencyTreeGuard: GeneratedDependencyTreeGuard;
   private readonly workspaceSessionStatusCoordinator = new WorkspaceSessionStatusCoordinator();
   private readonly endpoints = new Set<WebviewEndpoint>();
@@ -368,7 +368,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         ? (extensionPackageJson as { version: string }).version
         : 'unknown';
     const persistence = new HostPersistence(workspaceState);
-    this.followupPersistence = persistence;
+    this.legacyFollowupPersistence = persistence;
     this.serverMemoryPermissions = new ServerMemoryPermissionStore(persistence);
     this.sessionTransferCatalog = new SessionTransferCatalog(persistence);
     this.streamingText = new StreamingTextCache(persistence);
@@ -819,7 +819,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     const restProxy = new RestProxy({
       restoreStreamingText: (info, parts) => this.streamingText.restore(info, parts),
       server: endpointServer,
-      followupPersistence: this.followupPersistence,
+      legacyFollowupPersistence: this.legacyFollowupPersistence,
       workspaceSessionStatusCoordinator: this.workspaceSessionStatusCoordinator,
       contextProvider: this.contextProvider,
       providerLimitService: this.providerLimitService,

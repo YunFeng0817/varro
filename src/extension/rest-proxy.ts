@@ -311,7 +311,7 @@ export { scopeOpenCodeRequest, getOpenCodeDirectoryHeaders } from './util/openco
 export { resolveOpenCodeProjectConfigPaths } from './opencode-config-service';
 
 export interface RestProxyCallbacks {
-  followupPersistence?: Persistence;
+  legacyFollowupPersistence?: Persistence;
   restoreStreamingText?(
     info: Record<string, unknown>,
     parts: Record<string, unknown>[]
@@ -515,7 +515,10 @@ export class RestProxy {
         event.affectsConfiguration('varro.chat.followupModel') ||
         event.affectsConfiguration('varro.chat.followupsEnabled')
       )
-        FollowupService.forServer(callbacks.server, callbacks.followupPersistence).invalidate();
+        FollowupService.forServer(
+          callbacks.server,
+          callbacks.legacyFollowupPersistence
+        ).invalidate();
       if (
         event.affectsConfiguration('varro.chat.remoteImages') &&
         readExtensionConfigState().remoteImages !== 'on'
@@ -1213,7 +1216,7 @@ export class RestProxy {
         if (!source) throw new Error('Invalid follow-ups source');
         const service = FollowupService.forServer(
           this.callbacks.server,
-          this.callbacks.followupPersistence
+          this.callbacks.legacyFollowupPersistence
         );
         if (requestPathname.endsWith('/dismiss')) {
           if (!directSessionID || this.isHiddenSession(directSessionID))
@@ -1889,7 +1892,10 @@ export class RestProxy {
       }
       if (promptSessionID) {
         const messageID = asRecord(payload.body)?.messageID;
-        await FollowupService.forServer(this.callbacks.server, this.callbacks.followupPersistence)
+        await FollowupService.forServer(
+          this.callbacks.server,
+          this.callbacks.legacyFollowupPersistence
+        )
           .clearPreviousTurn({
             sessionId: promptSessionID,
             directory: promptWorkspaceDirectory ?? undefined,

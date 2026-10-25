@@ -35,7 +35,14 @@ vi.mock('node:fs/promises', async (importOriginal) => {
 });
 
 const platform = process.platform;
-const kinds = ['servers', 'opencode-v2', 'provider-quota-v2', 'scratch'] as const;
+const kinds = [
+  'servers',
+  'opencode-v2',
+  'provider-quota-v2',
+  'scratch',
+  'thumbnails',
+  'followups',
+] as const;
 let root: string;
 
 beforeEach(async () => {

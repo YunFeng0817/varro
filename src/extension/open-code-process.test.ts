@@ -145,6 +145,10 @@ import {
 
 const originalPlatform = process.platform;
 
+// Native/legacy path fixtures already isolate homedir and tmpdir. Exercise those paths rather
+// than the shared test setup's explicit state root; individual AI-isolation cases can override it.
+beforeEach(() => vi.stubEnv('VARRO_TEST_STATE_ROOT', undefined));
+
 async function requireFileSymlink(context: TestContext, target: string, link: string) {
   try {
     await symlink(target, link);

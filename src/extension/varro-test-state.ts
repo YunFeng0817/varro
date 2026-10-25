@@ -5,6 +5,7 @@ export type VarroStateKind =
   | 'opencode-v2'
   | 'provider-quota-v2'
   | 'scratch'
+  | 'followups'
   | 'thumbnails';
 
 /** Test hosts must not discover or write a production editor's ownership state. */

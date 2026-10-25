@@ -1,5 +1,7 @@
 /* oxlint-disable anti-slop/no-module-mocking -- The optional inference boundary is tested without contacting a provider. */
-import { describe, expect, it, vi } from 'vitest';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { join, resolve as resolvePath } from 'node:path';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { OpenCodeServer } from './server';
 import { FollowupService } from './followup-service';
 import { logger } from './logger';
@@ -23,6 +25,20 @@ const actions = [
 const summary =
   'The empty-token parser issue is still unresolved. A focused fix and regression test would address the reported failure without unrelated changes.';
 const suggestions = { summary, actions };
+let directory: string;
+
+beforeEach(async () => {
+  const parent = resolvePath('artifacts/ai-test-data');
+  await mkdir(parent, { recursive: true });
+  directory = await mkdtemp(join(parent, 'followup-service-'));
+  vi.stubEnv('VARRO_TEST_STATE_ROOT', directory);
+});
+
+afterEach(async () => {
+  vi.useRealTimers();
+  vi.unstubAllEnvs();
+  await rm(directory, { recursive: true, force: true });
+});
 
 function setup() {
   let currentAnswer = source.answer;
@@ -229,6 +245,42 @@ describe('FollowupService', () => {
     }
   );
 
+  it.each(['dismissed', 'new-prompt', 'used-action'])(
+    'clears stored suggestion text after %s and never restores it in another editor',
+    async (action) => {
+      const { server, request, input } = setup();
+      const service = new FollowupService(server);
+      expect(await service.suggest(input)).toEqual(suggestions);
+      if (action === 'new-prompt')
+        await service.clearPreviousTurn({
+          sessionId: input.sessionId,
+          directory: input.directory,
+          userMessageId: 'next-user',
+        });
+      else await service.dismiss(input);
+      const stored = await readFile(join(directory, 'followups', 'cache.json'), 'utf8');
+      expect(stored).not.toContain(summary);
+      expect(stored).not.toContain(actions[0]!.prompt);
+      const reopened = new FollowupService({ ...server });
+      expect(await reopened.suggest({ ...input, allowGenerate: false })).toEqual(
+        EMPTY_FOLLOWUP_SUGGESTIONS
+      );
+      expect(await reopened.suggest(input)).toEqual(EMPTY_FOLLOWUP_SUGGESTIONS);
+      expect(request.mock.calls.filter(([method]) => method === 'POST')).toHaveLength(1);
+    }
+  );
+
+  it('admits only one inference across services without shared workspace state', async () => {
+    const { server, request, input } = setup();
+    const results = await Promise.all([
+      new FollowupService(server).suggest(input),
+      new FollowupService({ ...server }).suggest(input),
+    ]);
+    expect(results.some((result) => result.actions.length > 0)).toBe(true);
+    expect(request.mock.calls.filter(([method]) => method === 'POST')).toHaveLength(1);
+    expect(await new FollowupService({ ...server }).suggest(input)).toEqual(suggestions);
+  });
+
   it('does not regenerate an edited source in the same user turn', async () => {
     const { server, request, input, setAnswer } = setup();
     const service = new FollowupService(server);
@@ -307,14 +359,8 @@ describe('FollowupService', () => {
 
   it('does not infer if admission cannot be persisted', async () => {
     const { server, request, input } = setup();
-    const persistence: Persistence = {
-      get: () => undefined,
-      set: () => Promise.reject(new Error('Storage unavailable')),
-      remove: () => {},
-    };
-    expect(await new FollowupService(server, persistence).suggest(input)).toEqual(
-      EMPTY_FOLLOWUP_SUGGESTIONS
-    );
+    await writeFile(join(directory, 'followups'), 'Not a writable directory');
+    expect(await new FollowupService(server).suggest(input)).toEqual(EMPTY_FOLLOWUP_SUGGESTIONS);
     expect(request.mock.calls.some(([method]) => method === 'POST')).toBe(false);
   });
   it.each(['ask', 'plan', 'review', 'custom', undefined])(
@@ -412,6 +458,7 @@ describe('FollowupService', () => {
     );
     try {
       const pending = new FollowupService(server).suggest(input);
+      await vi.waitFor(() => expect(finish).toBeDefined());
       await vi.advanceTimersByTimeAsync(10_000);
       const generation = request.mock.calls.find(
         ([, path]) => path === '/api/experimental/generate'
@@ -442,6 +489,11 @@ describe('FollowupService', () => {
     try {
       const service = new FollowupService(server);
       const pending = service.suggest(input);
+      await vi.waitFor(() =>
+        expect(request.mock.calls.some(([, path]) => path === '/api/experimental/generate')).toBe(
+          true
+        )
+      );
       await vi.advanceTimersByTimeAsync(30_001);
       expect(await pending).toEqual(EMPTY_FOLLOWUP_SUGGESTIONS);
       expect(logger.info).toHaveBeenCalledWith(

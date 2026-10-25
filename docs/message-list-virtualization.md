@@ -614,7 +614,11 @@ Direct input acquires ownership only when it can affect the transcript:
   before inference and caches results, abstentions, failures, and explicit dismissals across reloads.
   Navigation and invalidation do not persist dismissal; closing the card or an accepted action does.
   An accepted new turn clears prior suggestion contents and retires pending results for that session,
-  retaining only bounded admission metadata. Rejected sends do not clear the cache.
+  retaining compact admission metadata. Rejected sends do not clear the cache.
+  Follow-up persistence lives in Varro's shared `followups/cache.json`, not workspace state. All
+  admissions, dismissals, completions, retirements, and legacy workspace merges share a cross-process
+  lock and atomic file replacement. Migration preserves admission and lets dismissal win; it removes
+  the old workspace key only after committing. Retiring suggestion text must not remove admission.
   Only source responses explicitly identified as Build are eligible, in both the webview and host.
   Follow-ups default to enabled; the application-scoped `chat.followupsEnabled` opt-out gates both
   display and host inference. An unset `chat.followupModel` uses the current session model and reasoning

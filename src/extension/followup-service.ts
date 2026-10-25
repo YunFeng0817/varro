@@ -81,47 +81,60 @@ export class FollowupService {
     let attempt = this.attempts.get(key);
     if (attempt && attempt.digest !== digest) return EMPTY_FOLLOWUP_SUGGESTIONS;
     if (!attempt) {
-      const cached = this.cache.get(key, digest);
-      if (cached) {
+      let cached: FollowupSuggestionSet | undefined;
+      try {
+        cached = await this.cache.get(key, digest);
+      } catch {
+        logger.info('Follow-ups skipped', { reason: 'cache-unavailable' });
+        return EMPTY_FOLLOWUP_SUGGESTIONS;
+      }
+      input.signal?.throwIfAborted();
+      // Disk reads yield. Another view can publish the shared attempt while this one is reading.
+      attempt = this.attempts.get(key);
+      if (attempt && attempt.digest !== digest) return EMPTY_FOLLOWUP_SUGGESTIONS;
+      if (!attempt && cached) {
         if (!cached.actions.length) return cached;
         return (await this.sourceIsCurrent(input, input.signal ?? AbortSignal.timeout(3_000)))
           ? cached
           : EMPTY_FOLLOWUP_SUGGESTIONS;
       }
-      if (!input.allowGenerate) return EMPTY_FOLLOWUP_SUGGESTIONS;
-      while (this.attempts.size >= 32) {
-        const oldest = this.attempts.keys().next().value;
-        if (!oldest) break;
-        this.attempts.get(oldest)?.controller.abort();
-        this.attempts.delete(oldest);
+      if (!attempt) {
+        if (!input.allowGenerate) return EMPTY_FOLLOWUP_SUGGESTIONS;
+        while (this.attempts.size >= 32) {
+          const oldest = this.attempts.keys().next().value;
+          if (!oldest) break;
+          this.attempts.get(oldest)?.controller.abort();
+          this.attempts.delete(oldest);
+        }
+        const controller = new AbortController();
+        const started = Date.now();
+        const timer = setTimeout(
+          () =>
+            controller.abort(new DOMException('Follow-ups generation timed out', 'TimeoutError')),
+          FOLLOWUP_GENERATION_TIMEOUT_MS
+        );
+        const result = this.generate(input, controller.signal, key, digest)
+          // oxlint-disable-next-line anti-slop/no-unknown-parameters -- Promise rejections are untrusted; diagnostics use only narrowed error classes.
+          .catch((error: unknown) => {
+            // Log outcome metadata, never prompts, model output, or provider error bodies.
+            logger.info('Follow-ups failed', {
+              reason: controller.signal.aborted
+                ? controller.signal.reason instanceof DOMException &&
+                  controller.signal.reason.name === 'TimeoutError'
+                  ? 'timeout'
+                  : 'cancelled'
+                : error instanceof SyntaxError
+                  ? 'invalid-json'
+                  : 'request-or-validation-error',
+              model: `${input.model.providerID}/${input.model.modelID}`,
+              elapsedMs: Date.now() - started,
+            });
+            return EMPTY_FOLLOWUP_SUGGESTIONS;
+          })
+          .finally(() => clearTimeout(timer));
+        attempt = { controller, result, subscribers: 0, digest, sessionKey };
+        this.attempts.set(key, attempt);
       }
-      const controller = new AbortController();
-      const started = Date.now();
-      const timer = setTimeout(
-        () => controller.abort(new DOMException('Follow-ups generation timed out', 'TimeoutError')),
-        FOLLOWUP_GENERATION_TIMEOUT_MS
-      );
-      const result = this.generate(input, controller.signal, key, digest)
-        // oxlint-disable-next-line anti-slop/no-unknown-parameters -- Promise rejections are untrusted; diagnostics use only narrowed error classes.
-        .catch((error: unknown) => {
-          // Log outcome metadata, never prompts, model output, or provider error bodies.
-          logger.info('Follow-ups failed', {
-            reason: controller.signal.aborted
-              ? controller.signal.reason instanceof DOMException &&
-                controller.signal.reason.name === 'TimeoutError'
-                ? 'timeout'
-                : 'cancelled'
-              : error instanceof SyntaxError
-                ? 'invalid-json'
-                : 'request-or-validation-error',
-            model: `${input.model.providerID}/${input.model.modelID}`,
-            elapsedMs: Date.now() - started,
-          });
-          return EMPTY_FOLLOWUP_SUGGESTIONS;
-        })
-        .finally(() => clearTimeout(timer));
-      attempt = { controller, result, subscribers: 0, digest, sessionKey };
-      this.attempts.set(key, attempt);
     }
     const current = attempt;
     current.subscribers += 1;
@@ -141,7 +154,7 @@ export class FollowupService {
         !(await this.sourceIsCurrent(input, input.signal ?? AbortSignal.timeout(3_000)))
       )
         return EMPTY_FOLLOWUP_SUGGESTIONS;
-      return this.cache.get(key, digest) ?? suggestions;
+      return (await this.cache.get(key, digest)) ?? suggestions;
     } finally {
       input.signal?.removeEventListener('abort', release);
       release();
@@ -271,7 +284,7 @@ export class FollowupService {
       return EMPTY_FOLLOWUP_SUGGESTIONS;
     // Persist admission before inference. Reloading or changing the model cannot bill this turn again.
     if (!(await this.cache.claim(key, digest, this.sessionKey(input))))
-      return this.cache.get(key, digest) ?? EMPTY_FOLLOWUP_SUGGESTIONS;
+      return (await this.cache.get(key, digest)) ?? EMPTY_FOLLOWUP_SUGGESTIONS;
     signal.throwIfAborted();
     logger.info('Follow-ups generation started', {
       model: `${input.model.providerID}/${input.model.modelID}`,

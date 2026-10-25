@@ -1,8 +1,8 @@
-import { mkdir, readFile, readdir, rename, rm, rmdir, unlink, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { setTimeout as delay } from 'node:timers/promises';
 import { asRecord, type UnknownRecord } from '../shared/type-utils';
+import { acquireFileLock } from './file-lock';
 import {
   getLegacyVarroStateDirectory,
   getVarroStateDirectory,
@@ -91,7 +91,12 @@ export class OpenCodeV2SessionState {
     const operation = (async () => {
       // A failed operation must not block a later update or cleanup.
       await previous?.catch(() => {});
-      const release = await this.acquireLock(sessionID, signal);
+      await this.prepareDirectory();
+      const release = await acquireFileLock(
+        `${this.path(sessionID)}.lock`,
+        signal,
+        'Timed out waiting to update Varro session annotations'
+      );
       try {
         signal?.throwIfAborted();
         await run();
@@ -107,98 +112,8 @@ export class OpenCodeV2SessionState {
     }
   }
 
-  private async acquireLock(sessionID: string, signal?: AbortSignal): Promise<() => Promise<void>> {
-    const lock = `${this.path(sessionID)}.lock`;
-    await this.prepareDirectory();
-    const owner = `${process.pid}-${randomUUID()}`;
-    const candidate = `${lock}.${owner}`;
-    const deadline = Date.now() + 10_000;
-    let contentionError: unknown;
-    await mkdir(this.directory, { recursive: true, mode: 0o700 });
-    while (true) {
-      signal?.throwIfAborted();
-      let publishing = false;
-      try {
-        // Publish a nonempty directory atomically, so contenders always see its owner.
-        await mkdir(candidate, { mode: 0o700 });
-        await writeFile(join(candidate, owner), '', { flag: 'wx', mode: 0o600 });
-        publishing = true;
-        await rename(candidate, lock);
-        return async () => {
-          await unlink(join(lock, owner));
-          // A contender can replace the empty directory after we remove our owner.
-          await removeEmptyLock(lock);
-        };
-      } catch (error) {
-        const code = asRecord(error)?.code;
-        if (code === 'EPERM' && publishing) {
-          // Windows reports an existing destination directory as EPERM on rename.
-          // A lock being released can also temporarily deny directory scans.
-          // Retry that contention without treating an unreadable lock as empty.
-          try {
-            await readdir(lock);
-          } catch (inspectionError) {
-            if (!['ENOENT', 'EPERM'].includes(String(asRecord(inspectionError)?.code))) throw error;
-          }
-        } else if (!['EEXIST', 'ENOTEMPTY'].includes(String(code))) throw error;
-        contentionError = error;
-      } finally {
-        await rm(candidate, { recursive: true, force: true });
-      }
-      try {
-        const owners = await readdir(lock);
-        if (owners.length === 0) {
-          await removeEmptyLock(lock);
-        }
-        const oldOwner = owners[0];
-        if (owners.length === 1 && oldOwner && /^\d+-[a-f0-9-]{36}$/.test(oldOwner)) {
-          const pid = Number(oldOwner.split('-')[0]);
-          if (Number.isSafeInteger(pid) && pid > 0 && isDeadProcess(pid)) {
-            // Remove only this dead owner's marker. Never delete a replacement lock.
-            await unlink(join(lock, oldOwner));
-            await removeEmptyLock(lock);
-          }
-        }
-      } catch (error) {
-        const code = asRecord(error)?.code;
-        if (!['ENOENT', 'ENOTEMPTY', 'EEXIST', 'EPERM'].includes(String(code))) throw error;
-        if (code === 'EPERM') contentionError = error;
-      }
-      if (Date.now() >= deadline)
-        throw new Error('Timed out waiting to update Varro session annotations', {
-          cause: contentionError,
-        });
-      await delay(25, undefined, { signal });
-    }
-  }
-
   private path(sessionID: string): string {
     if (!/^[a-zA-Z0-9_-]{1,256}$/.test(sessionID)) throw new Error('Invalid OpenCode session ID');
     return join(this.directory, `${sessionID}.json`);
-  }
-}
-
-function isDeadProcess(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return false;
-  } catch (error) {
-    return asRecord(error)?.code === 'ESRCH';
-  }
-}
-
-async function removeEmptyLock(path: string): Promise<void> {
-  try {
-    await rmdir(path);
-  } catch (error) {
-    // Another contender may already have replaced or removed the empty directory.
-    if (asRecord(error)?.code === 'EPERM') {
-      try {
-        if ((await readdir(path)).length > 0) return;
-      } catch (inspectionError) {
-        if (asRecord(inspectionError)?.code === 'ENOENT') return;
-      }
-    }
-    if (!['ENOENT', 'ENOTEMPTY', 'EEXIST'].includes(String(asRecord(error)?.code))) throw error;
   }
 }

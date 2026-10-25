@@ -39,6 +39,7 @@ export default defineConfig({
         extends: true,
         test: {
           name: 'backend',
+          setupFiles: ['./src/test/state-isolation-setup.ts'],
           environment: 'node',
           include: backendTests,
           exclude: [...configDefaults.exclude, ...nativeProcessTests, ...jsdomBackendTests],
@@ -50,7 +51,7 @@ export default defineConfig({
           name: 'unit',
           environment: 'jsdom',
           include: ['src/{webview,test}/**/*.test.{ts,tsx}', ...jsdomBackendTests],
-          setupFiles: ['./vitest.setup.ts'],
+          setupFiles: ['./src/test/state-isolation-setup.ts', './vitest.setup.ts'],
         },
       },
       {

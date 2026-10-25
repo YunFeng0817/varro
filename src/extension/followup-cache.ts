@@ -1,10 +1,16 @@
+/* oxlint-disable anti-slop/no-unknown-parameters -- Legacy workspace values and disk JSON are validated at this storage boundary. */
+import { randomUUID } from 'node:crypto';
+import { readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import type { Persistence } from '../shared/persistence';
 import type { FollowupSuggestionSet } from '../shared/followups';
 import { EMPTY_FOLLOWUP_SUGGESTIONS, parseFollowupSuggestions } from '../shared/followups';
 import { asRecord, isString } from '../shared/type-utils';
+import { acquireFileLock } from './file-lock';
+import { getVarroStateDirectory } from './varro-state-paths';
 
 const STORAGE_KEY = 'varro.followupCache.v1';
-const MAX_TURNS = 512;
+const MAX_PRESENTATIONS = 512;
 type Entry = {
   sessionKey: string;
   digest: string;
@@ -15,13 +21,17 @@ type Entries = Record<string, Entry>;
 
 /** Host-owned cache. Attempts, abstentions, failures, and dismissals never expire on a timer. */
 export class FollowupCache {
-  private memory: Entries = {};
   private queue: Promise<void> = Promise.resolve();
+  private migration: Promise<void> | undefined;
+  private readonly path: string;
 
-  constructor(private readonly persistence?: Persistence) {}
+  constructor(private readonly legacyPersistence?: Persistence) {
+    this.path = join(getVarroStateDirectory('followups'), 'cache.json');
+  }
 
-  get(key: string, digest: string): FollowupSuggestionSet | undefined {
-    const entry = this.read()[key];
+  async get(key: string, digest: string): Promise<FollowupSuggestionSet | undefined> {
+    await this.migrate();
+    const entry = (await this.read())[key];
     if (!entry) return undefined;
     return entry.digest === digest && !entry.dismissed
       ? entry.suggestions
@@ -77,48 +87,134 @@ export class FollowupCache {
   }
 
   private change(update: (entries: Entries) => boolean): Promise<void> {
+    return this.mutate(async (entries) => {
+      const migrated = this.mergeLegacy(entries);
+      if (update(entries) || migrated) await this.write(entries);
+      await this.removeLegacy();
+    });
+  }
+
+  private async migrate(): Promise<void> {
+    if (this.legacyPersistence?.get<unknown>(STORAGE_KEY) === undefined) return;
+    this.migration ??= this.change(() => false);
+    try {
+      await this.migration;
+    } catch (error) {
+      this.migration = undefined;
+      throw error;
+    }
+  }
+
+  private mergeLegacy(entries: Entries): boolean {
+    const stored = this.legacyPersistence?.get<unknown>(STORAGE_KEY);
+    if (stored === undefined) return false;
+    if (!asRecord(stored)) throw new Error('Invalid legacy follow-up cache');
+    const legacy = parseEntries(stored);
+    let changed = false;
+    for (const [key, entry] of Object.entries(legacy)) {
+      const current = entries[key];
+      if (!current) {
+        entries[key] = entry;
+        changed = true;
+      } else if (
+        !current.dismissed &&
+        (entry.dismissed ||
+          current.digest !== entry.digest ||
+          current.sessionKey !== entry.sessionKey)
+      ) {
+        // A stale workspace must not revive dismissal, retirement, or conflicting source data.
+        current.dismissed = true;
+        current.suggestions = EMPTY_FOLLOWUP_SUGGESTIONS;
+        changed = true;
+      }
+    }
+    return changed;
+  }
+
+  private async removeLegacy(): Promise<void> {
+    if (this.legacyPersistence?.get<unknown>(STORAGE_KEY) !== undefined)
+      await this.legacyPersistence.remove(STORAGE_KEY);
+  }
+
+  private mutate(run: (entries: Entries) => Promise<void>): Promise<void> {
     const result = this.queue.then(async () => {
-      const entries = this.read();
-      if (!update(entries)) return;
-      const bounded = Object.fromEntries(Object.entries(entries).slice(-MAX_TURNS));
-      if (this.persistence) await this.persistence.set(STORAGE_KEY, bounded);
-      else this.memory = bounded;
+      const release = await acquireFileLock(`${this.path}.lock`);
+      try {
+        await run(await this.read());
+      } finally {
+        await release();
+      }
     });
     this.queue = result.catch(() => undefined);
     return result;
   }
 
-  private read() {
-    if (!this.persistence) return structuredClone(this.memory);
-    const stored = asRecord(this.persistence.get<unknown>(STORAGE_KEY));
-    const entries: Entries = {};
-    for (const [key, value] of Object.entries(stored ?? {}).slice(-MAX_TURNS)) {
-      const entry = asRecord(value);
-      if (
-        !/^[a-f0-9]{64}$/.test(key) ||
-        !isString(entry?.digest) ||
-        !/^[a-f0-9]{64}$/.test(entry.digest) ||
-        !isString(entry.sessionKey) ||
-        !/^[a-f0-9]{64}$/.test(entry.sessionKey)
-      )
-        continue;
-      try {
-        entries[key] = {
-          sessionKey: entry.sessionKey,
-          digest: entry.digest,
-          dismissed: entry.dismissed === true,
-          suggestions: parseFollowupSuggestions(JSON.stringify(entry.suggestions)),
-        };
-      } catch {
-        // Corrupt presentation must not erase the admission and allow another billed attempt.
-        entries[key] = {
-          sessionKey: entry.sessionKey,
-          digest: entry.digest,
-          dismissed: true,
-          suggestions: EMPTY_FOLLOWUP_SUGGESTIONS,
-        };
-      }
+  private async read(): Promise<Entries> {
+    try {
+      const stored = asRecord(JSON.parse(await readFile(this.path, 'utf8')));
+      if (stored?.version !== 1 || !asRecord(stored.entries))
+        throw new Error('Invalid follow-up cache format');
+      return parseEntries(stored.entries);
+    } catch (error) {
+      if (asRecord(error)?.code === 'ENOENT') return {};
+      // Lost or unreadable admission must not silently permit another billed attempt.
+      throw new Error('Could not read Varro follow-up cache', { cause: error });
     }
-    return entries;
   }
+
+  private async write(entries: Entries): Promise<void> {
+    const temporary = `${this.path}.${randomUUID()}.tmp`;
+    try {
+      // Bound generated text, not admission. Evicting admission could bill an old turn again.
+      for (const [, entry] of Object.entries(entries).slice(0, -MAX_PRESENTATIONS)) {
+        entry.dismissed = true;
+        entry.suggestions = EMPTY_FOLLOWUP_SUGGESTIONS;
+      }
+      await writeFile(
+        temporary,
+        JSON.stringify({
+          version: 1,
+          entries,
+        }),
+        { flag: 'wx', mode: 0o600 }
+      );
+      await rename(temporary, this.path);
+    } finally {
+      await rm(temporary, { force: true });
+    }
+  }
+}
+
+function parseEntries(storedValue: unknown) {
+  const stored = asRecord(storedValue);
+  const entries: Entries = {};
+  for (const [key, value] of Object.entries(stored ?? {})) {
+    const entry = asRecord(value);
+    if (
+      !/^[a-f0-9]{64}$/.test(key) ||
+      !isString(entry?.digest) ||
+      !/^[a-f0-9]{64}$/.test(entry.digest) ||
+      !isString(entry.sessionKey) ||
+      !/^[a-f0-9]{64}$/.test(entry.sessionKey)
+    )
+      throw new Error('Invalid follow-up admission record');
+    try {
+      const suggestions = parseFollowupSuggestions(JSON.stringify(entry.suggestions));
+      entries[key] = {
+        sessionKey: entry.sessionKey,
+        digest: entry.digest,
+        dismissed: entry.dismissed === true,
+        suggestions: entry.dismissed === true ? EMPTY_FOLLOWUP_SUGGESTIONS : suggestions,
+      };
+    } catch {
+      // Corrupt presentation must not erase the admission and allow another billed attempt.
+      entries[key] = {
+        sessionKey: entry.sessionKey,
+        digest: entry.digest,
+        dismissed: true,
+        suggestions: EMPTY_FOLLOWUP_SUGGESTIONS,
+      };
+    }
+  }
+  return entries;
 }

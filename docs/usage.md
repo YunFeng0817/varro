@@ -131,10 +131,17 @@ Varro uses one per-user state root for files shared across editor windows and di
 
 Relative or empty `LOCALAPPDATA` and `XDG_STATE_HOME` values are ignored for new paths.
 The root contains `scratch/` for no-project files, `servers/` for server ownership records, `opencode-v2/` for
-`<sessionID>.json` annotations and session locks, and `provider-quota-v2/` for shared
-quota snapshots and polling locks. Annotation JSON includes `generationTiming`,
+`<sessionID>.json` annotations and session locks, `followups/` for follow-up suggestions and admission records,
+and `provider-quota-v2/` for shared quota snapshots and polling locks. Annotation JSON includes `generationTiming`,
 the text/reasoning boundaries used with OpenCode's token counts to estimate tok/s.
 Quota disk sharing remains disabled on Windows until private ACL handling is supported.
+
+Follow-ups use `followups/cache.json` with atomic replacement and a cross-process lock on all platforms.
+Existing workspace caches are merged before the old workspace key is removed. Dismissals win over
+older suggestions. Closing a card, accepting its action, or accepting a new prompt clears its text
+while retaining admission records so it cannot be generated again. At most 512 turns retain suggestion
+text; older turns retain only admission and dismissal metadata. Tests redirect this directory through
+`VARRO_TEST_STATE_ROOT`, with no fallback to the normal state root.
 
 Existing annotation directories at `$XDG_STATE_HOME/varro/opencode-v2/` and quota
 directories at `~/.varro-provider-quota-v2/` remain intact. When needed, Varro creates
