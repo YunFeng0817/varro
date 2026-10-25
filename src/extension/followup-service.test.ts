@@ -104,6 +104,42 @@ describe('FollowupService', () => {
     );
   });
 
+  it('requests summary, titles, and prompts in the response language rather than the request language', async () => {
+    const { server, request, input, setAnswer, setOutput } = setup();
+    const answer = 'Der Fehler bei leeren Tokens besteht weiterhin.';
+    const localizedSuggestions = {
+      summary:
+        'Der Parser verarbeitet leere Tokens noch nicht korrekt. Eine gezielte Korrektur mit einem Regressionstest würde den verbleibenden Fehler beheben.',
+      actions: [
+        {
+          title: 'Leere Tokens korrigieren',
+          prompt:
+            'Behebe nur den gemeldeten Parserfehler bei leeren Tokens und ergänze einen Regressionstest.',
+        },
+      ],
+    };
+    setAnswer(answer);
+    setOutput(JSON.stringify(localizedSuggestions));
+    expect(
+      await new FollowupService(server).suggest({ ...input, source: { ...source, answer } })
+    ).toEqual(localizedSuggestions);
+    const body = request.mock.calls.find(([, path]) => path === '/api/experimental/generate')?.[2];
+    expect(body).toEqual(
+      expect.objectContaining({
+        prompt: expect.stringContaining(
+          'Write the summary, action titles, and action prompts in the same language as finalAnswer, even when userRequest is in a different language. Keep the JSON property names unchanged.'
+        ),
+      })
+    );
+    expect(body).toEqual(
+      expect.objectContaining({
+        prompt: expect.stringContaining(
+          JSON.stringify({ userRequest: source.userPrompt, finalAnswer: answer })
+        ),
+      })
+    );
+  });
+
   it('clears old suggestion content on the next accepted turn without allowing old-turn regeneration', async () => {
     const { server, request, input } = setup();
     const service = new FollowupService(server);

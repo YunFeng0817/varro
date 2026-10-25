@@ -280,6 +280,7 @@ export class FollowupService {
       prompt: [
         'Suggest optional next tasks after a coding assistant response. You cannot use tools or perform work.',
         'Return only JSON: {"summary":"Contextual explanation of the proposed next work","actions":[{"title":"Short button title","prompt":"Exact user request"}]}.',
+        'Write the summary, action titles, and action prompts in the same language as finalAnswer, even when userRequest is in a different language. Keep the JSON property names unchanged.',
         'When offering actions, write a useful one- or two-sentence summary, roughly 120-300 characters and at most 400. Name the relevant findings and explain what the next work would address. Do not use a generic heading such as Suggested next actions. Do not claim work was done or that the user has approved it.',
         'Return zero to three actions. Zero is normal; never fill a quota. Titles max 40 characters, prompts max 600 characters.',
         'Ground every action in explicit unfinished work or concrete optional next steps in the answer and the user goal.',
