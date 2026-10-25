@@ -17,6 +17,7 @@ vi.mock('node:fs/promises', async (importOriginal) => {
 });
 
 const storageKey = 'varro.followupCache.v1';
+const platform = process.platform;
 const suggestions = {
   summary: 'The parser still needs a focused regression test.',
   actions: [{ title: 'Add a test', prompt: 'Add a parser regression test.' }],
@@ -62,12 +63,138 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  Object.defineProperty(process, 'platform', { value: platform, configurable: true });
   vi.unstubAllEnvs();
   vi.restoreAllMocks();
   await rm(directory, { recursive: true, force: true });
 });
 
 describe('FollowupCache', () => {
+  it.each(['EPERM', 'EACCES', 'EBUSY'])(
+    'retries transient Windows %s replacement failures without losing dismissal',
+    async (code) => {
+      const cache = new FollowupCache();
+      await cache.claim(hash('turn'), digest, sessionKey);
+      await cache.complete(hash('turn'), digest, suggestions);
+      Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+      const actual = await vi.importActual<typeof FsPromises>('node:fs/promises');
+      let attempts = 0;
+      vi.mocked(rename).mockImplementation(async (from, to) => {
+        if (String(from).endsWith('.tmp') && ++attempts < 3)
+          throw Object.assign(new Error('Windows sharing violation'), { code });
+        await actual.rename(from, to);
+      });
+      await cache.dismiss(hash('turn'), digest);
+      expect(attempts).toBe(3);
+      expect(await new FollowupCache().get(hash('turn'), digest)).toEqual(
+        EMPTY_FOLLOWUP_SUGGESTIONS
+      );
+      expect(await new FollowupCache().claim(hash('turn'), digest, sessionKey)).toBe(false);
+      expect(await readFile(path, 'utf8')).not.toContain(suggestions.summary);
+      expect(await readdir(join(directory, 'followups'))).toEqual(['cache.json']);
+    }
+  );
+
+  it('bounds persistent Windows replacement failures and preserves the committed file and legacy data', async () => {
+    const cache = new FollowupCache();
+    await cache.claim(hash('turn'), digest, sessionKey);
+    const committed = await readFile(path, 'utf8');
+    const legacy = workspace({ [hash('imported')]: entry(true) });
+    Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+    const actual = await vi.importActual<typeof FsPromises>('node:fs/promises');
+    let attempts = 0;
+    vi.mocked(rename).mockImplementation(async (from, to) => {
+      if (String(from).endsWith('.tmp')) {
+        attempts++;
+        throw Object.assign(new Error('Windows sharing violation'), { code: 'EPERM' });
+      }
+      await actual.rename(from, to);
+    });
+    await expect(
+      new FollowupCache(legacy.persistence).get(hash('imported'), digest)
+    ).rejects.toThrow('Windows sharing violation');
+    expect(attempts).toBe(8);
+    expect(await readFile(path, 'utf8')).toBe(committed);
+    expect(legacy.values.has(storageKey)).toBe(true);
+    expect(await readdir(join(directory, 'followups'))).toEqual(['cache.json']);
+  });
+
+  it.skipIf(platform !== 'win32')(
+    'retries a real Windows handle that denies file replacement',
+    async () => {
+      const cache = new FollowupCache();
+      await cache.claim(hash('turn'), digest, sessionKey);
+      await cache.complete(hash('turn'), digest, suggestions);
+      const child = spawn(
+        'powershell.exe',
+        [
+          '-NoProfile',
+          '-NonInteractive',
+          '-Command',
+          `
+      $ErrorActionPreference = 'Stop'
+      $file = [System.IO.File]::Open($env:VARRO_FOLLOWUP_TEST_FILE, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::Read)
+      try { [Console]::WriteLine('locked'); [Console]::ReadLine() | Out-Null }
+      finally { $file.Dispose() }
+    `,
+        ],
+        {
+          env: { ...process.env, VARRO_FOLLOWUP_TEST_FILE: path },
+          windowsHide: true,
+          stdio: 'pipe',
+        }
+      );
+      let stderr = '';
+      child.stderr.on('data', (chunk: Buffer) => {
+        stderr += chunk.toString();
+      });
+      const acquired = new Promise<void>((done, reject) => {
+        child.once('error', reject);
+        child.stdout.on('data', (chunk: Buffer) => {
+          if (chunk.toString().includes('locked')) done();
+        });
+        child.once('exit', () =>
+          reject(new Error(`Windows handle fixture exited before acquisition: ${stderr}`))
+        );
+      });
+      const exited = new Promise<void>((done, reject) => {
+        child.once('error', reject);
+        child.once('exit', (code) =>
+          code === 0
+            ? done()
+            : reject(new Error(`Windows handle fixture exited with ${String(code)}: ${stderr}`))
+        );
+      });
+      const actual = await vi.importActual<typeof FsPromises>('node:fs/promises');
+      let sharingFailures = 0;
+      try {
+        await acquired;
+        vi.mocked(rename).mockImplementation(async (from, to) => {
+          try {
+            await actual.rename(from, to);
+          } catch (error) {
+            if (
+              String(from).endsWith('.tmp') &&
+              ['EPERM', 'EACCES', 'EBUSY'].includes(String(asRecord(error)?.code))
+            ) {
+              if (sharingFailures++ === 0) child.stdin.end('release\n');
+            }
+            throw error;
+          }
+        });
+        await cache.dismiss(hash('turn'), digest);
+        await exited;
+        expect(sharingFailures).toBeGreaterThan(0);
+        expect(await new FollowupCache().get(hash('turn'), digest)).toEqual(
+          EMPTY_FOLLOWUP_SUGGESTIONS
+        );
+      } finally {
+        if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+        await Promise.allSettled([exited]);
+      }
+    }
+  );
+
   it('admits each turn once across independent owners and reloads', async () => {
     const owners = [new FollowupCache(), new FollowupCache()];
     const claims = await Promise.all(

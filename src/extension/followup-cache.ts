@@ -2,6 +2,7 @@
 import { randomUUID } from 'node:crypto';
 import { readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { setTimeout as delay } from 'node:timers/promises';
 import type { Persistence } from '../shared/persistence';
 import type { FollowupSuggestionSet } from '../shared/followups';
 import { EMPTY_FOLLOWUP_SUGGESTIONS, parseFollowupSuggestions } from '../shared/followups';
@@ -178,7 +179,22 @@ export class FollowupCache {
         }),
         { flag: 'wx', mode: 0o600 }
       );
-      await rename(temporary, this.path);
+      for (let attempt = 0; ; attempt++) {
+        try {
+          await rename(temporary, this.path);
+          break;
+        } catch (error) {
+          // Windows readers and antivirus can briefly deny replacement. Keep the lock and
+          // the committed file intact; never unlink the destination to force a replacement.
+          if (
+            process.platform !== 'win32' ||
+            !['EPERM', 'EACCES', 'EBUSY'].includes(String(asRecord(error)?.code)) ||
+            attempt >= 7
+          )
+            throw error;
+          await delay(Math.min(10 * 2 ** attempt, 200));
+        }
+      }
     } finally {
       await rm(temporary, { force: true });
     }
