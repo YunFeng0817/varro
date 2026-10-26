@@ -147,6 +147,9 @@ export function createMountBridgeOperations(deps: {
           if (payload.followupsEnabled !== undefined) {
             appStore.setState('followupsEnabled', payload.followupsEnabled);
           }
+          if (payload.defaultAgent !== undefined) {
+            appStore.setState('defaultAgent', payload.defaultAgent);
+          }
           if (payload.followupModel !== undefined) {
             appStore.setState('followupModel', payload.followupModel);
           }

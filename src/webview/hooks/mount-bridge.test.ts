@@ -911,6 +911,7 @@ describe('mount bridge helpers', () => {
         showTurnTimer: true,
         showEmptyStateHistogram: true,
         followupsEnabled: false,
+        defaultAgent: 'plan',
         remoteImages: 'ask',
         debugShowQuotaWarning: true,
         autoAttachProblems: false,
@@ -939,6 +940,7 @@ describe('mount bridge helpers', () => {
     expect(setShowTurnTimer).toHaveBeenCalledWith(true);
     expect(setShowEmptyStateHistogram).toHaveBeenCalledWith(true);
     expect(setState).toHaveBeenCalledWith('followupsEnabled', false);
+    expect(setState).toHaveBeenCalledWith('defaultAgent', 'plan');
     expect(setState).toHaveBeenCalledWith('debugShowQuotaWarning', true);
     expect(setState).toHaveBeenCalledWith('autoAttachProblems', false);
     expect(setState).toHaveBeenCalledWith('autoAttachActiveFile', false);

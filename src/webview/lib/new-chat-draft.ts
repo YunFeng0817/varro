@@ -84,10 +84,11 @@ export function startNewChatDraft() {
     stopLoading();
     setPersistentShowSessionPicker(false);
     restoreSelectedModelForComposer(null);
-    setSelectedAgent(getDefaultPrimaryAgentName(state.agents), {
-      sessionId: blankSessionId || null,
-      persistGlobal: false,
-    });
+    setSelectedAgent(
+      state.agents.find((agent) => agent.name === state.defaultAgent)?.name ??
+        getDefaultPrimaryAgentName(state.agents),
+      { sessionId: blankSessionId || null, persistGlobal: false }
+    );
     requestComposerFocus();
   });
 

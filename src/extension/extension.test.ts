@@ -1322,6 +1322,19 @@ describe('extension manifest', () => {
     expect(packageJson.activationEvents).not.toContain('onStartupFinished');
   });
 
+  it('contributes a user-scoped default agent setting', () => {
+    const properties = packageJson.contributes.configuration.properties as Record<
+      string,
+      Record<string, unknown>
+    >;
+
+    expect(properties['varro.chat.defaultAgent']).toMatchObject({
+      type: 'string',
+      scope: 'application',
+      default: '',
+    });
+  });
+
   it('contributes a disabled-by-default empty-state histogram setting', () => {
     const properties = packageJson.contributes.configuration.properties as Record<
       string,

@@ -682,6 +682,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         event.affectsConfiguration('varro.chat.remoteImages') ||
         event.affectsConfiguration('varro.chat.promptCompletionModel') ||
         event.affectsConfiguration('varro.chat.followupsEnabled') ||
+        event.affectsConfiguration('varro.chat.defaultAgent') ||
         event.affectsConfiguration('varro.chat.followupModel') ||
         event.affectsConfiguration('varro.debug.showQuotaWarning') ||
         event.affectsConfiguration('varro.debug.resetWarningDays') ||

@@ -70,6 +70,7 @@ export function createStateBoundDataLoaderOperations(deps: {
     getSelectedAgent: () => appStore.state.selectedAgent,
     getSelectedAgentForSession: routingStore.getSelectedAgentForSession,
     getPersistedSelectedAgent: routingStore.getPersistedSelectedAgent,
+    getDefaultAgent: () => appStore.state.defaultAgent,
     hydrateSessionSelectedAgents: routingStore.hydrateSessionSelectedAgents,
     setAllAgents: routingStore.setAllAgents,
     setPrimaryAgents: routingStore.setPrimaryAgents,
@@ -123,6 +124,7 @@ export function createDataLoaderOperations(deps: {
   getSelectedAgent(): string | null;
   getSelectedAgentForSession(sessionId: string): string | null;
   getPersistedSelectedAgent(): string | null;
+  getDefaultAgent(): string;
   hydrateSessionSelectedAgents(agents: Record<string, string>): void;
   setAllAgents(agents: Agent[]): void;
   setPrimaryAgents(agents: Agent[]): void;
@@ -304,6 +306,7 @@ export function createDataLoaderOperations(deps: {
           getSelectedAgent: deps.getSelectedAgent,
           getSelectedAgentForSession: deps.getSelectedAgentForSession,
           getPersistedSelectedAgent: deps.getPersistedSelectedAgent,
+          getDefaultAgent: deps.getDefaultAgent,
           setAllAgents: deps.setAllAgents,
           setPrimaryAgents: deps.setPrimaryAgents,
           setSelectedAgent: deps.setSelectedAgent,
@@ -777,6 +780,7 @@ export async function loadAgentsWithDependencies(
     getSelectedAgent(): string | null;
     getSelectedAgentForSession(sessionId: string): string | null;
     getPersistedSelectedAgent(): string | null;
+    getDefaultAgent(): string;
     setAllAgents(agents: Agent[]): void;
     setPrimaryAgents(agents: Agent[]): void;
     setSelectedAgent(
@@ -799,6 +803,7 @@ export async function loadAgentsWithDependencies(
         ? deps.getSelectedAgentForSession(activeSessionId)
         : null,
       persistedSelectedAgent: deps.getPersistedSelectedAgent(),
+      defaultAgent: deps.getDefaultAgent(),
     });
 
     deps.setAllAgents(routingState.visibleAgents);

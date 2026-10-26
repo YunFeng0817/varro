@@ -73,6 +73,7 @@ describe('routing-state helpers', () => {
         selectedAgent: 'plan',
         sessionSelectedAgent: null,
         persistedSelectedAgent: 'plan',
+        defaultAgent: '',
       })
     ).toMatchObject({
       visibleAgents: [agent('plan'), agent('build')],
@@ -87,6 +88,7 @@ describe('routing-state helpers', () => {
         selectedAgent: 'build',
         sessionSelectedAgent: 'build',
         persistedSelectedAgent: 'build',
+        defaultAgent: '',
       })
     ).toMatchObject({
       nextSelectedAgent: {
@@ -104,6 +106,7 @@ describe('routing-state helpers', () => {
         selectedAgent: 'plan',
         sessionSelectedAgent: null,
         persistedSelectedAgent: 'plan',
+        defaultAgent: '',
       }).nextSelectedAgent
     ).toEqual({ value: 'build', options: { persistGlobal: false } });
 
@@ -114,6 +117,7 @@ describe('routing-state helpers', () => {
         selectedAgent: 'build',
         sessionSelectedAgent: null,
         persistedSelectedAgent: 'plan',
+        defaultAgent: '',
       }).nextSelectedAgent
     ).toBeNull();
   });
@@ -126,6 +130,31 @@ describe('routing-state helpers', () => {
         selectedAgent: null,
         sessionSelectedAgent: null,
         persistedSelectedAgent: 'ask',
+        defaultAgent: '',
+      }).nextSelectedAgent
+    ).toEqual({ value: 'build', options: { persistGlobal: false } });
+  });
+
+  it('uses the configured default agent for a fresh draft', () => {
+    expect(
+      reconcileLoadedAgents({
+        loadedAgents: [agent('ask'), agent('plan'), agent('build')],
+        activeSessionId: null,
+        selectedAgent: null,
+        sessionSelectedAgent: null,
+        persistedSelectedAgent: 'ask',
+        defaultAgent: 'plan',
+      }).nextSelectedAgent
+    ).toEqual({ value: 'plan', options: { persistGlobal: false } });
+
+    expect(
+      reconcileLoadedAgents({
+        loadedAgents: [agent('build')],
+        activeSessionId: null,
+        selectedAgent: null,
+        sessionSelectedAgent: null,
+        persistedSelectedAgent: null,
+        defaultAgent: 'review',
       }).nextSelectedAgent
     ).toEqual({ value: 'build', options: { persistGlobal: false } });
   });
@@ -138,6 +167,7 @@ describe('routing-state helpers', () => {
         selectedAgent: 'ask',
         sessionSelectedAgent: null,
         persistedSelectedAgent: 'build',
+        defaultAgent: '',
       }).nextSelectedAgent
     ).toBeNull();
   });
@@ -154,6 +184,7 @@ describe('routing-state helpers', () => {
       selectedAgent: null,
       sessionSelectedAgent: 'plan',
       persistedSelectedAgent: 'build',
+      defaultAgent: '',
     });
 
     expect(result.nextSelectedAgent).toEqual({

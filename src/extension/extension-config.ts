@@ -23,6 +23,7 @@ export function readExtensionConfigState(
     remoteImages: parseRemoteImageMode(config.inspect?.('chat.remoteImages')?.globalValue),
     promptCompletionModel: config.get<string>('chat.promptCompletionModel', ''),
     followupsEnabled: readFollowupsEnabled(config),
+    defaultAgent: readDefaultAgent(config),
     followupModel: readFollowupModel(config),
     debugShowQuotaWarning: config.get<boolean>('debug.showQuotaWarning', false),
     debugResetWarningDays: readResetWarningDays(config),
@@ -50,6 +51,13 @@ export function readFollowupModel(
   config: vscode.WorkspaceConfiguration = vscode.workspace.getConfiguration('varro')
 ): string {
   const value = config.inspect?.<string>('chat.followupModel')?.globalValue;
+  return isString(value) ? value.trim() : '';
+}
+
+function readDefaultAgent(
+  config: vscode.WorkspaceConfiguration = vscode.workspace.getConfiguration('varro')
+): string {
+  const value = config.get<unknown>('chat.defaultAgent');
   return isString(value) ? value.trim() : '';
 }
 

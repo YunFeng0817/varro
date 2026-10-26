@@ -2871,6 +2871,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
         appStore.state.sessions.find((session) => session.id === sessionId)
       ),
     resolveDefaultAgent: () =>
+      appStore.state.agents.find((agent) => agent.name === appStore.state.defaultAgent)?.name ||
       getBuildAgentNameFromState() ||
       routingStore.getPersistedSelectedAgent() ||
       getDefaultPrimaryAgentNameFromState(),

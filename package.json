@@ -603,6 +603,12 @@
           "default": "right",
           "markdownDescription": "Choose which side shows the sessions pane on large screens in the Varro chat view."
         },
+        "varro.chat.defaultAgent": {
+          "type": "string",
+          "scope": "application",
+          "default": "",
+          "markdownDescription": "Primary agent selected for new chats and sessions. Leave empty to use Build."
+        },
         "varro.chat.defaultPermissionMode": {
           "type": "string",
           "enum": [

@@ -932,6 +932,35 @@ describe('sendMessage', () => {
     expect(stateModule.getPersistedSelectedAgent()).toBe('plan');
   });
 
+  it('uses the configured default agent for a new session', async () => {
+    const { stateModule, hookModule } = await loadModules();
+
+    stateModule.setState('agents', [
+      {
+        name: 'build',
+        mode: 'primary',
+        builtIn: true,
+        permission: { edit: 'ask', bash: {} },
+        tools: {},
+      },
+      {
+        name: 'plan',
+        mode: 'primary',
+        builtIn: true,
+        permission: { edit: 'ask', bash: {} },
+        tools: {},
+      },
+    ]);
+    stateModule.setState('defaultAgent', 'plan');
+
+    clientMocks.sessionCreate.mockResolvedValue(session('session-2'));
+
+    await hookModule.createSession();
+
+    expect(stateModule.state.selectedAgent).toBe('plan');
+    expect(stateModule.getSelectedAgentForSession('session-2')).toBe('plan');
+  });
+
   it('sends the first message of a new chat with the selected agent', async () => {
     const { stateModule, hookModule } = await loadModules();
 

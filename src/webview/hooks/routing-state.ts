@@ -58,13 +58,18 @@ export function reconcileLoadedAgents(args: {
   selectedAgent: string | null;
   sessionSelectedAgent: string | null;
   persistedSelectedAgent: string | null;
+  defaultAgent: string;
 }) {
   const visibleAgents = args.loadedAgents.filter((agent) => !agent.hidden);
   const primaryAgents = visibleAgents.filter((agent) => agent.mode !== 'subagent');
   let nextSelectedAgent: AgentSelectionUpdate | null = null;
 
   if (!args.activeSessionId) {
-    const fallback = [args.selectedAgent, getDefaultPrimaryAgentName(primaryAgents)].find(
+    const fallback = [
+      args.selectedAgent,
+      args.defaultAgent,
+      getDefaultPrimaryAgentName(primaryAgents),
+    ].find(
       (candidate): candidate is string =>
         !!candidate && primaryAgents.some((agent) => agent.name === candidate)
     );

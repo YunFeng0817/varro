@@ -616,6 +616,15 @@ describe('SidebarProvider local config routing', () => {
       type: 'config/update',
       payload: expect.objectContaining({ debugShowQuotaWarning: true }),
     });
+
+    await vscodeMock.workspace.getConfiguration('varro').update('chat.defaultAgent', 'plan');
+    listener?.({
+      affectsConfiguration: (key: string) => key === 'varro.chat.defaultAgent',
+    });
+    expect(posted).toContainEqual({
+      type: 'config/update',
+      payload: expect.objectContaining({ defaultAgent: 'plan' }),
+    });
   });
 
   it('reads model routing from project opencode.json', async () => {

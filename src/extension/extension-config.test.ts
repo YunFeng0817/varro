@@ -45,6 +45,7 @@ describe('readExtensionConfigState', () => {
       showTurnTimer: true,
       showEmptyStateHistogram: false,
       followupsEnabled: true,
+      defaultAgent: '',
       debugShowQuotaWarning: false,
       debugResetWarningDays: 5,
       autoAttachProblems: true,
@@ -87,6 +88,14 @@ describe('readExtensionConfigState', () => {
       inspect: vi.fn(() => ({ globalValue: false })),
     });
     expect(readExtensionConfigState().followupsEnabled).toBe(false);
+  });
+
+  it('reads and trims the default agent for new sessions', () => {
+    expect(readExtensionConfigState().defaultAgent).toBe('');
+    mocks.values.set('varro.chat.defaultAgent', '  plan  ');
+    expect(readExtensionConfigState().defaultAgent).toBe('plan');
+    mocks.values.set('varro.chat.defaultAgent', 42);
+    expect(readExtensionConfigState().defaultAgent).toBe('');
   });
 
   it('reads follow-up model overrides only from user settings', () => {

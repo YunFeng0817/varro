@@ -139,6 +139,23 @@ describe('startNewChatDraft', () => {
     expect(getSelectedAgentForSession('session-1')).toBe(agent);
   });
 
+  it('starts a new chat with the configured default agent', () => {
+    setState('agents', [
+      { name: 'ask', mode: 'primary', builtIn: false, permission: {}, tools: {} },
+      { name: 'plan', mode: 'primary', builtIn: false, permission: {}, tools: {} },
+      { name: 'build', mode: 'primary', builtIn: true, permission: {}, tools: {} },
+    ]);
+    setState('defaultAgent', 'plan');
+    setState('activeSessionId', 'session-1');
+    setSelectedAgent('ask', { sessionId: 'session-1' });
+
+    startNewChatDraft();
+
+    expect(state.activeSessionId).toBeNull();
+    expect(state.selectedAgent).toBe('plan');
+    expect(getSelectedAgentForSession('session-1')).toBe('ask');
+  });
+
   it('clears message loading immediately when a slow session load is abandoned', () => {
     setState('activeSessionId', 'session-1');
     setState('messagesLoading', true);

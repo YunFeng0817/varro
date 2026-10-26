@@ -547,6 +547,7 @@ export class WebviewSession {
       remoteImages: config.remoteImages,
       promptCompletionModel: config.promptCompletionModel,
       followupsEnabled: config.followupsEnabled,
+      defaultAgent: config.defaultAgent,
       followupModel: config.followupModel,
       debugShowQuotaWarning: config.debugShowQuotaWarning,
       debugResetWarningDays: config.debugResetWarningDays,

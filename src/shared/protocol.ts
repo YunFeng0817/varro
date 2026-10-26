@@ -886,6 +886,7 @@ export type InitialWebviewState = {
   remoteImages?: RemoteImageMode;
   promptCompletionModel?: string;
   followupsEnabled?: boolean;
+  defaultAgent?: string;
   followupModel?: string;
   debugShowQuotaWarning?: boolean;
   debugResetWarningDays?: number;
