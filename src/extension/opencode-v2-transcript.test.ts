@@ -173,6 +173,37 @@ describe('V2 transcript deletion', () => {
 describe('V2 generated transcript records', () => {
   const base = { id: 'msg_generated', time: { created: 10 } };
 
+  it.each(['failed', 'interrupted'] as const)(
+    'keeps %s status rows model-less when context has no complete model identity',
+    (outcome) => {
+      for (const model of [
+        undefined,
+        { providerID: '', id: '', variant: 'high' },
+        { providerID: 'openai', id: '', variant: 'high' },
+        { providerID: '', id: 'model', variant: 'high' },
+      ]) {
+        const projected = projectV2Message(
+          { ...base, type: 'idle', outcome },
+          'ses_one',
+          '/workspace',
+          'msg_user',
+          { agent: 'build', model }
+        );
+        expect(projected.info).toMatchObject({
+          id: base.id,
+          role: 'assistant',
+          parentID: 'msg_user',
+          modelID: '',
+          providerID: '',
+          time: { created: 10, completed: 10 },
+          error: { name: outcome === 'interrupted' ? 'MessageAbortedError' : 'UnknownError' },
+        });
+        expect(projected.info.variant).toBeUndefined();
+        expect(projected.parts).toEqual([]);
+      }
+    }
+  );
+
   it.each([false, true])(
     'preserves persisted execution errors on reload with a preceding assistant: %s',
     async (hasAssistant) => {

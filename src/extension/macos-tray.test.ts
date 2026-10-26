@@ -1,5 +1,8 @@
 // @vitest-environment node
-import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+/* oxlint-disable anti-slop/no-module-mocking -- Delay a filesystem observation to reproduce out-of-order discovery while retaining real sockets and watchers. */
+import type { Stats } from 'node:fs';
+import { chmod, lstat, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import type * as NodeFs from 'node:fs/promises';
 import { createServer } from 'node:net';
 import type { Server, Socket } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -8,6 +11,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MacOSTray, projectTraySessions } from './macos-tray';
 import type { TrayProject, TraySession, TraySnapshot } from './macos-tray';
 import type { PendingAttentionEntry } from './session-state-manager';
+
+vi.mock('node:fs/promises', async (importOriginal) => {
+  const fs = await importOriginal<typeof NodeFs>();
+  return { ...fs, lstat: vi.fn(fs.lstat) };
+});
 
 function row(status: TraySession['status'] = 'running', updatedAt = 0): TraySession {
   return {
@@ -152,6 +160,7 @@ describe.skipIf(process.platform === 'win32')(
     let frames: TraySnapshot[];
 
     beforeEach(async () => {
+      vi.mocked(lstat).mockClear();
       directory = await mkdtemp(join(tmpdir(), 'vt-'));
       await chmod(directory, 0o700);
       socketPath = join(directory, 'tray.sock');
@@ -191,11 +200,16 @@ describe.skipIf(process.platform === 'win32')(
         server?.once('error', reject);
         server?.listen(socketPath, resolve);
       });
+      // Match TrayServer.start: macOS can omit bind notifications, but chmod emits a change.
+      await chmod(socketPath, 0o600);
     }
 
     it('tolerates an absent app and connects later with a full snapshot', async () => {
       publisher = new MacOSTray(() => [row()], socketPath);
-      await new Promise((resolve) => setTimeout(resolve, 30));
+      await vi.waitFor(() => {
+        expect(lstat).toHaveBeenLastCalledWith(socketPath);
+        expect(vi.mocked(lstat).mock.settledResults.at(-1)?.type).toBe('rejected');
+      });
       expect(frames).toEqual([]);
       await listen();
       await vi.waitFor(() => expect(frames).toHaveLength(1), { timeout: 7_000 });
@@ -205,6 +219,29 @@ describe.skipIf(process.platform === 'win32')(
         sessions: [expect.objectContaining({ status: 'running' })],
       });
     }, 10_000);
+
+    it('ignores an older absent-socket observation after discovering the app', async () => {
+      let rejectMissing!: (error: Error) => void;
+      const missing = new Promise<Stats>((_resolve, reject) => {
+        rejectMissing = reject;
+      });
+      vi.mocked(lstat)
+        .mockResolvedValueOnce(await lstat(directory))
+        .mockReturnValueOnce(missing);
+      let rows = [row()];
+      publisher = new MacOSTray(() => rows, socketPath);
+      await vi.waitFor(() => expect(lstat).toHaveBeenCalledWith(socketPath));
+      await listen();
+      await vi.waitFor(() => expect(frames).toHaveLength(1));
+
+      // The initial lookup completed before creation, but its result arrived later.
+      rejectMissing(new Error('ENOENT'));
+      await missing.catch(() => {});
+      rows = [row('completed', 123)];
+      publisher.update();
+      await vi.waitFor(() => expect(frames).toHaveLength(2));
+      expect(frames[1]?.sessions[0]?.status).toBe('completed');
+    });
 
     it('does not poll, schedule updates, or project sessions while the app is absent', async () => {
       const sessions = vi.fn(() => [row()]);

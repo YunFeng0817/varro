@@ -3708,6 +3708,97 @@ describe('MessageList session scoping', () => {
     expect(container?.textContent).not.toContain('GPT-5.4 Medium → High');
   });
 
+  it.each([
+    { name: 'interruption', providerID: '', modelID: '', errorName: 'MessageAbortedError' },
+    {
+      name: 'failure without a model',
+      providerID: 'openai',
+      modelID: '',
+      errorName: 'UnknownError',
+    },
+    { name: 'status without a provider', providerID: '', modelID: 'gpt-5.4', errorName: undefined },
+  ])('ignores $name rows without losing genuine model or thinking changes', async (status) => {
+    setState('activeSessionId', 'session-1');
+    setState('providers', [
+      {
+        id: 'openai',
+        name: 'OpenAI',
+        source: 'api',
+        models: {
+          'gpt-5.4': {
+            id: 'gpt-5.4',
+            name: 'GPT-5.4',
+            capabilities: { reasoning: true },
+            cost: { input: 0, output: 0 },
+            variants: { medium: {}, high: {} },
+          },
+          other: {
+            id: 'other',
+            name: 'Other',
+            capabilities: { reasoning: true },
+            cost: { input: 0, output: 0 },
+            variants: { medium: {} },
+          },
+        },
+      },
+    ]);
+    const statusRow = (id: string): MessageEntry => ({
+      info: assistantMessage(id, {
+        providerID: status.providerID,
+        modelID: status.modelID,
+        error: status.errorName ? { name: status.errorName, data: {} } : undefined,
+      }),
+      parts: [],
+    });
+    replaceMessages([
+      statusRow('leading-status'),
+      {
+        info: assistantMessage('assistant-1', { variant: 'high' }),
+        parts: [textPart('text-1', 'First response')],
+      },
+      statusRow('intermediate-status'),
+      {
+        info: assistantMessage('assistant-2', { variant: 'high' }),
+        parts: [textPart('text-2', 'Same thinking level')],
+      },
+      statusRow('before-thinking-change'),
+      {
+        info: assistantMessage('assistant-3', { variant: 'medium' }),
+        parts: [textPart('text-3', 'Changed thinking level')],
+      },
+      statusRow('before-model-change'),
+      {
+        info: assistantMessage('assistant-4', { modelID: 'other', variant: 'medium' }),
+        parts: [textPart('text-4', 'Changed model')],
+      },
+      {
+        info: assistantMessage('assistant-5', {
+          modelID: 'other',
+          variant: 'none',
+          error: { name: 'MessageAbortedError', data: {} },
+        }),
+        parts: [],
+      },
+      statusRow('trailing-status'),
+    ]);
+
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+
+    const labels = container!.querySelectorAll(
+      '.model-change-indicator:not(.assistant-dialog-summary) .model-change-label'
+    );
+    expect(
+      [...labels].map((label) => label.querySelector('.model-change-normal')?.textContent?.trim())
+    ).toEqual(['GPT-5.4 High → Medium', 'GPT-5.4 Medium → Other Medium', 'Other Medium → None']);
+    expect(
+      [...labels].map((label) => label.closest('[data-msg-id]')?.getAttribute('data-msg-id'))
+    ).toEqual(['assistant-3', 'assistant-4', 'assistant-5']);
+    if (status.errorName === 'MessageAbortedError') {
+      expect(container!.textContent).toContain('Interrupted');
+    }
+  });
+
   it('shows model transitions with unchanged details omitted and full details in a tooltip', async () => {
     setState('activeSessionId', 'session-1');
     setState('providers', [

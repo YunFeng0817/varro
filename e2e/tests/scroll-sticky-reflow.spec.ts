@@ -54,7 +54,7 @@ function history(): MessageEntry[] {
             sessionID: sessionId,
             type: 'text' as const,
             text: table
-              ? `| Column 1 | Column 2 | Column 3 | Column 4 | Column 5 |\n|---|---|---|---|---|\n${Array.from({ length: 14 }, (_, row) => `| ${row + 1} | | | | |`).join('\n')}\n\nEND-${turn}`
+              ? `| Column 1 | Column 2 | Column 3 | Column 4 | Column 5 |\n|---|---|---|---|---|\n${Array.from({ length: 14 }, (_value, row) => `| ${row + 1} | | | | |`).join('\n')}\n\nEND-${turn}`
               : `Understood. END-${turn}`,
           },
         ],

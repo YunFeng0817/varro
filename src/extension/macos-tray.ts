@@ -139,6 +139,7 @@ export class MacOSTray {
   private connected = false;
   private disposed = false;
   private socketIdentity: string | undefined;
+  private socketCheckGeneration = 0;
   private lastFrame: string | undefined;
   private readonly observed = new Map<string, TraySession>();
 
@@ -209,6 +210,7 @@ export class MacOSTray {
   }
 
   private async socketChanged(): Promise<void> {
+    const generation = ++this.socketCheckGeneration;
     let identity: string | undefined;
     try {
       const file = await lstat(this.socketPath);
@@ -219,7 +221,12 @@ export class MacOSTray {
     }
     // macOS can report creation as change, and connections can touch metadata too.
     // Only a different socket identity should restart the connection.
-    if (this.disposed || identity === this.socketIdentity) return;
+    if (
+      this.disposed ||
+      generation !== this.socketCheckGeneration ||
+      identity === this.socketIdentity
+    )
+      return;
     this.socketIdentity = identity;
     this.reconnectAllowed = true;
     this.detach()?.destroy();
