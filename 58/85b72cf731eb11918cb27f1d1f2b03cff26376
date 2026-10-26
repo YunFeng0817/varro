@@ -1,0 +1,90 @@
+package.json
+  s_a9700d118a5026::t_6f750ed16aa280 610
+  s_a9700d118a5026::t_7ec68fe3bf47dd 606-607,609,611
+  s_a9700d118a5026::t_c0c469fc1a4d7e 608
+src/webview/hooks/mount-bridge.test.ts
+  s_a9700d118a5026::t_8d9a8a14f66c4c 914,943
+src/extension/extension-config.ts
+  s_a9700d118a5026::t_f125af2d8bdbd6 26
+  s_a9700d118a5026::t_1e02c5561b56de 57
+  s_a9700d118a5026::t_62c08d83f4cb72 58-63
+src/webview/hooks/mount-bridge.ts
+  s_7938df23494d8e::t_e178b339d6047b 152
+  s_a9700d118a5026::t_c31f4f033d8fc2 150-151
+src/webview/hooks/data-loaders.ts
+  s_a9700d118a5026::t_50a84e90644cde 127
+  s_a9700d118a5026::t_0fd4a22ffb73a0 309
+  s_a9700d118a5026::t_5d39c10854954f 806
+  s_a9700d118a5026::t_42f446799dd2fc 73
+  s_a9700d118a5026::t_f9206a5f28a08a 783
+src/webview/hooks/routing-state.test.ts
+  s_a9700d118a5026::t_b880ecf9f94adc 136-137
+  s_a9700d118a5026::t_1d27c19cf0dac8 138-157
+  s_a9700d118a5026::t_2da5c7b5c3b57b 187
+  s_a9700d118a5026::t_8924216ed79e08 76,91,109,120,133,170
+  s_a9700d118a5026::t_6f4da56c95e0c4 134
+  s_a9700d118a5026::t_f048ee6944d99f 135
+src/webview/hooks/useOpenCode.sendMessage.test.ts
+  s_a9700d118a5026::t_8fdba5d9941718 935-963
+src/extension/webview-session.ts
+  s_a9700d118a5026::t_7a5a153512b117 550
+src/extension/extension.test.ts
+  s_a9700d118a5026::t_77782c966d393f 1325-1337
+src/shared/provider-limit-config.ts
+  s_a9700d118a5026::t_64ef03f3cd7d99 38
+  s_a9700d118a5026::t_b49a71c208a7e3 16
+src/shared/protocol.ts
+  s_a9700d118a5026::t_9d27fc710e7845 889
+src/webview/hooks/routing-state.ts
+  s_a9700d118a5026::t_5103593cd807f1 61
+  s_a9700d118a5026::t_e3783c2697ccc3 69
+  s_a9700d118a5026::t_651aa50d1d4581 68,70-72
+src/webview/lib/app-state.ts
+  s_a9700d118a5026::t_8671da5757d1b3 130
+  s_a9700d118a5026::t_1b37a6ee2b3fea 404
+src/webview/hooks/runtime/open-code-runtime-instance.ts
+  s_a9700d118a5026::t_dc82d84065c203 2874
+src/webview/lib/new-chat-draft.test.ts
+  s_a9700d118a5026::t_142dfa83185f7f 142-158
+src/extension/sidebar-provider.config.test.ts
+  s_a9700d118a5026::t_6788c9152a6cc2 619-627
+src/webview/hooks/data-loaders.test.ts
+  s_a9700d118a5026::t_d5bade24148727 60,167,191
+src/shared/extension-message.ts
+  s_a9700d118a5026::t_94393d9ba46f7d 377
+docs/usage.md
+  s_a9700d118a5026::t_6f750ed16aa280 864
+src/extension/extension-config.test.ts
+  s_a9700d118a5026::t_206f0ed687b908 48,93-98
+  s_a9700d118a5026::t_9773c563ba1f76 99-100
+src/shared/extension-message.test.ts
+  s_a9700d118a5026::t_8d9a8a14f66c4c 1128,1148
+src/webview/lib/new-chat-draft.ts
+  s_a9700d118a5026::t_80e93bfd6404a9 87-91
+src/extension/sidebar-provider.ts
+  s_a9700d118a5026::t_4d954041980316 685
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "5885b72cf731eb11918cb27f1d1f2b03cff26376",
+  "prompts": {},
+  "sessions": {
+    "s_7938df23494d8e": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_e85d0ce19ffe0kpFgvjeAmdHYg",
+        "model": "unknown"
+      },
+      "human_author": "Yun Feng <yun@luminai.com>"
+    },
+    "s_a9700d118a5026": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_e85db368cffeoVe5JMqfBI0Ce7",
+        "model": "unknown"
+      },
+      "human_author": null
+    }
+  }
+}
