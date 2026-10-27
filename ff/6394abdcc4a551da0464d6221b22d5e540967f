@@ -1,0 +1,60 @@
+src/webview/components/chat-input/AttachmentChip.tsx
+  s_1fbef0f56c0cc3::t_0f74bcf2281554 23
+  s_1fbef0f56c0cc3::t_3c5e107c4816dd 159-170
+  s_1fbef0f56c0cc3::t_5c3efd1031bb6d 3
+  s_32b27b99322eeb::t_a8146b1ca0389f 171
+src/webview/components/ChatInput.test.ts
+  s_1fbef0f56c0cc3::t_1c3b68366e0bb4 11937-11972
+src/webview/components/chat-input/AttachmentStrip.tsx
+  s_1fbef0f56c0cc3::t_a723d259412fcb 106
+  s_1fbef0f56c0cc3::t_12520e5d4c6a85 49
+src/webview/components/ChatInput.tsx
+  s_1fbef0f56c0cc3::t_e34bf07643a676 2233-2243
+  s_1fbef0f56c0cc3::t_3b7d3193989f59 6526
+src/webview/styles/composer.css
+  s_1fbef0f56c0cc3::t_94fe7f9127def7 3102-3117
+  s_e17755d53ef41f::t_c40970ce073fd1 2973-2974
+src/webview/components/chat-input/AttachmentChip.test.tsx
+  s_1fbef0f56c0cc3::t_578d9e13a7c2a6 105
+  s_1fbef0f56c0cc3::t_d82a758b77ed84 101-104,106-114
+src/webview/components/chat-input/AttachmentStrip.test.tsx
+  s_1fbef0f56c0cc3::t_b57ffdb51d4d43 234,236-237,245,247-248
+  s_1fbef0f56c0cc3::t_6ea62f54fff1e4 202,218,220,223,226,228,233,235,246
+  s_1fbef0f56c0cc3::t_578d9e13a7c2a6 238-244
+  s_1fbef0f56c0cc3::t_5909b9b8410529 33,41-42
+  s_1fbef0f56c0cc3::t_4d52d75179d2e0 203-217,219,221-222,224-225,227,229-232,249-250
+  s_1fbef0f56c0cc3::t_93357a3f7df02a 15
+  s_1fbef0f56c0cc3::t_f0f2d3b8ab52b3 43
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "ff6394abdcc4a551da0464d6221b22d5e540967f",
+  "prompts": {},
+  "sessions": {
+    "s_1fbef0f56c0cc3": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_e80d9bd72ffevxMsRb00uow8K7",
+        "model": "unknown"
+      },
+      "human_author": "Yun Feng <yun.feng0817@gmail.com>"
+    },
+    "s_32b27b99322eeb": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_e81132114ffepqgvhmQkNG4Fe7",
+        "model": "unknown"
+      },
+      "human_author": "Yun Feng <yun.feng0817@gmail.com>"
+    },
+    "s_e17755d53ef41f": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_e80d48df1ffeceDoHxlgyyJsvg",
+        "model": "unknown"
+      },
+      "human_author": "Yun Feng <yun.feng0817@gmail.com>"
+    }
+  }
+}
