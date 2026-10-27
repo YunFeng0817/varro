@@ -1,0 +1,29 @@
+src/webview/components/ChatInput.test.ts
+  s_1eba54e94ca0da::t_b984379bea0bc6 9947-9953
+  s_1eba54e94ca0da::t_72d941f2a8c769 4402,4428,4430-4438,4443
+  s_1eba54e94ca0da::t_bc52bfb5c969af 4470-4481
+src/webview/components/chat-input/completion.ts
+  s_1eba54e94ca0da::t_d8fc4440c4b6e1 264,295
+src/webview/components/chat-input/completion.test.ts
+  s_1eba54e94ca0da::t_d5657434be1ac7 538,581,597
+  s_1eba54e94ca0da::t_35aed1ead942af 619
+  s_1eba54e94ca0da::t_7adcbc79f4f7c5 93,97
+src/webview/components/ChatInput.tsx
+  s_1eba54e94ca0da::t_4623088fc68c37 2863,2970,2974,6737
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "19823ad857bc63f403ff7c80c603b0c510ab0a49",
+  "prompts": {},
+  "sessions": {
+    "s_1eba54e94ca0da": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_e810ddf74ffew9MiaU7L7cgsma",
+        "model": "unknown"
+      },
+      "human_author": "Yun Feng <yun@luminai.com>"
+    }
+  }
+}
