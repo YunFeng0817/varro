@@ -4399,7 +4399,7 @@ describe('ChatInput', () => {
     expect(sendMessageMock).not.toHaveBeenCalled();
   });
 
-  it('runs a parameterless slash completion on the first Enter', async () => {
+  it('inserts a parameterless slash completion before running it', async () => {
     setState('commands', [
       {
         name: 'zzvarrotest',
@@ -4425,13 +4425,22 @@ describe('ChatInput', () => {
     );
     await flushAsyncWork();
 
-    expect(inputText()).toBe('');
+    expect(inputText()).toBe('/zzvarrotest');
     expect(container?.querySelector('.composer-completion-menu')).toBeNull();
+    expect(runSlashCommandByNameMock).not.toHaveBeenCalled();
+    expect(sendMessageMock).not.toHaveBeenCalled();
+
+    editor.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
+    );
+    await flushAsyncWork();
+
+    expect(inputText()).toBe('');
     expect(runSlashCommandByNameMock).toHaveBeenCalledWith('zzvarrotest', '');
     expect(sendMessageMock).not.toHaveBeenCalled();
   });
 
-  it('runs /stats from the completion menu on the first Enter', async () => {
+  it('selects /stats from the completion menu before sending it', async () => {
     // SAFETY: The fixture provides the unknown fields read by this statement.
     const bridgeWindow = window as {
       __sendToExtension?: (message: WebviewMessage) => void;
@@ -4452,6 +4461,18 @@ describe('ChatInput', () => {
       await flushAsyncWork();
 
       expect(container?.querySelector('.composer-completion-menu')).not.toBeNull();
+
+      editor.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
+      );
+      await flushAsyncWork();
+
+      expect(inputText()).toBe('/stats');
+      expect(sent).not.toContainEqual({
+        type: 'usage/report',
+        payload: { includeAllTime: false },
+      });
+      expect(sendMessageMock).not.toHaveBeenCalled();
 
       editor.dispatchEvent(
         new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
@@ -9922,6 +9943,13 @@ describe('ChatInput', () => {
       ].find((option) => option.textContent?.includes('/btw'));
       expect(suggestion).toBeDefined();
       suggestion!.click();
+      await flushAsyncWork();
+      expect(sideQuestionView()).toBeNull();
+      expect(inputText()).toBe('/btw');
+
+      editor.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
+      );
       await flushAsyncWork();
       expect(sideQuestionView()).toMatchObject({ sessionID: 'session-1', question: '' });
       expect(inputText()).toBe('');

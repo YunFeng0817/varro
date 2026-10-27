@@ -90,11 +90,11 @@ describe('getMentionCompletionItems', () => {
     ]);
     const completion = getActiveCompletion('/problems ', 10);
     expect(completion).toMatchObject({ type: 'slash', query: 'problems ' });
-    expect(getCompletionSelection(completion, items[0], true)).toEqual({
+    expect(getCompletionSelection(completion, items[0])).toEqual({
       type: 'attach-problems',
       diagnostic: null,
     });
-    expect(getCompletionSelection(completion, items[1], true)).toEqual({
+    expect(getCompletionSelection(completion, items[1])).toEqual({
       type: 'attach-problems',
       diagnostic,
     });
@@ -116,7 +116,7 @@ describe('getMentionCompletionItems', () => {
     expect(items.map((item) => item.type)).toEqual(['table', 'table', 'file']);
     expect(items[0]?.detail).toBe('Development · Table');
     expect(items[1]?.key).not.toBe(items[0]?.key);
-    expect(getCompletionSelection(getActiveCompletion('@users', 6), items[0], true)).toEqual({
+    expect(getCompletionSelection(getActiveCompletion('@users', 6), items[0])).toEqual({
       type: 'apply-mention',
       value: '',
       table: tables[0],
@@ -535,24 +535,7 @@ describe('getLeadingSlashCommand', () => {
 });
 
 describe('getCompletionSelection', () => {
-  it('confirms slash selections by invoking the command path', () => {
-    expect(
-      getCompletionSelection(
-        { type: 'slash', query: 'in', start: 0, end: 3 },
-        {
-          key: 'slash:init',
-          type: 'slash',
-          name: 'init',
-          aliases: [],
-          description: 'Analyze the project and create AGENTS.md',
-          action: () => {},
-        },
-        true
-      )
-    ).toEqual({ type: 'run-slash', value: '/init' });
-  });
-
-  it('keeps tab-style slash selections as composer text updates', () => {
+  it('keeps slash selections as composer text updates until the command is typed exactly', () => {
     expect(
       getCompletionSelection(
         { type: 'slash', query: 'in', start: 0, end: 3 },
@@ -595,8 +578,7 @@ describe('getCompletionSelection', () => {
           aliases: [],
           description: 'Browse available skills',
           action: () => {},
-        },
-        true
+        }
       )
     ).toEqual({ type: 'set-slash', value: '/skills ' });
   });
@@ -612,8 +594,7 @@ describe('getCompletionSelection', () => {
           aliases: [],
           description: 'Token-efficient Chrome tab inspection',
           action: () => {},
-        },
-        true
+        }
       )
     ).toEqual({ type: 'set-slash', value: '/browser-bridge' });
   });
@@ -635,8 +616,7 @@ describe('getCompletionSelection', () => {
           detail: 'File',
           value: '@README.md ',
           file,
-        },
-        true
+        }
       )
     ).toEqual({ type: 'apply-mention', value: '@README.md ', file, session: undefined });
   });
@@ -654,8 +634,7 @@ describe('getCompletionSelection', () => {
     expect(
       getCompletionSelection(
         { type: 'session', query: 'auth', start: 0, end: 5 },
-        getSessionCompletionItems([session])[0],
-        true
+        getSessionCompletionItems([session])[0]
       )
     ).toEqual({
       type: 'apply-mention',
